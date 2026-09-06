@@ -2,6 +2,7 @@ import { render, screen, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import App from './App'
 import type { Card } from './types/card'
+import { useQuizStore, createQuizStore } from './state/useQuizStore'
 
 vi.mock('./persistence/fileStore', () => ({
   loadMindMap: vi.fn(),
@@ -85,5 +86,40 @@ describe('App save-error indicator', () => {
     render(<App />)
     await settle()
     expect(screen.getByText(/erreur de sauvegarde/i)).toBeInTheDocument()
+  })
+})
+
+describe('App quiz wiring', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(loadMindMap).mockReset()
+    vi.mocked(saveMindMap).mockReset()
+    vi.mocked(loadMindMap).mockResolvedValue(null)
+    vi.mocked(saveMindMap).mockResolvedValue(undefined)
+    const pristine = createQuizStore().getState()
+    useQuizStore.setState({
+      active: pristine.active,
+      showSummary: pristine.showSummary,
+      config: pristine.config,
+      questions: pristine.questions,
+      results: pristine.results,
+      wasLockedBeforeQuiz: pristine.wasLockedBeforeQuiz,
+    })
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('shows the quiz launch button when no quiz is active', async () => {
+    render(<App />)
+    await settle()
+    expect(screen.getByRole('button', { name: /lancer un quiz/i })).toBeInTheDocument()
+  })
+
+  it('hides the quiz launch button and shows the HUD while a quiz is active', async () => {
+    useQuizStore.setState({ active: true, questions: [{ cardId: 'x', type: 'recall' }], results: { x: 'unanswered' } })
+    render(<App />)
+    await settle()
+
+    expect(screen.queryByRole('button', { name: /lancer un quiz/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /terminer le quiz/i })).toBeInTheDocument() // proves the HUD rendered
   })
 })

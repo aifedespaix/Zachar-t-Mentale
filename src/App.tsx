@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { MindMapCanvas } from './components/MindMapCanvas'
 import { LockToggle } from './components/LockToggle'
+import { QuizButton } from './components/quiz/QuizButton'
+import { QuizHud } from './components/quiz/QuizHud'
+import { QuizSummaryModal } from './components/quiz/QuizSummaryModal'
 import { useCardsStore } from './state/useCardsStore'
+import { useQuizStore } from './state/useQuizStore'
 import { useAutosave } from './persistence/useAutosave'
 import { loadMindMap } from './persistence/fileStore'
 import { useUndoRedoShortcuts } from './hooks/useUndoRedoShortcuts'
@@ -16,6 +20,7 @@ function App() {
   // store's transient default root card (slow load, or a load that failed).
   const [loaded, setLoaded] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
+  const quizActive = useQuizStore(s => s.active)
   useUndoRedoShortcuts()
   useAutosave(DEMO_FILE_PATH, cards, 500, loaded, () => setSaveFailed(true))
 
@@ -39,6 +44,7 @@ function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <header style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
         <LockToggle />
+        {!quizActive && <QuizButton />}
         {saveFailed && (
           <span role="status" style={{ color: '#b45309', fontSize: 13 }}>
             ⚠ Erreur de sauvegarde
@@ -47,6 +53,8 @@ function App() {
       </header>
       <main style={{ flex: 1 }}>
         <MindMapCanvas />
+        <QuizHud />
+        <QuizSummaryModal />
       </main>
     </div>
   )
