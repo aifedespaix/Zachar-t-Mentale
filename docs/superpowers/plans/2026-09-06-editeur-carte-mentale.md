@@ -1507,12 +1507,11 @@ export interface Position {
 
 export function computeLayout(cards: Card[]): Record<string, Position> {
   const positions: Record<string, Position> = {}
-  const groups = new Map<string, Card[]>()
+  const groups = new Map<string | null, Card[]>()
 
   for (const card of cards) {
-    const key = card.parentId ?? 'root'
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(card)
+    if (!groups.has(card.parentId)) groups.set(card.parentId, [])
+    groups.get(card.parentId)!.push(card)
   }
 
   for (const group of groups.values()) {
