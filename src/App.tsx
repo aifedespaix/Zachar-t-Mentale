@@ -1,51 +1,37 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useEffect } from 'react'
+import { MindMapCanvas } from './components/MindMapCanvas'
+import { LockToggle } from './components/LockToggle'
+import { useCardsStore } from './state/useCardsStore'
+import { useAutosave } from './persistence/useAutosave'
+import { loadMindMap } from './persistence/fileStore'
+import { useUndoRedoShortcuts } from './hooks/useUndoRedoShortcuts'
+
+const DEMO_FILE_PATH = 'demo-chapitre.mmap.json'
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const cards = useCardsStore(s => s.history.present)
+  const loadCards = useCardsStore(s => s.loadCards)
+  useUndoRedoShortcuts()
+  useAutosave(DEMO_FILE_PATH, cards)
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  useEffect(() => {
+    loadMindMap(DEMO_FILE_PATH)
+      .then(loadCards)
+      .catch(() => {
+        // No existing file yet — keep the default single-root card from the store.
+      })
+  }, [loadCards])
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
-  );
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <header style={{ padding: 8 }}>
+        <LockToggle />
+      </header>
+      <main style={{ flex: 1 }}>
+        <MindMapCanvas />
+      </main>
+    </div>
+  )
 }
 
-export default App;
+export default App

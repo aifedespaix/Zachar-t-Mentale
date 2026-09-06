@@ -1,5 +1,15 @@
-import { useCallback, useMemo } from 'react'
-import { ReactFlow, ReactFlowProvider, Background, Controls, Position, type Node, type Edge, type OnNodeDrag } from '@xyflow/react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  Background,
+  Controls,
+  Position,
+  useReactFlow,
+  type Node,
+  type Edge,
+  type OnNodeDrag,
+} from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCardsStore } from '../state/useCardsStore'
 import { computeLayout } from '../layout/columns'
@@ -32,8 +42,23 @@ function MindMapCanvasInner() {
   const cards = useCardsStore(s => s.history.present)
   const locked = useCardsStore(s => s.locked)
   const moveCardToIndex = useCardsStore(s => s.moveCardToIndex)
+  const { setCenter } = useReactFlow()
 
   const layout = useMemo(() => computeLayout(cards), [cards])
+
+  // Track card ids seen so far so a newly created card (child or sibling)
+  // can be detected and the viewport panned/zoomed to center on it.
+  const previousIds = useRef(new Set(cards.map(c => c.id)))
+
+  useEffect(() => {
+    const currentIds = new Set(cards.map(c => c.id))
+    const createdId = cards.map(c => c.id).find(id => !previousIds.current.has(id))
+    if (createdId) {
+      const position = layout[createdId]
+      setCenter(position.x + NODE_WIDTH / 2, position.y + NODE_HEIGHT / 2, { zoom: 1, duration: 400 })
+    }
+    previousIds.current = currentIds
+  }, [cards, layout, setCenter])
 
   const nodes: Node[] = useMemo(
     () =>

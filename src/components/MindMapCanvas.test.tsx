@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect, beforeEach } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import { MindMapCanvas } from './MindMapCanvas'
 import { useCardsStore } from '../state/useCardsStore'
 import type { Card } from '../types/card'
@@ -21,5 +22,20 @@ describe('MindMapCanvas', () => {
   it('renders one edge for the parent-child link', () => {
     const { container } = render(<MindMapCanvas />)
     expect(container.querySelectorAll('.react-flow__edge')).toHaveLength(1)
+  })
+})
+
+describe('MindMapCanvas auto-focus', () => {
+  it('centers the view on a newly created card', async () => {
+    const user = userEvent.setup()
+    useCardsStore.getState().loadCards([root])
+    render(<MindMapCanvas />)
+
+    await user.click(screen.getByRole('button', { name: /ajouter un enfant/i }))
+
+    const newCard = useCardsStore
+      .getState()
+      .history.present.find(c => c.parentId === root.id)!
+    expect(screen.getByTestId(`card-${newCard.id}`)).toBeInTheDocument()
   })
 })
