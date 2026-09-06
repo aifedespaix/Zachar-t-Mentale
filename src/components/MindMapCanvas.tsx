@@ -38,6 +38,20 @@ const nodeHandles = [
   { type: 'source' as const, position: Position.Right, x: NODE_WIDTH, y: NODE_HEIGHT / 2 },
 ]
 
+// Distinguishes a genuine incremental create (addChild/addSibling — every
+// previously-known id is still present, plus one new one) from a wholesale
+// replacement of the card array (a file load via `loadCards`, which swaps
+// in a completely different set of ids — notably including the very first
+// load-on-mount, which replaces the store's transient default root card).
+// Only the former should trigger auto-focus; exported for direct unit
+// testing since spying on `setCenter` through `useReactFlow`'s context is
+// more brittle than testing this pure decision in isolation.
+export function findNewlyCreatedCardId(previousIds: Set<string>, currentIds: Set<string>): string | undefined {
+  const isIncrementalChange = [...previousIds].some(id => currentIds.has(id))
+  if (!isIncrementalChange) return undefined
+  return [...currentIds].find(id => !previousIds.has(id))
+}
+
 function MindMapCanvasInner() {
   const cards = useCardsStore(s => s.history.present)
   const locked = useCardsStore(s => s.locked)
@@ -52,7 +66,7 @@ function MindMapCanvasInner() {
 
   useEffect(() => {
     const currentIds = new Set(cards.map(c => c.id))
-    const createdId = cards.map(c => c.id).find(id => !previousIds.current.has(id))
+    const createdId = findNewlyCreatedCardId(previousIds.current, currentIds)
     if (createdId) {
       const position = layout[createdId]
       setCenter(position.x + NODE_WIDTH / 2, position.y + NODE_HEIGHT / 2, { zoom: 1, duration: 400 })
