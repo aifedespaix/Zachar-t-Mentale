@@ -8,6 +8,7 @@ interface QcmDialogProps {
   correctDefinition: string
   distractors: string[]
   onAnswer: (chosenDefinition: string) => void
+  onCancel: () => void
   random?: () => number
 }
 
@@ -26,6 +27,7 @@ export function QcmDialog({
   correctDefinition,
   distractors,
   onAnswer,
+  onCancel,
   random = Math.random,
 }: QcmDialogProps) {
   const [options] = useState(() => shuffle([correctDefinition, ...distractors], random))
@@ -38,7 +40,16 @@ export function QcmDialog({
   }
 
   return (
-    <Dialog open={open}>
+    <Dialog
+      open={open}
+      onOpenChange={next => {
+        // Radix routes both Escape and outside-click through onOpenChange.
+        // Only treat it as a dismissal (not a call) when no answer has been
+        // chosen yet — once answered, the dialog also closes itself via the
+        // timeout above, and that path must not also fire onCancel.
+        if (!next && chosen === null) onCancel()
+      }}
+    >
       <DialogContent showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>

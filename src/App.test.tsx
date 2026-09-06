@@ -122,4 +122,12 @@ describe('App quiz wiring', () => {
     expect(screen.queryByRole('button', { name: /lancer un quiz/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /terminer le quiz/i })).toBeInTheDocument() // proves the HUD rendered
   })
+
+  it('hides the lock toggle while a quiz is active (quiz mode inherits locked mode for its whole duration)', async () => {
+    useQuizStore.setState({ active: true, questions: [{ cardId: 'x', type: 'recall' }], results: { x: 'unanswered' } })
+    render(<App />)
+    await settle()
+
+    expect(screen.queryByRole('button', { name: /verrouiller|déverrouiller/i })).not.toBeInTheDocument()
+  })
 })

@@ -26,7 +26,11 @@ export function selectQuizQuestions(
   const drawn: Card[] = []
   for (const level of config.levels) {
     const levelCards = cards.filter(c => c.level === level)
-    const count = Math.round(levelCards.length * sampleRatio)
+    // A plain round() can hit 0 for a small non-empty level (e.g. exactly 1
+    // card at "facile", 1 * 0.3 rounds to 0) — level 1 (the root) always has
+    // exactly 1 card, so a fresh mind map's only card would never be drawn.
+    // Guarantee at least 1 card from any level that has cards at all.
+    const count = levelCards.length === 0 ? 0 : Math.max(1, Math.round(levelCards.length * sampleRatio))
     drawn.push(...shuffle(levelCards, random).slice(0, count))
   }
 
@@ -44,7 +48,8 @@ export function buildDistractorPool(
   difficulty: QuizDifficulty,
   random: () => number = Math.random
 ): string[] {
-  const withDefinitions = (pool: Card[]) => pool.filter(c => c.id !== targetCard.id && c.definition)
+  const withDefinitions = (pool: Card[]) =>
+    pool.filter(c => c.id !== targetCard.id && c.definition && c.definition !== targetCard.definition)
 
   const branch = withDefinitions(cards.filter(c => c.parentId === targetCard.parentId))
   const level = withDefinitions(cards.filter(c => c.level === targetCard.level))
@@ -79,7 +84,9 @@ export function attachDistractors(
   return questions.map(question => {
     if (question.type !== 'qcm') return question
     const card = cards.find(c => c.id === question.cardId)
-    if (!card) return question
+    // Defensive only (should not happen in practice): always degrade to
+    // recall rather than returning the original, unmodified qcm question.
+    if (!card) return { cardId: question.cardId, type: 'recall' }
     const pool = buildDistractorPool(cards, card, difficulty, random)
     if (pool.length === 0) return { cardId: question.cardId, type: 'recall' }
     return { ...question, distractorDefinitions: pool }

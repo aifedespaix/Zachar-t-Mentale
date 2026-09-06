@@ -58,6 +58,20 @@ describe('selectQuizQuestions', () => {
     expect(questions).toEqual([{ cardId: 'root', type: 'recall' }])
   })
 
+  it('still draws the single card of a level with exactly 1 card at "facile" (round-to-zero must not drop it)', () => {
+    // Math.round(1 * 0.3) === 0 — a level with exactly 1 card (e.g. level 1,
+    // the root, which is always exactly 1 card) must still draw that card.
+    const config: QuizConfig = { levels: [1], difficulty: 'facile' }
+    const questions = selectQuizQuestions([root], config)
+    expect(questions).toEqual([{ cardId: 'root', type: 'recall' }])
+  })
+
+  it('draws 0 cards for an empty level (no cards to guarantee a minimum from)', () => {
+    const config: QuizConfig = { levels: [3], difficulty: 'facile' }
+    const questions = selectQuizQuestions([root, ...makeLevel2(2)], config)
+    expect(questions).toEqual([])
+  })
+
   it('can type a card WITH a definition as "qcm" when the ratio roll says so', () => {
     const withDefinition: Card = { ...root, definition: 'Une définition' }
     const config: QuizConfig = { levels: [1], difficulty: 'difficile' } // 70% qcm
@@ -100,6 +114,20 @@ describe('buildDistractorPool', () => {
 
   it('returns an empty pool when no other card in the map has a definition', () => {
     const pool = buildDistractorPool([target, noDefinition], target, 'facile')
+    expect(pool).toEqual([])
+  })
+
+  it('never includes a distractor whose definition TEXT duplicates the target\'s (even from a different card id)', () => {
+    const duplicateText: Card = {
+      id: 'duplicate',
+      level: 3,
+      title: 'Doublon',
+      definition: 'Bonne définition', // identical text to `target`'s definition, different id
+      parentId: 'p1',
+      order: 3,
+    }
+    const pool = buildDistractorPool([target, duplicateText], target, 'facile')
+    expect(pool).not.toContain('Bonne définition')
     expect(pool).toEqual([])
   })
 })
