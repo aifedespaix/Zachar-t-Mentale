@@ -65,4 +65,22 @@ describe('FileTreeRow', () => {
     await user.click(screen.getByRole('button', { name: /chimie/i }))
     expect(screen.queryByText('atomes.json')).not.toBeInTheDocument()
   })
+
+  it('shows a "retirer de la liste" action on a root folder row, and calls onRemoveRoot with its path', async () => {
+    const user = userEvent.setup()
+    const onRemoveRoot = vi.fn()
+    const node: FileTreeNode = { type: 'folder', name: 'cours-svt', path: '/cours-svt', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot onRemoveRoot={onRemoveRoot} />)
+
+    await user.click(screen.getByRole('button', { name: 'Retirer cours-svt de la liste' }))
+
+    expect(onRemoveRoot).toHaveBeenCalledWith('/cours-svt')
+  })
+
+  it('does not show a "retirer" action on a non-root folder row', () => {
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours-svt/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    expect(screen.queryByRole('button', { name: /retirer/i })).not.toBeInTheDocument()
+  })
 })

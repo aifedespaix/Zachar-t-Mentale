@@ -1,14 +1,17 @@
-import { Folder, FolderOpen, FileJson, File, ChevronRight, ChevronDown } from 'lucide-react'
+import { Folder, FolderOpen, FileJson, File, ChevronRight, ChevronDown, X } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import { useWorkspaceStore } from '../../state/useWorkspaceStore'
+import { Button } from '../ui/button'
 
 interface FileTreeRowProps {
   node: FileTreeNode
   depth: number
   onOpenFile: (path: string) => void
+  isRoot?: boolean
+  onRemoveRoot?: (path: string) => void
 }
 
-export function FileTreeRow({ node, depth, onOpenFile }: FileTreeRowProps) {
+export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveRoot }: FileTreeRowProps) {
   const expandedPaths = useWorkspaceStore(s => s.expandedPaths)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const toggleExpanded = useWorkspaceStore(s => s.toggleExpanded)
@@ -19,26 +22,38 @@ export function FileTreeRow({ node, depth, onOpenFile }: FileTreeRowProps) {
     const isExpanded = expandedPaths.has(node.path)
     return (
       <div>
-        <button
-          type="button"
-          onClick={() => toggleExpanded(node.path)}
-          aria-expanded={isExpanded}
-          style={{
-            ...indent,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            width: '100%',
-            background: 'transparent',
-            border: 'none',
-            textAlign: 'left',
-            cursor: 'pointer',
-          }}
-        >
-          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
-          <span>{node.name}</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => toggleExpanded(node.path)}
+            aria-expanded={isExpanded}
+            style={{
+              ...indent,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              flex: 1,
+              background: 'transparent',
+              border: 'none',
+              textAlign: 'left',
+              cursor: 'pointer',
+            }}
+          >
+            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
+            <span>{node.name}</span>
+          </button>
+          {isRoot && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Retirer ${node.name} de la liste`}
+              onClick={() => onRemoveRoot?.(node.path)}
+            >
+              <X size={14} />
+            </Button>
+          )}
+        </div>
         {isExpanded &&
           node.children.map(child => <FileTreeRow key={child.path} node={child} depth={depth + 1} onOpenFile={onOpenFile} />)}
       </div>
