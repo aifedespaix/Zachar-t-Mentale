@@ -7,6 +7,5 @@ class ResizeObserverMock {
 }
 
 if (!('ResizeObserver' in globalThis)) {
-  // @ts-expect-error test polyfill
   globalThis.ResizeObserver = ResizeObserverMock
 }
