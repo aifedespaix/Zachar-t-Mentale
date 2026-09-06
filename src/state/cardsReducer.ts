@@ -40,10 +40,10 @@ export function addSibling(
     parentId: reference.parentId,
     order: 0,
   }
-  const newGroup = [...group.slice(0, insertAt), newCard, ...group.slice(insertAt)]
-  newGroup.forEach((c, i) => {
-    c.order = i
-  })
+  const newGroup = [...group.slice(0, insertAt), newCard, ...group.slice(insertAt)].map((c, i) => ({
+    ...c,
+    order: i,
+  }))
   const otherCards = cards.filter(c => c.parentId !== reference.parentId)
   return { cards: [...otherCards, ...newGroup], newCardId: newCard.id }
 }
