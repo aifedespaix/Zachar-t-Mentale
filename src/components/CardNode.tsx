@@ -3,6 +3,7 @@ import { motion } from 'motion/react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Plus, ArrowRight, X, GripVertical, AlignLeft, FlipHorizontal2, type LucideIcon } from 'lucide-react'
 import type { Card } from '../types/card'
+import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
 import { levelColors } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
@@ -10,7 +11,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 
-type CardNodeProps = NodeProps & { data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean } }
+interface QuizData {
+  type: QuizQuestionType
+  result: QuizResult
+  distractorDefinitions?: string[]
+}
+
+type CardNodeProps = NodeProps & {
+  data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean; quiz?: QuizData }
+}
 
 /**
  * Shared "structurally unavailable" grey. Only the delete `x` still uses
@@ -80,7 +89,17 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
 }
 
 export function CardNode({ data }: CardNodeProps) {
-  const { card, autoEdit = false, isReparentTarget = false } = data
+  const { card, autoEdit = false, isReparentTarget = false, quiz } = data
+  const [quizRevealed, setQuizRevealed] = useState(false)
+  const isRecallPending = quiz?.type === 'recall' && quiz.result === 'unanswered'
+  const displayMasked = isRecallPending && !quizRevealed
+
+  function handleReveal() {
+    setQuizRevealed(true)
+    setFlipped(true)
+    window.setTimeout(() => setFlipped(false), 400)
+  }
+
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
   const addChild = useCardsStore(s => s.addChild)
@@ -316,7 +335,7 @@ export function CardNode({ data }: CardNodeProps) {
         ref={titleInputRef}
         aria-label="Titre"
         readOnly={locked}
-        value={titleFocused ? draftTitle : card.title}
+        value={titleFocused ? draftTitle : displayMasked ? '???' : card.title}
         onFocus={handleTitleFocus}
         onChange={e => setDraftTitle(e.target.value)}
         onBlur={commitTitle}
@@ -422,14 +441,27 @@ export function CardNode({ data }: CardNodeProps) {
             </Tooltip>
           )}
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Retourner" onClick={() => setFlipped(v => !v)}>
-                <FlipHorizontal2 />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Retourner</TooltipContent>
-          </Tooltip>
+          {quiz && quiz.result === 'unanswered' ? (
+            quiz.type === 'recall' ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Révéler la réponse" onClick={handleReveal}>
+                    <FlipHorizontal2 />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Révéler la réponse</TooltipContent>
+              </Tooltip>
+            ) : null /* qcm trigger wired in Task 13 */
+          ) : !quiz ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" aria-label="Retourner" onClick={() => setFlipped(v => !v)}>
+                  <FlipHorizontal2 />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Retourner</TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
       </TooltipProvider>
 
