@@ -43,7 +43,7 @@ function App() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <header style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <LockToggle />
+        {!quizActive && <LockToggle />}
         {!quizActive && <QuizButton />}
         {saveFailed && (
           <span role="status" style={{ color: '#b45309', fontSize: 13 }}>

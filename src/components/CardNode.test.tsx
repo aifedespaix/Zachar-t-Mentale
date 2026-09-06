@@ -42,10 +42,13 @@ function renderCardNode(card: Card, autoEdit = false, isReparentTarget = false, 
   )
   return {
     ...result,
-    rerenderWith: (next: Card) =>
+    // `nextQuiz` always reflects the caller's intent exactly (including an
+    // explicit `undefined`, e.g. to simulate a quiz ending) — no fallback to
+    // the initial `quiz` closure, since no existing caller needs one.
+    rerenderWith: (next: Card, nextQuiz?: QuizData) =>
       result.rerender(
         <ReactFlowProvider>
-          <CardNode {...cardNodeProps(next, autoEdit, isReparentTarget, quiz)} />
+          <CardNode {...cardNodeProps(next, autoEdit, isReparentTarget, nextQuiz)} />
         </ReactFlowProvider>
       ),
   }
@@ -355,6 +358,34 @@ describe('CardNode footer', () => {
     await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
 
     expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
+  })
+
+  it('resets quizRevealed when the quiz ends, so a second quiz session drawing the same card masks it again', async () => {
+    const user = userEvent.setup()
+    const { rerenderWith } = renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
+
+    // The quiz ends: this card is no longer part of any question.
+    rerenderWith(testCard, undefined)
+    // A second quiz later draws the SAME card again as a recall question.
+    rerenderWith(testCard, { type: 'recall', result: 'unanswered' })
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveValue('Titre initial')
+    expect(screen.queryByRole('button', { name: /je savais/i })).not.toBeInTheDocument()
+  })
+
+  it('does not reveal the real title or show grading buttons when the masked title field is focused', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+
+    expect(input).not.toHaveValue('Titre initial')
+    expect(screen.queryByRole('button', { name: /je savais/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /je ne savais pas/i })).not.toBeInTheDocument()
   })
 
   it('opens an editable field when "add definition" is clicked and commits the typed text on Enter', async () => {

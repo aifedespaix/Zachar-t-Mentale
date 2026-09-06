@@ -107,6 +107,15 @@ export function CardNode({ data }: CardNodeProps) {
     window.setTimeout(() => setFlipped(false), 400)
   }
 
+  // React Flow keeps CardNode mounted for the life of the app (nodes are
+  // keyed by card id, not remounted between quizzes), so `quizRevealed` must
+  // be reset by hand whenever this card leaves an active quiz question —
+  // otherwise a SECOND quiz drawing the same card as a recall question would
+  // inherit the first quiz's "already revealed" state and skip masking.
+  useEffect(() => {
+    if (!quiz) setQuizRevealed(false)
+  }, [quiz])
+
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
   const addChild = useCardsStore(s => s.addChild)
@@ -156,6 +165,15 @@ export function CardNode({ data }: CardNodeProps) {
   }
 
   function handleTitleFocus() {
+    // `readOnly` on the <input> below blocks typing but NOT focus. Without
+    // this guard, focusing a masked title would seed the draft with the REAL
+    // title and render it via the `titleFocused` branch of the value
+    // ternary — bypassing the mask (and the reveal/grading flow) with a
+    // single click. Block focus itself while masked instead.
+    if (displayMasked) {
+      titleInputRef.current?.blur()
+      return
+    }
     // Re-seed the draft from the card as it is NOW: a stale draft (from a
     // previous focus session) committed on blur would silently re-write the
     // card with an old value. The actual `select()` happens in the effect
@@ -538,6 +556,7 @@ export function CardNode({ data }: CardNodeProps) {
             answerQcm(card.id, chosen)
             setQcmOpen(false)
           }}
+          onCancel={() => setQcmOpen(false)}
         />
       )}
 
