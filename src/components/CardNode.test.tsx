@@ -163,4 +163,31 @@ describe('CardNode footer', () => {
     expect(screen.getByTestId(`card-${testCard.id}`)).toHaveAttribute('data-flipped', 'true')
     expect(useCardsStore.getState().history.present).toEqual([testCard])
   })
+
+  it('opens an editable field when "add definition" is clicked and commits the typed text on Enter', async () => {
+    const user = userEvent.setup()
+    useCardsStore.getState().loadCards([testCard])
+    renderCardNode(testCard)
+
+    await user.click(screen.getByRole('button', { name: /ajouter une définition/i }))
+    const field = screen.getByRole('textbox', { name: /définition/i })
+    await user.type(field, 'Nouvelle définition{Enter}')
+
+    expect(useCardsStore.getState().history.present.find(c => c.id === testCard.id)?.definition).toBe(
+      'Nouvelle définition'
+    )
+  })
+
+  it('cancels the definition edit on Escape without calling updateDefinition', async () => {
+    const user = userEvent.setup()
+    useCardsStore.getState().loadCards([testCard])
+    renderCardNode(testCard)
+
+    await user.click(screen.getByRole('button', { name: /ajouter une définition/i }))
+    const field = screen.getByRole('textbox', { name: /définition/i })
+    await user.type(field, 'Texte annulé{Escape}')
+
+    expect(screen.queryByRole('textbox', { name: /définition/i })).not.toBeInTheDocument()
+    expect(useCardsStore.getState().history.present.find(c => c.id === testCard.id)?.definition).toBeUndefined()
+  })
 })

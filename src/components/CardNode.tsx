@@ -24,6 +24,8 @@ export function CardNode({ data }: CardNodeProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [definitionShown, setDefinitionShown] = useState(false)
   const [flipped, setFlipped] = useState(false)
+  const [editingDefinition, setEditingDefinition] = useState(false)
+  const [draftDefinition, setDraftDefinition] = useState(card.definition ?? '')
   const colors = levelColors[card.level]
   const childColors = card.level < 4 ? levelColors[(card.level + 1) as 1 | 2 | 3 | 4] : null
 
@@ -35,6 +37,16 @@ export function CardNode({ data }: CardNodeProps) {
   function cancelTitle() {
     setDraftTitle(card.title)
     setEditing(false)
+  }
+
+  function commitDefinition() {
+    updateDefinition(card.id, draftDefinition)
+    setEditingDefinition(false)
+  }
+
+  function cancelDefinition() {
+    setDraftDefinition(card.definition ?? '')
+    setEditingDefinition(false)
   }
 
   function handleDeleteClick() {
@@ -163,7 +175,13 @@ export function CardNode({ data }: CardNodeProps) {
             👁
           </button>
         ) : (
-          <button aria-label="Ajouter une définition" onClick={() => updateDefinition(card.id, '')}>
+          <button
+            aria-label="Ajouter une définition"
+            onClick={() => {
+              setDraftDefinition('')
+              setEditingDefinition(true)
+            }}
+          >
             👁+
           </button>
         )}
@@ -172,6 +190,23 @@ export function CardNode({ data }: CardNodeProps) {
           ⟲
         </button>
       </div>
+
+      {editingDefinition && (
+        <textarea
+          autoFocus
+          aria-label="Définition"
+          value={draftDefinition}
+          onChange={e => setDraftDefinition(e.target.value)}
+          onBlur={commitDefinition}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              commitDefinition()
+            }
+            if (e.key === 'Escape') cancelDefinition()
+          }}
+        />
+      )}
 
       {definitionShown && card.definition && <p>{card.definition}</p>}
     </motion.div>
