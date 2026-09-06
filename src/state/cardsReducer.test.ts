@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createRootCard, addChild, addSibling } from './cardsReducer'
+import { createRootCard, addChild, addSibling, updateTitle, updateDefinition, countDescendants, deleteCard } from './cardsReducer'
 import type { Card } from '../types/card'
 
 describe('createRootCard', () => {
@@ -50,5 +50,58 @@ describe('addSibling', () => {
   it('throws when trying to add a sibling to the root (single-root invariant)', () => {
     const root = createRootCard()
     expect(() => addSibling([root], root.id, 'below')).toThrow()
+  })
+})
+
+describe('updateTitle', () => {
+  it('updates only the targeted card', () => {
+    const root = createRootCard('old')
+    const cards = updateTitle([root], root.id, 'new')
+    expect(cards[0].title).toBe('new')
+  })
+})
+
+describe('updateDefinition', () => {
+  it('sets the definition on the targeted card', () => {
+    const root = createRootCard()
+    const cards = updateDefinition([root], root.id, 'une définition')
+    expect(cards[0].definition).toBe('une définition')
+  })
+})
+
+describe('countDescendants', () => {
+  it('counts children and grandchildren', () => {
+    const root = createRootCard()
+    const { cards: withChild, newCardId: childId } = addChild([root], root.id)
+    const { cards: withGrandchild } = addChild(withChild, childId)
+    expect(countDescendants(withGrandchild, root.id)).toBe(2)
+    expect(countDescendants(withGrandchild, childId)).toBe(1)
+  })
+})
+
+describe('deleteCard', () => {
+  it('removes a leaf card and reindexes its remaining siblings', () => {
+    const root = createRootCard()
+    const { cards: c1, newCardId: firstChild } = addChild([root], root.id)
+    const { cards: c2, newCardId: secondChild } = addChild(c1, root.id)
+    const result = deleteCard(c2, firstChild)
+    expect(result.find(c => c.id === firstChild)).toBeUndefined()
+    const remainingChild = result.find(c => c.id === secondChild)!
+    expect(remainingChild.order).toBe(0)
+  })
+
+  it('cascades deletion to descendants', () => {
+    const root = createRootCard()
+    const { cards: c1, newCardId: childId } = addChild([root], root.id)
+    const { cards: c2, newCardId: grandchildId } = addChild(c1, childId)
+    const result = deleteCard(c2, childId)
+    expect(result.find(c => c.id === childId)).toBeUndefined()
+    expect(result.find(c => c.id === grandchildId)).toBeUndefined()
+    expect(result).toHaveLength(1)
+  })
+
+  it('throws when trying to delete the root card', () => {
+    const root = createRootCard()
+    expect(() => deleteCard([root], root.id)).toThrow()
   })
 })
