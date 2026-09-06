@@ -5,6 +5,9 @@ import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
 import { CardNode } from './CardNode'
 import { useCardsStore, createCardsStore } from '../state/useCardsStore'
 import type { Card } from '../types/card'
+import type { QuizQuestionType, QuizResult } from '../types/quiz'
+
+type QuizData = { type: QuizQuestionType; result: QuizResult; distractorDefinitions?: string[] }
 
 const testCard: Card = { id: 'root', level: 1, title: 'Titre initial', parentId: null, order: 0 }
 
@@ -17,10 +20,12 @@ const cardWithDefinition: Card = {
   order: 0,
 }
 
-type CardNodeTestProps = NodeProps & { data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean } }
+type CardNodeTestProps = NodeProps & {
+  data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean; quiz?: QuizData }
+}
 
-function cardNodeProps(card: Card, autoEdit = false, isReparentTarget = false) {
-  return { id: card.id, data: { card, autoEdit, isReparentTarget } } as unknown as CardNodeTestProps
+function cardNodeProps(card: Card, autoEdit = false, isReparentTarget = false, quiz?: QuizData) {
+  return { id: card.id, data: { card, autoEdit, isReparentTarget, quiz } } as unknown as CardNodeTestProps
 }
 
 /**
@@ -28,10 +33,10 @@ function cardNodeProps(card: Card, autoEdit = false, isReparentTarget = false) {
  * measures empty handleBounds and silently stops drawing edges), and Handle
  * requires a ReactFlowProvider ancestor for its store/handle-config contexts.
  */
-function renderCardNode(card: Card, autoEdit = false, isReparentTarget = false) {
+function renderCardNode(card: Card, autoEdit = false, isReparentTarget = false, quiz?: QuizData) {
   const result = render(
     <ReactFlowProvider>
-      <CardNode {...cardNodeProps(card, autoEdit, isReparentTarget)} />
+      <CardNode {...cardNodeProps(card, autoEdit, isReparentTarget, quiz)} />
     </ReactFlowProvider>
   )
   return {
@@ -39,7 +44,7 @@ function renderCardNode(card: Card, autoEdit = false, isReparentTarget = false) 
     rerenderWith: (next: Card) =>
       result.rerender(
         <ReactFlowProvider>
-          <CardNode {...cardNodeProps(next, autoEdit, isReparentTarget)} />
+          <CardNode {...cardNodeProps(next, autoEdit, isReparentTarget, quiz)} />
         </ReactFlowProvider>
       ),
   }
@@ -317,6 +322,27 @@ describe('CardNode footer', () => {
 
     await user.hover(screen.getByRole('button', { name: /retourner/i }))
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Retourner')
+  })
+
+  it('masks the title while a quiz recall question on this card is unanswered', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveValue('Titre initial')
+  })
+
+  it('does not mask the title when no quiz question applies to this card', () => {
+    renderCardNode(testCard)
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
+  })
+
+  it('reveals the real title after clicking "Révéler la réponse"', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
   })
 
   it('opens an editable field when "add definition" is clicked and commits the typed text on Enter', async () => {
