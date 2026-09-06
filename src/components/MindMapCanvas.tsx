@@ -12,7 +12,8 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCardsStore } from '../state/useCardsStore'
-import { computeLayout } from '../layout/columns'
+import type { Card } from '../types/card'
+import { computeLayout, type Position } from '../layout/columns'
 import { CardNode } from './CardNode'
 import { levelColors } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
@@ -29,8 +30,8 @@ const NOMINAL_NODE_WIDTH = 200
 const NOMINAL_NODE_HEIGHT = 92
 
 function buildNodes(
-  cards: ReturnType<typeof useCardsStore.getState>['history']['present'],
-  layout: Record<string, { x: number; y: number }>,
+  cards: Card[],
+  layout: Record<string, Position>,
   locked: boolean,
   autoEditId: string | null
 ): Node[] {
