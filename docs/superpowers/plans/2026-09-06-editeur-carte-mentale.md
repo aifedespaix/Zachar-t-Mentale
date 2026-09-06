@@ -1625,7 +1625,8 @@ import { useState } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import type { Card } from '../types/card'
 import { useCardsStore } from '../state/useCardsStore'
-import { levelColors, toCss } from '../colors/levelColors'
+import { levelColors } from '../colors/levelColors'
+import { toCss } from '../colors/contrast'
 
 type CardNodeProps = NodeProps & { data: { card: Card } }
 
@@ -1755,7 +1756,8 @@ import '@xyflow/react/dist/style.css'
 import { useCardsStore } from '../state/useCardsStore'
 import { computeLayout } from '../layout/columns'
 import { CardNode } from './CardNode'
-import { levelColors, toCss } from '../colors/levelColors'
+import { levelColors } from '../colors/levelColors'
+import { toCss } from '../colors/contrast'
 
 const nodeTypes = { card: CardNode }
 
