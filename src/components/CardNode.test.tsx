@@ -130,6 +130,35 @@ describe('CardNode', () => {
     renderCardNode(testCard)
     expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveFocus()
   })
+
+  // testCard is the root: canAddSibling is false, so "ajouter au-dessus/en
+  // dessous" never render regardless of lock. This only asserts on the
+  // buttons that DO render for a root ("->" and "x") plus the drag handle,
+  // which is always present.
+  it('hides the structural buttons and the drag handle (but keeps their space) when the mind map is locked', () => {
+    useCardsStore.setState({ locked: true })
+    renderCardNode(testCard)
+
+    // `hidden: true` is required to even find these: getByRole excludes
+    // inaccessible (visibility: hidden) elements by default. Their accessible
+    // name also resolves to "" once hidden, so buttons are located by their
+    // aria-label attribute directly rather than by accessible name matching.
+    const hiddenButtons = screen.getAllByRole('button', { hidden: true })
+    const addChildButton = hiddenButtons.find(el => el.getAttribute('aria-label') === 'Ajouter un enfant')
+    const deleteButton = hiddenButtons.find(el => el.getAttribute('aria-label') === 'Supprimer')
+
+    expect(addChildButton).not.toBeVisible()
+    expect(deleteButton).not.toBeVisible()
+    expect(screen.getByTestId('drag-handle')).not.toBeVisible()
+  })
+
+  it('keeps the structural buttons visible when the mind map is unlocked', () => {
+    renderCardNode(testCard)
+
+    expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toBeVisible()
+    expect(screen.getByRole('button', { name: /supprimer/i })).toBeVisible()
+    expect(screen.getByTestId('drag-handle')).toBeVisible()
+  })
 })
 
 describe('CardNode structural buttons', () => {

@@ -244,7 +244,8 @@ export function CardNode({ data }: CardNodeProps) {
           left: 4,
           display: 'flex',
           cursor: locked ? 'default' : 'grab',
-          color: locked ? DISABLED_GREY : toCss(colors.border),
+          color: toCss(colors.border),
+          visibility: locked ? 'hidden' : 'visible',
           pointerEvents: locked ? 'none' : 'auto',
         }}
       >
@@ -252,46 +253,54 @@ export function CardNode({ data }: CardNodeProps) {
       </span>
 
       {canAddSibling && (
-        <EdgeButton
-          label="Ajouter au-dessus"
-          icon={Plus}
-          color={toCss(colors.border)}
-          disabled={false}
-          onActivate={() => addSibling(card.id, 'above')}
-          position={{ top: '-0.85rem', left: '50%', x: '-50%' }}
-        />
+        <span style={{ visibility: locked ? 'hidden' : 'visible' }}>
+          <EdgeButton
+            label="Ajouter au-dessus"
+            icon={Plus}
+            color={toCss(colors.border)}
+            disabled={false}
+            onActivate={() => addSibling(card.id, 'above')}
+            position={{ top: '-0.85rem', left: '50%', x: '-50%' }}
+          />
+        </span>
       )}
 
       {canAddSibling && (
-        <EdgeButton
-          label="Ajouter en dessous"
-          icon={Plus}
-          color={toCss(colors.border)}
-          disabled={false}
-          onActivate={() => addSibling(card.id, 'below')}
-          position={{ bottom: '-0.85rem', left: '50%', x: '-50%' }}
-        />
+        <span style={{ visibility: locked ? 'hidden' : 'visible' }}>
+          <EdgeButton
+            label="Ajouter en dessous"
+            icon={Plus}
+            color={toCss(colors.border)}
+            disabled={false}
+            onActivate={() => addSibling(card.id, 'below')}
+            position={{ bottom: '-0.85rem', left: '50%', x: '-50%' }}
+          />
+        </span>
       )}
 
       {canAddChild && (
-        <EdgeButton
-          label="Ajouter un enfant"
-          icon={ArrowRight}
-          color={toCss((childColors ?? colors).border)}
-          disabled={false}
-          onActivate={() => addChild(card.id)}
-          position={{ right: '-0.85rem', top: '50%', y: '-50%' }}
-        />
+        <span style={{ visibility: locked ? 'hidden' : 'visible' }}>
+          <EdgeButton
+            label="Ajouter un enfant"
+            icon={ArrowRight}
+            color={toCss((childColors ?? colors).border)}
+            disabled={false}
+            onActivate={() => addChild(card.id)}
+            position={{ right: '-0.85rem', top: '50%', y: '-50%' }}
+          />
+        </span>
       )}
 
-      <EdgeButton
-        label="Supprimer"
-        icon={X}
-        color={toCss(colors.border)}
-        disabled={deleteDisabled}
-        onActivate={handleDeleteClick}
-        position={{ top: '-0.6rem', right: '-0.6rem' }}
-      />
+      <span style={{ visibility: locked ? 'hidden' : 'visible' }}>
+        <EdgeButton
+          label="Supprimer"
+          icon={X}
+          color={toCss(colors.border)}
+          disabled={deleteDisabled}
+          onActivate={handleDeleteClick}
+          position={{ top: '-0.6rem', right: '-0.6rem' }}
+        />
+      </span>
 
       {/*
         Always an <input>, never swapped for a <span>: the two elements
