@@ -124,6 +124,7 @@ export function CardNode({ data }: CardNodeProps) {
   }, [autoEdit])
 
   function startEditingDefinition() {
+    if (locked) return
     setDraftDefinition(card.definition ?? '')
     setEditingDefinition(true)
   }
@@ -314,6 +315,7 @@ export function CardNode({ data }: CardNodeProps) {
       <input
         ref={titleInputRef}
         aria-label="Titre"
+        readOnly={locked}
         value={titleFocused ? draftTitle : card.title}
         onFocus={handleTitleFocus}
         onChange={e => setDraftTitle(e.target.value)}
@@ -397,6 +399,7 @@ export function CardNode({ data }: CardNodeProps) {
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Ajouter une définition"
+                  disabled={locked}
                   onClick={startEditingDefinition}
                 >
                   <span style={{ position: 'relative', display: 'inline-flex' }}>

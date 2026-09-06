@@ -355,4 +355,23 @@ describe('CardNode footer', () => {
     renderCardNode(testCard)
     expect(screen.getByTestId(`card-${testCard.id}`)).toHaveAttribute('data-reparent-target', 'false')
   })
+
+  it('makes the title read-only when the mind map is locked', async () => {
+    const user = userEvent.setup()
+    useCardsStore.setState({ locked: true })
+    renderCardNode(testCard)
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, ' modifié{Enter}')
+
+    expect(useCardsStore.getState().history.present[0].title).toBe('Titre initial')
+  })
+
+  it('disables the "add definition" button when the mind map is locked', () => {
+    useCardsStore.setState({ locked: true })
+    renderCardNode(testCard)
+
+    expect(screen.getByRole('button', { name: /ajouter une définition/i })).toBeDisabled()
+  })
 })
