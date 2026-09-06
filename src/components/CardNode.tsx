@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { motion } from 'motion/react'
 import type { NodeProps } from '@xyflow/react'
 import type { Card } from '../types/card'
 import { useCardsStore } from '../state/useCardsStore'
@@ -12,6 +13,7 @@ type CardNodeProps = NodeProps & { data: { card: Card } }
 export function CardNode({ data }: CardNodeProps) {
   const { card } = data
   const updateTitle = useCardsStore(s => s.updateTitle)
+  const updateDefinition = useCardsStore(s => s.updateDefinition)
   const addChild = useCardsStore(s => s.addChild)
   const addSibling = useCardsStore(s => s.addSibling)
   const deleteCard = useCardsStore(s => s.deleteCard)
@@ -20,6 +22,8 @@ export function CardNode({ data }: CardNodeProps) {
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState(card.title)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [definitionShown, setDefinitionShown] = useState(false)
+  const [flipped, setFlipped] = useState(false)
   const colors = levelColors[card.level]
   const childColors = card.level < 4 ? levelColors[(card.level + 1) as 1 | 2 | 3 | 4] : null
 
@@ -42,9 +46,12 @@ export function CardNode({ data }: CardNodeProps) {
   }
 
   return (
-    <div
+    <motion.div
       data-testid={`card-${card.id}`}
+      data-flipped={flipped}
       className="card-node"
+      animate={{ rotateY: flipped ? 180 : 0 }}
+      transition={{ duration: 0.4 }}
       style={{
         background: toCss(colors.bg),
         borderColor: toCss(colors.border),
@@ -146,6 +153,27 @@ export function CardNode({ data }: CardNodeProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+
+      <div className="card-footer" style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        {card.definition ? (
+          <button
+            aria-label={definitionShown ? 'Masquer la définition' : 'Afficher la définition'}
+            onClick={() => setDefinitionShown(v => !v)}
+          >
+            👁
+          </button>
+        ) : (
+          <button aria-label="Ajouter une définition" onClick={() => updateDefinition(card.id, '')}>
+            👁+
+          </button>
+        )}
+
+        <button aria-label="Retourner" onClick={() => setFlipped(v => !v)}>
+          ⟲
+        </button>
+      </div>
+
+      {definitionShown && card.definition && <p>{card.definition}</p>}
+    </motion.div>
   )
 }

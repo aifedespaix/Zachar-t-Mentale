@@ -133,3 +133,34 @@ describe('CardNode drag handle', () => {
     useCardsStore.getState().toggleLock() // reset for other tests
   })
 })
+
+describe('CardNode footer', () => {
+  it('shows an "add definition" affordance when there is none yet', () => {
+    useCardsStore.getState().loadCards([testCard])
+    renderCardNode(testCard)
+    expect(screen.getByRole('button', { name: /ajouter une définition/i })).toBeInTheDocument()
+  })
+
+  it('toggles an existing definition between hidden and shown', async () => {
+    const user = userEvent.setup()
+    const withDef: Card = { ...testCard, definition: 'Une définition' }
+    useCardsStore.getState().loadCards([withDef])
+    renderCardNode(withDef)
+
+    expect(screen.queryByText('Une définition')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    expect(screen.getByText('Une définition')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /masquer la définition/i }))
+    expect(screen.queryByText('Une définition')).not.toBeInTheDocument()
+  })
+
+  it('flips the card visually when the flip icon is clicked, without altering any card data', async () => {
+    const user = userEvent.setup()
+    useCardsStore.getState().loadCards([testCard])
+    renderCardNode(testCard)
+
+    await user.click(screen.getByRole('button', { name: /retourner/i }))
+    expect(screen.getByTestId(`card-${testCard.id}`)).toHaveAttribute('data-flipped', 'true')
+    expect(useCardsStore.getState().history.present).toEqual([testCard])
+  })
+})
