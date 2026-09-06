@@ -19,13 +19,32 @@ import { toCss } from '../colors/contrast'
 
 const nodeTypes = { card: CardNode }
 
-// Nominal card size, used only to offset `setCenter` onto the middle of a
-// freshly created card (its real size is not measured yet at that instant).
-// It is NOT declared on the nodes: CardNode renders real <Handle> elements, so
-// React Flow measures the true footprint, which is what fitView and the
-// minimap need.
+// Nominal card size. Used to offset `setCenter` onto the middle of a freshly
+// created card, and passed as `initialWidth`/`initialHeight` — a pre-measurement
+// FALLBACK only (React Flow replaces it with `measured` as soon as the real DOM
+// node is observed, unlike the fixed `width`/`height` this used to declare).
+// Without it, `fitView` resolves as soon as the first node is measured and ends
+// up framing that node alone, zoomed to maxZoom.
 const NOMINAL_NODE_WIDTH = 200
 const NOMINAL_NODE_HEIGHT = 92
+
+function buildNodes(
+  cards: ReturnType<typeof useCardsStore.getState>['history']['present'],
+  layout: Record<string, { x: number; y: number }>,
+  locked: boolean,
+  autoEditId: string | null
+): Node[] {
+  return cards.map(card => ({
+    id: card.id,
+    type: 'card',
+    position: layout[card.id],
+    data: { card, autoEdit: card.id === autoEditId },
+    draggable: !locked,
+    dragHandle: '.card-drag-handle',
+    initialWidth: NOMINAL_NODE_WIDTH,
+    initialHeight: NOMINAL_NODE_HEIGHT,
+  }))
+}
 
 // Distinguishes a genuine incremental create (addChild/addSibling — every
 // previously-known id is still present, plus one new one) from a wholesale
@@ -74,19 +93,14 @@ function MindMapCanvasInner() {
   // canonical positions whenever the store changes — including right after
   // `moveCardToIndex` fires on drag stop, which is what snaps the card back
   // onto its grid row.
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  // Seeded with the real nodes rather than `[]` so the very first paint (and
+  // the `fitView` that runs with it) already sees the whole tree.
+  const initialNodes = useRef<Node[]>(undefined)
+  if (!initialNodes.current) initialNodes.current = buildNodes(cards, layout, locked, null)
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes.current)
 
   useEffect(() => {
-    setNodes(
-      cards.map(card => ({
-        id: card.id,
-        type: 'card',
-        position: layout[card.id],
-        data: { card, autoEdit: card.id === autoEditId },
-        draggable: !locked,
-        dragHandle: '.card-drag-handle',
-      }))
-    )
+    setNodes(buildNodes(cards, layout, locked, autoEditId))
   }, [cards, layout, locked, autoEditId, setNodes])
 
   const edges: Edge[] = useMemo(
