@@ -135,6 +135,15 @@ Chaque bord et zone de la card a un rôle fixe et non ambigu :
 - **Coin haut-gauche** : poignée de drag dédiée (icône type `⠿`, grise et
   discrète), pour le réordonnancement vertical — voir section suivante.
 - **Bouton de suppression** : discret sur la card (ex. petit `x`).
+
+**Boutons structurellement non applicables** (`+` sur la racine — pas de
+frère/sœur possible pour une racine unique ; `->` sur un niveau 4 — pas de
+niveau 5 ; `x` sur la racine — suppression de la racine interdite) : ces
+boutons restent **affichés mais grisés/inactifs**, jamais retirés de la card,
+sur le même principe que la poignée de drag verrouillée. Une card garde ainsi
+toujours le même gabarit visuel à 4 boutons quel que soit son niveau — seul
+l'état actif/grisé change — ce qui renforce la prévisibilité plutôt que de
+faire varier le nombre de boutons affichés selon le niveau.
 - **Corps de la card** : titre (clic pour éditer inline), définition optionnelle
   si présente.
 - **Footer de la card** (sous le titre/définition) : rangée d'icônes avec
@@ -167,7 +176,9 @@ cas de manipulation — bon compromis pour laisser une interaction plus libre
 
 ## Suppression
 
-- Bouton de suppression discret sur chaque card.
+- Bouton de suppression discret sur chaque card, toujours affiché (grisé et
+  inactif sur la racine, qui ne peut pas être supprimée — voir Anatomie d'une
+  card ci-dessus).
 - Si la card n'a **pas d'enfants** : suppression immédiate.
 - Si la card **a des enfants** : modale de confirmation ("Supprimer cette card
   et ses X enfants ?") avant toute suppression irréversible.
