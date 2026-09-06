@@ -16,6 +16,7 @@ export function CardNode({ data }: CardNodeProps) {
   const addSibling = useCardsStore(s => s.addSibling)
   const deleteCard = useCardsStore(s => s.deleteCard)
   const descendantCount = useCardsStore(s => s.descendantCount)
+  const locked = useCardsStore(s => s.locked)
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState(card.title)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -55,6 +56,22 @@ export function CardNode({ data }: CardNodeProps) {
         position: 'relative',
       }}
     >
+      <span
+        className="card-drag-handle"
+        data-testid="drag-handle"
+        aria-disabled={locked}
+        style={{
+          position: 'absolute',
+          top: 4,
+          left: 4,
+          cursor: locked ? 'default' : 'grab',
+          color: locked ? '#c0c0c0' : toCss(colors.border),
+          pointerEvents: locked ? 'none' : 'auto',
+        }}
+      >
+        ⠿
+      </span>
+
       {card.parentId !== null && (
         <button
           aria-label="Ajouter au-dessus"

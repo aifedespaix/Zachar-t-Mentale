@@ -115,3 +115,21 @@ describe('CardNode delete', () => {
     expect(screen.queryByRole('button', { name: /supprimer/i })).not.toBeInTheDocument()
   })
 })
+
+describe('CardNode drag handle', () => {
+  it('renders an enabled drag handle when unlocked', () => {
+    useCardsStore.getState().loadCards([testCard])
+    renderCardNode(testCard)
+    const handle = screen.getByTestId('drag-handle')
+    expect(handle).toHaveAttribute('aria-disabled', 'false')
+  })
+
+  it('greys out the drag handle when locked, without removing it', () => {
+    useCardsStore.getState().loadCards([testCard])
+    useCardsStore.getState().toggleLock()
+    renderCardNode(testCard)
+    const handle = screen.getByTestId('drag-handle')
+    expect(handle).toHaveAttribute('aria-disabled', 'true')
+    useCardsStore.getState().toggleLock() // reset for other tests
+  })
+})
