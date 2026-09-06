@@ -1,0 +1,21 @@
+[
+  { "id": "root", "level": 1, "title": "Développer et réduire une expression littérale", "parentId": null, "order": 0 },
+
+  { "id": "developper", "level": 2, "title": "Développer une expression", "definition": "Développer une expression littérale, c'est transformer un produit en une somme, grâce à la distributivité : k×(a+b) = k×a + k×b.", "parentId": "root", "order": 0 },
+  { "id": "developper-exemple", "level": 3, "title": "Exemple", "definition": "5(2x+3) = 5×2x + 5×3 = 10x + 15", "parentId": "developper", "order": 0 },
+
+  { "id": "reduire-produit", "level": 2, "title": "Réduire un produit", "definition": "Réduire un produit, c'est l'écrire avec le moins de facteurs possible.", "parentId": "root", "order": 1 },
+  { "id": "reduire-produit-exemples", "level": 3, "title": "Exemples", "definition": "5×x×2 = 10x   ;   3×x×x = 3x²", "parentId": "reduire-produit", "order": 0 },
+
+  { "id": "reduire-somme", "level": 2, "title": "Réduire une somme", "definition": "Réduire une somme, c'est l'écrire avec le moins de termes possible, en regroupant entre eux les termes de même famille (même lettre, même puissance).", "parentId": "root", "order": 2 },
+  { "id": "reduire-somme-exemple", "level": 3, "title": "Exemple", "definition": "5x + 3x² + 4x + 1 + 7x² = (5x+4x) + (3x²+7x²) + 1 = 9x + 10x² + 1", "parentId": "reduire-somme", "order": 0 },
+  { "id": "reduire-somme-piege", "level": 3, "title": "Piège : familles différentes", "definition": "3x + 5x² ne se réduit pas : x et x² ne sont pas de la même famille.", "parentId": "reduire-somme", "order": 1 },
+
+  { "id": "ne-pas-confondre", "level": 2, "title": "Ne pas confondre", "definition": "(3x)² et 3x+3x ne sont pas la même opération et n'ont pas le même résultat.", "parentId": "root", "order": 3 },
+  { "id": "ne-pas-confondre-exemples", "level": 3, "title": "Exemples", "definition": "(3x)² = 9x²   ;   3x + 3x = 6x", "parentId": "ne-pas-confondre", "order": 0 },
+
+  { "id": "parentheses-moins", "level": 2, "title": "Parenthèses précédées de −", "definition": "Multiplier par −1 revient à prendre l'opposé d'un nombre ; soustraire un nombre revient à ajouter son opposé. Donc soustraire une expression entre parenthèses revient à la multiplier par −1 puis à l'ajouter.", "parentId": "root", "order": 4 },
+  { "id": "parentheses-moins-exemple", "level": 3, "title": "Exemple", "definition": "A = 5 − (4x+5) = 5 + (−1)×(4x+5) = 5 − 4x − 5 = −4x", "parentId": "parentheses-moins", "order": 0 },
+  { "id": "parentheses-moins-methode-directe", "level": 3, "title": "Méthode directe : soustraire chaque terme", "definition": "Soustraire une somme revient à soustraire chacun de ses termes.", "parentId": "parentheses-moins", "order": 1 },
+  { "id": "parentheses-moins-methode-directe-exemple", "level": 4, "title": "Exemple", "definition": "A = 4 − (3x + (−5)) = 4 − 3x − (−5) = 4 − 3x + 5 = 9 − 3x", "parentId": "parentheses-moins-methode-directe", "order": 0 }
+]
