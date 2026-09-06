@@ -450,7 +450,14 @@ export function CardNode({ data }: CardNodeProps) {
         />
       )}
 
-      {definitionShown && card.definition && <p>{card.definition}</p>}
+      {definitionShown && card.definition && (
+        <p
+          onClick={startEditingDefinition}
+          style={{ cursor: locked ? 'default' : 'text', margin: 0 }}
+        >
+          {card.definition}
+        </p>
+      )}
 
       <Handle type="source" position={Position.Right} isConnectable={false} style={{ visibility: 'hidden' }} />
     </motion.div>

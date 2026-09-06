@@ -8,6 +8,15 @@ import type { Card } from '../types/card'
 
 const testCard: Card = { id: 'root', level: 1, title: 'Titre initial', parentId: null, order: 0 }
 
+const cardWithDefinition: Card = {
+  id: 'root',
+  level: 1,
+  title: 'Titre initial',
+  definition: 'Définition existante',
+  parentId: null,
+  order: 0,
+}
+
 type CardNodeTestProps = NodeProps & { data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean } }
 
 function cardNodeProps(card: Card, autoEdit = false, isReparentTarget = false) {
@@ -373,5 +382,28 @@ describe('CardNode footer', () => {
     renderCardNode(testCard)
 
     expect(screen.getByRole('button', { name: /ajouter une définition/i })).toBeDisabled()
+  })
+
+  it('opens the definition for editing when the shown definition text is clicked', async () => {
+    const user = userEvent.setup()
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    await user.click(screen.getByText('Définition existante'))
+
+    expect(screen.getByRole('textbox', { name: /définition/i })).toHaveValue('Définition existante')
+  })
+
+  it('does not open the definition for editing when the mind map is locked', async () => {
+    const user = userEvent.setup()
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    useCardsStore.setState({ locked: true })
+
+    await user.click(screen.getByText('Définition existante'))
+
+    expect(screen.queryByRole('textbox', { name: /définition/i })).not.toBeInTheDocument()
   })
 })
