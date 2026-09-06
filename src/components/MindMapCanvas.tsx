@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
   Controls,
-  Position,
+  useNodesState,
   useReactFlow,
   type Node,
   type Edge,
@@ -19,24 +19,13 @@ import { toCss } from '../colors/contrast'
 
 const nodeTypes = { card: CardNode }
 
-// CardNode (Task 14) renders no <Handle> sub-components yet, so React Flow has
-// no way to measure real connection points for it — `getEdgePosition` bails
-// out (returns null) whenever a node lacks `internals.handleBounds`, which
-// means edges silently fail to render for a Handle-less custom node type
-// regardless of test environment. Declaring static `handles` (a supported
-// public field on Node, see @xyflow/system's `NodeHandle`) gives React Flow
-// fixed, known connection points without needing an actual rendered <Handle>
-// element — appropriate here since edges are always derived from parent/child
-// data, never drawn by the user. Explicit width/height are required too:
-// once `handles` is set, edge/position math needs `measured.width` or
-// `width`, and jsdom's ResizeObserver/getBoundingClientRect never report a
-// non-zero size, so real measurement would never happen anyway.
-const NODE_WIDTH = 220
-const NODE_HEIGHT = 56
-const nodeHandles = [
-  { type: 'target' as const, position: Position.Left, x: 0, y: NODE_HEIGHT / 2 },
-  { type: 'source' as const, position: Position.Right, x: NODE_WIDTH, y: NODE_HEIGHT / 2 },
-]
+// Nominal card size, used only to offset `setCenter` onto the middle of a
+// freshly created card (its real size is not measured yet at that instant).
+// It is NOT declared on the nodes: CardNode renders real <Handle> elements, so
+// React Flow measures the true footprint, which is what fitView and the
+// minimap need.
+const NOMINAL_NODE_WIDTH = 200
+const NOMINAL_NODE_HEIGHT = 92
 
 // Distinguishes a genuine incremental create (addChild/addSibling — every
 // previously-known id is still present, plus one new one) from a wholesale
@@ -61,34 +50,44 @@ function MindMapCanvasInner() {
   const layout = useMemo(() => computeLayout(cards), [cards])
 
   // Track card ids seen so far so a newly created card (child or sibling)
-  // can be detected and the viewport panned/zoomed to center on it.
+  // can be detected: the viewport pans to it AND its title editor opens.
   const previousIds = useRef(new Set(cards.map(c => c.id)))
+  const [autoEditId, setAutoEditId] = useState<string | null>(null)
 
   useEffect(() => {
     const currentIds = new Set(cards.map(c => c.id))
     const createdId = findNewlyCreatedCardId(previousIds.current, currentIds)
     if (createdId) {
       const position = layout[createdId]
-      setCenter(position.x + NODE_WIDTH / 2, position.y + NODE_HEIGHT / 2, { zoom: 1, duration: 400 })
+      setCenter(position.x + NOMINAL_NODE_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
+        zoom: 1,
+        duration: 400,
+      })
     }
+    setAutoEditId(createdId ?? null)
     previousIds.current = currentIds
   }, [cards, layout, setCenter])
 
-  const nodes: Node[] = useMemo(
-    () =>
+  // React Flow owns the node array so a drag moves the card live under the
+  // cursor (`onNodesChange` applies position changes during the gesture).
+  // `cards` + `layout` stay the source of truth: this effect resyncs the
+  // canonical positions whenever the store changes — including right after
+  // `moveCardToIndex` fires on drag stop, which is what snaps the card back
+  // onto its grid row.
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+
+  useEffect(() => {
+    setNodes(
       cards.map(card => ({
         id: card.id,
         type: 'card',
         position: layout[card.id],
-        data: { card },
+        data: { card, autoEdit: card.id === autoEditId },
         draggable: !locked,
         dragHandle: '.card-drag-handle',
-        width: NODE_WIDTH,
-        height: NODE_HEIGHT,
-        handles: nodeHandles,
-      })),
-    [cards, layout, locked]
-  )
+      }))
+    )
+  }, [cards, layout, locked, autoEditId, setNodes])
 
   const edges: Edge[] = useMemo(
     () =>
@@ -118,7 +117,14 @@ function MindMapCanvasInner() {
   )
 
   return (
-    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodeDragStop={handleNodeDragStop} fitView>
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      onNodesChange={onNodesChange}
+      nodeTypes={nodeTypes}
+      onNodeDragStop={handleNodeDragStop}
+      fitView
+    >
       <Background />
       <Controls showInteractive={false} />
     </ReactFlow>

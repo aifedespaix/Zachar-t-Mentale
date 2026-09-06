@@ -5,22 +5,12 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * The 4 card level palettes live in src/colors/levelColors.ts, which CardNode
+ * reads directly through toCss(). They are deliberately NOT duplicated here as
+ * CSS custom properties: that copy was unused and would drift.
+ */
 :root {
-  --level-1-bg: oklch(0.96 0.03 25);
-  --level-1-border: oklch(0.55 0.18 25);
-  --level-1-text: oklch(0.32 0.15 25);
-
-  --level-2-bg: oklch(0.96 0.03 55);
-  --level-2-border: oklch(0.6 0.16 55);
-  --level-2-text: oklch(0.34 0.14 55);
-
-  --level-3-bg: oklch(0.96 0.03 235);
-  --level-3-border: oklch(0.55 0.14 235);
-  --level-3-text: oklch(0.32 0.13 235);
-
-  --level-4-bg: oklch(0.96 0.03 95);
-  --level-4-border: oklch(0.62 0.14 95);
-  --level-4-text: oklch(0.3 0.12 95);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

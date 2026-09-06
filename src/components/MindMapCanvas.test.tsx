@@ -1,4 +1,4 @@
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, within } from '@testing-library/react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { MindMapCanvas, findNewlyCreatedCardId } from './MindMapCanvas'
@@ -56,6 +56,42 @@ describe('MindMapCanvas auto-focus', () => {
       .history.present.find(c => c.parentId === root.id)!
     expect(screen.getByTestId(`card-${newCard.id}`)).toBeInTheDocument()
     expect(mockSetCenter).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens the new card’s title editor as well as centering on it', async () => {
+    const user = userEvent.setup()
+    useCardsStore.getState().loadCards([root])
+    render(<MindMapCanvas />)
+
+    await user.click(screen.getByRole('button', { name: /ajouter un enfant/i }))
+
+    const newCard = useCardsStore.getState().history.present.find(c => c.parentId === root.id)!
+    const titleField = screen.getByRole('textbox', { name: /titre/i })
+    expect(titleField).toHaveValue(newCard.title)
+  })
+
+  it('opens the title editor of a new SIBLING too', async () => {
+    const user = userEvent.setup()
+    useCardsStore.getState().loadCards([root, child])
+    render(<MindMapCanvas />)
+
+    const childCard = within(screen.getByTestId('card-child'))
+    await user.click(childCard.getByRole('button', { name: /ajouter en dessous/i }))
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).toBeInTheDocument()
+  })
+
+  it('does NOT open a title editor when loadCards replaces the card set (a file load)', () => {
+    useCardsStore.getState().loadCards([root])
+    render(<MindMapCanvas />)
+
+    const loadedRoot: Card = { id: 'file-root', level: 1, title: 'Depuis le fichier', parentId: null, order: 0 }
+    const loadedChild: Card = { id: 'file-child', level: 2, title: 'Enfant', parentId: 'file-root', order: 0 }
+    act(() => {
+      useCardsStore.getState().loadCards([loadedRoot, loadedChild])
+    })
+
+    expect(screen.queryByRole('textbox', { name: /titre/i })).not.toBeInTheDocument()
   })
 
   it('does NOT auto-focus when loadCards wholesale-replaces the card set (e.g. a file load on mount)', () => {
