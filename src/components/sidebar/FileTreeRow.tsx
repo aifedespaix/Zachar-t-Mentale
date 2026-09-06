@@ -1,7 +1,26 @@
-import { Folder, FolderOpen, FileJson, File, ChevronRight, ChevronDown, X } from 'lucide-react'
+// src/components/sidebar/FileTreeRow.tsx
+import { useState } from 'react'
+import {
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  FileJson,
+  FilePlus,
+  File,
+  ChevronRight,
+  ChevronDown,
+  Pencil,
+  Trash2,
+  X,
+  type LucideIcon,
+} from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import { useWorkspaceStore } from '../../state/useWorkspaceStore'
+import { createMindMapFile, createSubfolder, renamePath, deletePath } from '../../persistence/fileOps'
+import { countDescendants } from '../../persistence/fileTree'
 import { Button } from '../ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 
 interface FileTreeRowProps {
   node: FileTreeNode
@@ -11,12 +30,103 @@ interface FileTreeRowProps {
   onRemoveRoot?: (path: string) => void
 }
 
+function ActionButton({ label, icon: Icon, onClick }: { label: string; icon: LucideIcon; onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon-sm" aria-label={label} onClick={onClick}>
+          <Icon size={14} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function ConfirmDeleteDialog({
+  title,
+  onCancel,
+  onConfirm,
+}: {
+  title: string
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <Dialog open onOpenChange={onCancel}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Annuler
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
+            Confirmer
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** `node.path` is always `<parent>/<node.name>` (built that way by `scanFolder`/`fileOps`), so the parent directory can be recovered without threading an extra prop through every level of recursion. */
+function parentFolderPath(node: FileTreeNode): string {
+  const withoutName = node.path.slice(0, node.path.length - node.name.length)
+  return withoutName.replace(/[\\/]+$/, '')
+}
+
 export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveRoot }: FileTreeRowProps) {
   const expandedPaths = useWorkspaceStore(s => s.expandedPaths)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const toggleExpanded = useWorkspaceStore(s => s.toggleExpanded)
+  const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
+  const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
+
+  const [creatingKind, setCreatingKind] = useState<'mindmap' | 'folder' | null>(null)
+  const [draftCreateName, setDraftCreateName] = useState('')
+  const [renaming, setRenaming] = useState(false)
+  const [draftRenameName, setDraftRenameName] = useState(node.name)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
 
   const indent = { paddingLeft: 8 + depth * 16 }
+
+  async function submitCreate() {
+    const name = draftCreateName.trim()
+    setCreatingKind(null)
+    if (!name) return
+    if (creatingKind === 'mindmap') {
+      const path = await createMindMapFile(node.path, name)
+      await refreshFolder(node.path)
+      onOpenFile(path)
+    } else if (creatingKind === 'folder') {
+      await createSubfolder(node.path, name)
+      await refreshFolder(node.path)
+    }
+    setDraftCreateName('')
+  }
+
+  async function submitRename() {
+    const name = draftRenameName.trim()
+    setRenaming(false)
+    if (!name || name === node.name) return
+    const parentPath = parentFolderPath(node)
+    const separator = node.path.includes('\\') ? '\\' : '/'
+    const newPath = `${parentPath}${separator}${name}`
+    await renamePath(node.path, newPath)
+    if (node.path === currentFilePath) setCurrentFile(newPath)
+    await refreshFolder(parentPath)
+  }
+
+  async function confirmDelete() {
+    setConfirmDeleteOpen(false)
+    const parentPath = parentFolderPath(node)
+    const separator = node.path.includes('\\') ? '\\' : '/'
+    await deletePath(node.path, node.type === 'folder')
+    if (currentFilePath === node.path || currentFilePath?.startsWith(node.path + separator)) setCurrentFile(null)
+    await refreshFolder(parentPath)
+  }
 
   if (node.type === 'folder') {
     const isExpanded = expandedPaths.has(node.path)
@@ -43,17 +153,76 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
             {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
             <span>{node.name}</span>
           </button>
-          {isRoot && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Retirer ${node.name} de la liste`}
-              onClick={() => onRemoveRoot?.(node.path)}
-            >
-              <X size={14} />
-            </Button>
-          )}
+          <TooltipProvider>
+            <ActionButton
+              label="Nouvelle carte mentale"
+              icon={FilePlus}
+              onClick={() => {
+                setCreatingKind('mindmap')
+                setDraftCreateName('')
+              }}
+            />
+            <ActionButton
+              label="Nouveau sous-dossier"
+              icon={FolderPlus}
+              onClick={() => {
+                setCreatingKind('folder')
+                setDraftCreateName('')
+              }}
+            />
+            {!isRoot && <ActionButton label="Renommer" icon={Pencil} onClick={() => setRenaming(true)} />}
+            {!isRoot && <ActionButton label="Supprimer" icon={Trash2} onClick={() => setConfirmDeleteOpen(true)} />}
+            {isRoot && (
+              <ActionButton
+                label={`Retirer ${node.name} de la liste`}
+                icon={X}
+                onClick={() => onRemoveRoot?.(node.path)}
+              />
+            )}
+          </TooltipProvider>
         </div>
+
+        {renaming && (
+          <input
+            autoFocus
+            aria-label={`Renommer ${node.name}`}
+            value={draftRenameName}
+            onChange={e => setDraftRenameName(e.target.value)}
+            onBlur={submitRename}
+            onKeyDown={e => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+              if (e.key === 'Escape') {
+                setDraftRenameName(node.name)
+                setRenaming(false)
+              }
+            }}
+            style={{ ...indent, display: 'block', width: '100%' }}
+          />
+        )}
+
+        {creatingKind && (
+          <input
+            autoFocus
+            aria-label={creatingKind === 'mindmap' ? 'Nom de la nouvelle carte mentale' : 'Nom du nouveau dossier'}
+            value={draftCreateName}
+            onChange={e => setDraftCreateName(e.target.value)}
+            onBlur={submitCreate}
+            onKeyDown={e => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+              if (e.key === 'Escape') setCreatingKind(null)
+            }}
+            style={{ paddingLeft: 8 + (depth + 1) * 16, display: 'block', width: '100%' }}
+          />
+        )}
+
+        {confirmDeleteOpen && (
+          <ConfirmDeleteDialog
+            title={`Supprimer le dossier « ${node.name} » et son contenu (${countDescendants(node)} éléments) ?`}
+            onCancel={() => setConfirmDeleteOpen(false)}
+            onConfirm={confirmDelete}
+          />
+        )}
+
         {isExpanded &&
           node.children.map(child => <FileTreeRow key={child.path} node={child} depth={depth + 1} onOpenFile={onOpenFile} />)}
       </div>
@@ -63,24 +232,56 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
   if (node.type === 'mindmap') {
     const isActive = node.path === currentFilePath
     return (
-      <button
-        type="button"
-        onClick={() => onOpenFile(node.path)}
-        style={{
-          ...indent,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          width: '100%',
-          background: isActive ? 'var(--muted)' : 'transparent',
-          border: 'none',
-          textAlign: 'left',
-          cursor: 'pointer',
-        }}
-      >
-        <FileJson size={16} />
-        <span>{node.name}</span>
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        {renaming ? (
+          <input
+            autoFocus
+            aria-label={`Renommer ${node.name}`}
+            value={draftRenameName}
+            onChange={e => setDraftRenameName(e.target.value)}
+            onBlur={submitRename}
+            onKeyDown={e => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+              if (e.key === 'Escape') {
+                setDraftRenameName(node.name)
+                setRenaming(false)
+              }
+            }}
+            style={{ ...indent, display: 'block', flex: 1 }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => onOpenFile(node.path)}
+            style={{
+              ...indent,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              flex: 1,
+              background: isActive ? 'var(--muted)' : 'transparent',
+              border: 'none',
+              textAlign: 'left',
+              cursor: 'pointer',
+            }}
+          >
+            <FileJson size={16} />
+            <span>{node.name}</span>
+          </button>
+        )}
+        <TooltipProvider>
+          <ActionButton label="Renommer" icon={Pencil} onClick={() => setRenaming(true)} />
+          <ActionButton label="Supprimer" icon={Trash2} onClick={() => setConfirmDeleteOpen(true)} />
+        </TooltipProvider>
+
+        {confirmDeleteOpen && (
+          <ConfirmDeleteDialog
+            title={`Supprimer le fichier « ${node.name} » ?`}
+            onCancel={() => setConfirmDeleteOpen(false)}
+            onConfirm={confirmDelete}
+          />
+        )}
+      </div>
     )
   }
 

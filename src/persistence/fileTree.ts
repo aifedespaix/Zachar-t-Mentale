@@ -26,3 +26,8 @@ function sortTree(nodes: FileTreeNode[]): FileTreeNode[] {
     return a.name.localeCompare(b.name)
   })
 }
+
+export function countDescendants(node: FileTreeNode): number {
+  if (node.type !== 'folder') return 0
+  return node.children.reduce((total, child) => total + 1 + countDescendants(child), 0)
+}

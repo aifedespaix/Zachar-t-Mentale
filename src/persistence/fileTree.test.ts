@@ -51,3 +51,29 @@ describe('scanFolder', () => {
     expect(tree[0].type).toBe('mindmap')
   })
 })
+
+import { countDescendants } from './fileTree'
+
+describe('countDescendants', () => {
+  it('returns 0 for a file node', () => {
+    expect(countDescendants({ type: 'mindmap', name: 'a.json', path: '/a.json' })).toBe(0)
+  })
+
+  it('counts every nested file and folder, not just direct children', () => {
+    const tree = {
+      type: 'folder' as const,
+      name: 'chimie',
+      path: '/chimie',
+      children: [
+        { type: 'mindmap' as const, name: 'atomes.json', path: '/chimie/atomes.json' },
+        {
+          type: 'folder' as const,
+          name: 'td',
+          path: '/chimie/td',
+          children: [{ type: 'mindmap' as const, name: 'td1.json', path: '/chimie/td/td1.json' }],
+        },
+      ],
+    }
+    expect(countDescendants(tree)).toBe(3)
+  })
+})
