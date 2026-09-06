@@ -10,9 +10,12 @@ type CardNodeProps = NodeProps & { data: { card: Card } }
 export function CardNode({ data }: CardNodeProps) {
   const { card } = data
   const updateTitle = useCardsStore(s => s.updateTitle)
+  const addChild = useCardsStore(s => s.addChild)
+  const addSibling = useCardsStore(s => s.addSibling)
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState(card.title)
   const colors = levelColors[card.level]
+  const childColors = card.level < 4 ? levelColors[(card.level + 1) as 1 | 2 | 3 | 4] : null
 
   function commitTitle() {
     updateTitle(card.id, draftTitle.trim() || card.title)
@@ -36,8 +39,19 @@ export function CardNode({ data }: CardNodeProps) {
         borderRadius: 8,
         padding: 12,
         minWidth: 180,
+        position: 'relative',
       }}
     >
+      {card.parentId !== null && (
+        <button
+          aria-label="Ajouter au-dessus"
+          style={{ color: toCss(colors.border) }}
+          onClick={() => addSibling(card.id, 'above')}
+        >
+          +
+        </button>
+      )}
+
       {editing ? (
         <input
           autoFocus
@@ -51,6 +65,26 @@ export function CardNode({ data }: CardNodeProps) {
         />
       ) : (
         <span onClick={() => setEditing(true)}>{card.title}</span>
+      )}
+
+      {card.parentId !== null && (
+        <button
+          aria-label="Ajouter en dessous"
+          style={{ color: toCss(colors.border) }}
+          onClick={() => addSibling(card.id, 'below')}
+        >
+          +
+        </button>
+      )}
+
+      {childColors && (
+        <button
+          aria-label="Ajouter un enfant"
+          style={{ color: toCss(childColors.border) }}
+          onClick={() => addChild(card.id)}
+        >
+          {'->'}
+        </button>
       )}
     </div>
   )
