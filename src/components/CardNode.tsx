@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Plus, ArrowRight, X, GripVertical, AlignLeft, FlipHorizontal2, type LucideIcon } from 'lucide-react'
+import { Plus, ArrowRight, X, Check, GripVertical, AlignLeft, FlipHorizontal2, type LucideIcon } from 'lucide-react'
 import type { Card } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
+import { useQuizStore } from '../state/useQuizStore'
 import { levelColors } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
@@ -93,6 +94,8 @@ export function CardNode({ data }: CardNodeProps) {
   const [quizRevealed, setQuizRevealed] = useState(false)
   const isRecallPending = quiz?.type === 'recall' && quiz.result === 'unanswered'
   const displayMasked = isRecallPending && !quizRevealed
+  const answerRecall = useQuizStore(s => s.answerRecall)
+  const resultBorderColor = quiz?.result === 'correct' ? '#16a34a' : quiz?.result === 'incorrect' ? '#dc2626' : undefined
 
   function handleReveal() {
     setQuizRevealed(true)
@@ -221,9 +224,9 @@ export function CardNode({ data }: CardNodeProps) {
       transition={{ duration: 0.4 }}
       style={{
         background: toCss(colors.bg),
-        borderColor: toCss(colors.border),
         color: toCss(colors.text),
         border: '2px solid',
+        borderColor: resultBorderColor ?? toCss(colors.border),
         borderRadius: 8,
         // Room for the pinned edge buttons: the drag handle and the delete `x`
         // sit in the top corners, the `->` on the right edge.
@@ -321,6 +324,27 @@ export function CardNode({ data }: CardNodeProps) {
           position={{ top: '-0.6rem', right: '-0.6rem' }}
         />
       </span>
+
+      {isRecallPending && quizRevealed && (
+        <>
+          <EdgeButton
+            label="Je savais"
+            icon={Check}
+            color="#16a34a"
+            disabled={false}
+            onActivate={() => answerRecall(card.id, true)}
+            position={{ top: '-0.6rem', right: '-0.6rem' }}
+          />
+          <EdgeButton
+            label="Je ne savais pas"
+            icon={X}
+            color="#dc2626"
+            disabled={false}
+            onActivate={() => answerRecall(card.id, false)}
+            position={{ top: '-0.6rem', left: '-0.6rem' }}
+          />
+        </>
+      )}
 
       {/*
         Always an <input>, never swapped for a <span>: the two elements

@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
 import { CardNode } from './CardNode'
 import { useCardsStore, createCardsStore } from '../state/useCardsStore'
+import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 
@@ -287,7 +288,18 @@ describe('CardNode drag handle', () => {
 })
 
 describe('CardNode footer', () => {
-  beforeEach(() => resetStore([testCard]))
+  beforeEach(() => {
+    resetStore([testCard])
+    const pristineQuiz = createQuizStore().getState()
+    useQuizStore.setState({
+      active: pristineQuiz.active,
+      showSummary: pristineQuiz.showSummary,
+      config: pristineQuiz.config,
+      questions: pristineQuiz.questions,
+      results: pristineQuiz.results,
+      wasLockedBeforeQuiz: pristineQuiz.wasLockedBeforeQuiz,
+    })
+  })
 
   it('shows an "add definition" affordance when there is none yet', () => {
     renderCardNode(testCard)
@@ -408,6 +420,49 @@ describe('CardNode footer', () => {
     renderCardNode(testCard)
 
     expect(screen.getByRole('button', { name: /ajouter une définition/i })).toBeDisabled()
+  })
+
+  it('shows self-grade buttons once a revealed recall question is unanswered', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+
+    expect(screen.getByRole('button', { name: /je savais/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /je ne savais pas/i })).toBeInTheDocument()
+  })
+
+  it('clicking "Je savais" records a correct answer in the quiz store', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+
+    await user.click(screen.getByRole('button', { name: /je savais/i }))
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
+  })
+
+  it('clicking "Je ne savais pas" records an incorrect answer in the quiz store', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+
+    await user.click(screen.getByRole('button', { name: /je ne savais pas/i }))
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('incorrect')
+  })
+
+  it('shows a green border and no grading buttons once graded correct', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'correct' })
+
+    expect(screen.queryByRole('button', { name: /je savais/i })).not.toBeInTheDocument()
+    expect(screen.getByTestId(`card-${testCard.id}`)).toHaveStyle({ borderColor: '#16a34a' })
+  })
+
+  it('shows a red border once graded incorrect', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'incorrect' })
+
+    expect(screen.getByTestId(`card-${testCard.id}`)).toHaveStyle({ borderColor: '#dc2626' })
   })
 
   it('opens the definition for editing when the shown definition text is clicked', async () => {
