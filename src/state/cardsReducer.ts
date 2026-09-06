@@ -88,3 +88,19 @@ export function deleteCard(cards: Card[], cardId: string): Card[] {
   const others = remaining.filter(c => c.parentId !== target.parentId)
   return [...others, ...siblings]
 }
+
+export function moveCardToIndex(cards: Card[], cardId: string, newIndex: number): Card[] {
+  const target = cards.find(c => c.id === cardId)
+  if (!target) throw new Error(`moveCardToIndex: card ${cardId} not found`)
+
+  const group = cards.filter(c => c.parentId === target.parentId).sort((a, b) => a.order - b.order)
+  const currentIndex = group.findIndex(c => c.id === cardId)
+  const clampedIndex = Math.max(0, Math.min(newIndex, group.length - 1))
+
+  const [moved] = group.splice(currentIndex, 1)
+  group.splice(clampedIndex, 0, moved)
+  const reindexed = group.map((c, i) => ({ ...c, order: i }))
+
+  const others = cards.filter(c => c.parentId !== target.parentId)
+  return [...others, ...reindexed]
+}

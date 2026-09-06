@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createRootCard, addChild, addSibling, updateTitle, updateDefinition, countDescendants, deleteCard } from './cardsReducer'
+import { createRootCard, addChild, addSibling, updateTitle, updateDefinition, countDescendants, deleteCard, moveCardToIndex } from './cardsReducer'
 import type { Card } from '../types/card'
 
 describe('createRootCard', () => {
@@ -103,5 +103,27 @@ describe('deleteCard', () => {
   it('throws when trying to delete the root card', () => {
     const root = createRootCard()
     expect(() => deleteCard([root], root.id)).toThrow()
+  })
+})
+
+describe('moveCardToIndex', () => {
+  it('moves a card to a new index among its siblings and reindexes order', () => {
+    const root = createRootCard()
+    const { cards: c1, newCardId: first } = addChild([root], root.id)
+    const { cards: c2, newCardId: second } = addChild(c1, root.id)
+    const { cards: c3, newCardId: third } = addChild(c2, root.id)
+
+    const result = moveCardToIndex(c3, first, 2)
+    const siblings = result.filter(c => c.parentId === root.id).sort((a, b) => a.order - b.order)
+    expect(siblings.map(c => c.id)).toEqual([second, third, first])
+  })
+
+  it('clamps out-of-range indexes to the valid range', () => {
+    const root = createRootCard()
+    const { cards: c1, newCardId: first } = addChild([root], root.id)
+    const { cards: c2, newCardId: second } = addChild(c1, root.id)
+    const result = moveCardToIndex(c2, first, 999)
+    const siblings = result.filter(c => c.parentId === root.id).sort((a, b) => a.order - b.order)
+    expect(siblings.map(c => c.id)).toEqual([second, first])
   })
 })
