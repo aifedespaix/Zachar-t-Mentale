@@ -10,7 +10,10 @@ const cardsV1: Card[] = [{ id: 'root', level: 1, title: 'v1', parentId: null, or
 const cardsV2: Card[] = [{ id: 'root', level: 1, title: 'v2', parentId: null, order: 0 }]
 
 describe('useAutosave', () => {
-  beforeEach(() => vi.useFakeTimers())
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(saveMindMap).mockClear()
+  })
   afterEach(() => vi.useRealTimers())
 
   it('debounces saves and only writes the latest value', () => {
@@ -25,5 +28,13 @@ describe('useAutosave', () => {
     vi.advanceTimersByTime(1)
     expect(saveMindMap).toHaveBeenCalledTimes(1)
     expect(saveMindMap).toHaveBeenCalledWith('/fake/path.json', cardsV2)
+  })
+
+  it('does not save if unmounted before the debounce delay elapses', () => {
+    const { unmount } = renderHook(() => useAutosave('/fake/path.json', cardsV1, 500))
+    unmount()
+
+    vi.advanceTimersByTime(500)
+    expect(saveMindMap).not.toHaveBeenCalled()
   })
 })
