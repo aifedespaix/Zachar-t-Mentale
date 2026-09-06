@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
 import { CardNode } from './CardNode'
 import { useCardsStore, createCardsStore } from '../state/useCardsStore'
@@ -486,5 +486,41 @@ describe('CardNode footer', () => {
     await user.click(screen.getByText('Définition existante'))
 
     expect(screen.queryByRole('textbox', { name: /définition/i })).not.toBeInTheDocument()
+  })
+
+  it('opens the QCM dialog when a pending qcm question\'s "Répondre" button is clicked', async () => {
+    const user = userEvent.setup()
+    const cardWithDef: Card = { ...testCard, definition: 'Bonne définition' }
+    resetStore([cardWithDef])
+    renderCardNode(cardWithDef, false, false, {
+      type: 'qcm',
+      result: 'unanswered',
+      distractorDefinitions: ['Fausse A', 'Fausse B'],
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+
+    expect(screen.getByRole('heading', { name: cardWithDef.title })).toBeInTheDocument()
+    expect(screen.getByText('Bonne définition')).toBeInTheDocument()
+    expect(screen.getByText('Fausse A')).toBeInTheDocument()
+  })
+
+  it('records the qcm answer in the quiz store once a choice is made', async () => {
+    vi.useFakeTimers()
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const cardWithDef: Card = { ...testCard, definition: 'Bonne définition' }
+    resetStore([cardWithDef])
+    renderCardNode(cardWithDef, false, false, {
+      type: 'qcm',
+      result: 'unanswered',
+      distractorDefinitions: ['Fausse A'],
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+    await user.click(screen.getByText('Bonne définition'))
+    vi.advanceTimersByTime(700)
+
+    expect(useQuizStore.getState().results[cardWithDef.id]).toBe('correct')
+    vi.useRealTimers()
   })
 })
