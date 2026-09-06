@@ -4,6 +4,8 @@ import type { Card } from '../types/card'
 import { useCardsStore } from '../state/useCardsStore'
 import { levelColors } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
+import { Button } from './ui/button'
 
 type CardNodeProps = NodeProps & { data: { card: Card } }
 
@@ -12,8 +14,11 @@ export function CardNode({ data }: CardNodeProps) {
   const updateTitle = useCardsStore(s => s.updateTitle)
   const addChild = useCardsStore(s => s.addChild)
   const addSibling = useCardsStore(s => s.addSibling)
+  const deleteCard = useCardsStore(s => s.deleteCard)
+  const descendantCount = useCardsStore(s => s.descendantCount)
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState(card.title)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const colors = levelColors[card.level]
   const childColors = card.level < 4 ? levelColors[(card.level + 1) as 1 | 2 | 3 | 4] : null
 
@@ -25,6 +30,14 @@ export function CardNode({ data }: CardNodeProps) {
   function cancelTitle() {
     setDraftTitle(card.title)
     setEditing(false)
+  }
+
+  function handleDeleteClick() {
+    if (descendantCount(card.id) === 0) {
+      deleteCard(card.id)
+    } else {
+      setConfirmOpen(true)
+    }
   }
 
   return (
@@ -86,6 +99,36 @@ export function CardNode({ data }: CardNodeProps) {
           {'->'}
         </button>
       )}
+
+      {card.parentId !== null && (
+        <button aria-label="Supprimer" style={{ color: toCss(colors.border) }} onClick={handleDeleteClick}>
+          ×
+        </button>
+      )}
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Supprimer cette card et ses {descendantCount(card.id)} enfants ?
+            </DialogTitle>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+              Annuler
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                deleteCard(card.id)
+                setConfirmOpen(false)
+              }}
+            >
+              Confirmer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -83,3 +83,35 @@ describe('CardNode structural buttons', () => {
     expect(screen.queryByRole('button', { name: /ajouter un enfant/i })).not.toBeInTheDocument()
   })
 })
+
+describe('CardNode delete', () => {
+  it('deletes immediately when the card has no children', async () => {
+    const user = userEvent.setup()
+    const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
+    useCardsStore.getState().loadCards([testCard, child])
+    render(<CardNode {...({ id: child.id, data: { card: child } } as unknown as NodeProps & { data: { card: Card } })} />)
+
+    await user.click(screen.getByRole('button', { name: /supprimer/i }))
+    expect(useCardsStore.getState().history.present).toHaveLength(1)
+  })
+
+  it('shows a confirmation dialog before deleting a card with children', async () => {
+    const user = userEvent.setup()
+    const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
+    const grandchild: Card = { id: 'grandchild', level: 3, title: 'Petit-enfant', parentId: 'child', order: 0 }
+    useCardsStore.getState().loadCards([testCard, child, grandchild])
+    render(<CardNode {...({ id: child.id, data: { card: child } } as unknown as NodeProps & { data: { card: Card } })} />)
+
+    await user.click(screen.getByRole('button', { name: /supprimer/i }))
+    expect(screen.getByText(/supprimer cette card et ses 1 enfants/i)).toBeInTheDocument()
+    expect(useCardsStore.getState().history.present).toHaveLength(3)
+
+    await user.click(screen.getByRole('button', { name: /confirmer/i }))
+    expect(useCardsStore.getState().history.present).toHaveLength(1)
+  })
+
+  it('does not render a delete button on the root card', () => {
+    renderCardNode(testCard)
+    expect(screen.queryByRole('button', { name: /supprimer/i })).not.toBeInTheDocument()
+  })
+})
