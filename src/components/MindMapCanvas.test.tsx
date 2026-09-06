@@ -28,8 +28,8 @@ describe('MindMapCanvas', () => {
 
   it('renders one CardNode per card', () => {
     render(<MindMapCanvas />)
-    expect(screen.getByText('Racine')).toBeInTheDocument()
-    expect(screen.getByText('Enfant')).toBeInTheDocument()
+    const titles = screen.getAllByRole('textbox', { name: /titre/i }).map(el => (el as HTMLInputElement).value)
+    expect(titles).toEqual(expect.arrayContaining(['Racine', 'Enfant']))
   })
 
   it('renders one edge for the parent-child link', () => {
@@ -66,8 +66,9 @@ describe('MindMapCanvas auto-focus', () => {
     await user.click(screen.getByRole('button', { name: /ajouter un enfant/i }))
 
     const newCard = useCardsStore.getState().history.present.find(c => c.parentId === root.id)!
-    const titleField = screen.getByRole('textbox', { name: /titre/i })
+    const titleField = within(screen.getByTestId(`card-${newCard.id}`)).getByRole('textbox', { name: /titre/i })
     expect(titleField).toHaveValue(newCard.title)
+    expect(titleField).toHaveFocus()
   })
 
   it('opens the title editor of a new SIBLING too', async () => {
@@ -78,10 +79,11 @@ describe('MindMapCanvas auto-focus', () => {
     const childCard = within(screen.getByTestId('card-child'))
     await user.click(childCard.getByRole('button', { name: /ajouter en dessous/i }))
 
-    expect(screen.getByRole('textbox', { name: /titre/i })).toBeInTheDocument()
+    const newCard = useCardsStore.getState().history.present.find(c => c.parentId === child.parentId && c.id !== child.id)!
+    expect(within(screen.getByTestId(`card-${newCard.id}`)).getByRole('textbox', { name: /titre/i })).toHaveFocus()
   })
 
-  it('does NOT open a title editor when loadCards replaces the card set (a file load)', () => {
+  it('does NOT focus a title field when loadCards replaces the card set (a file load)', () => {
     useCardsStore.getState().loadCards([root])
     render(<MindMapCanvas />)
 
@@ -91,7 +93,9 @@ describe('MindMapCanvas auto-focus', () => {
       useCardsStore.getState().loadCards([loadedRoot, loadedChild])
     })
 
-    expect(screen.queryByRole('textbox', { name: /titre/i })).not.toBeInTheDocument()
+    for (const field of screen.getAllByRole('textbox', { name: /titre/i })) {
+      expect(field).not.toHaveFocus()
+    }
   })
 
   it('does NOT auto-focus when loadCards wholesale-replaces the card set (e.g. a file load on mount)', () => {
@@ -104,7 +108,7 @@ describe('MindMapCanvas auto-focus', () => {
       useCardsStore.getState().loadCards([loadedRoot])
     })
 
-    expect(screen.getByText('Racine chargée')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Racine chargée')
     expect(mockSetCenter).not.toHaveBeenCalled()
   })
 })

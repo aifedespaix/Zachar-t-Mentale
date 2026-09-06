@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createRootCard, addChild, addSibling, updateTitle, updateDefinition, countDescendants, deleteCard, moveCardToIndex } from './cardsReducer'
+import { createRootCard, addChild, addSibling, updateTitle, updateDefinition, countDescendants, hasChildren, deleteCard, moveCardToIndex } from './cardsReducer'
 import type { Card } from '../types/card'
 
 describe('createRootCard', () => {
@@ -76,6 +76,19 @@ describe('countDescendants', () => {
     const { cards: withGrandchild } = addChild(withChild, childId)
     expect(countDescendants(withGrandchild, root.id)).toBe(2)
     expect(countDescendants(withGrandchild, childId)).toBe(1)
+  })
+})
+
+describe('hasChildren', () => {
+  it('is false for a card with no children', () => {
+    const root = createRootCard()
+    expect(hasChildren([root], root.id)).toBe(false)
+  })
+
+  it('is true for a card with at least one child', () => {
+    const root = createRootCard()
+    const { cards } = addChild([root], root.id)
+    expect(hasChildren(cards, root.id)).toBe(true)
   })
 })
 

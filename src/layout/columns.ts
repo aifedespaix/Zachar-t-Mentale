@@ -1,7 +1,11 @@
 import type { Card } from '../types/card'
 
 export const COLUMN_WIDTH = 320
-export const ROW_HEIGHT = 120
+// A card's actual height (~100px unfolded) plus the sibling "+" buttons
+// CardNode pins straddling its top/bottom edges (each pokes ~14px past the
+// border) leaves almost no clearance at 120: two stacked siblings' buttons
+// visibly overlapped. 168 keeps a clear gap between them even so.
+export const ROW_HEIGHT = 168
 
 export interface Position {
   x: number

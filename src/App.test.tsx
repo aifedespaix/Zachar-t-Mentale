@@ -59,7 +59,7 @@ describe('App autosave gating', () => {
     vi.mocked(loadMindMap).mockResolvedValue(savedCards)
     render(<App />)
     await settle()
-    expect(screen.getByText('Chapitre enregistré')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Chapitre enregistré')
     expect(saveMindMap).toHaveBeenCalledWith('demo-chapitre.mmap.json', savedCards)
   })
 })

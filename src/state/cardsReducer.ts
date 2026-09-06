@@ -56,6 +56,10 @@ export function updateDefinition(cards: Card[], cardId: string, definition: stri
   return cards.map(c => (c.id === cardId ? { ...c, definition } : c))
 }
 
+export function hasChildren(cards: Card[], cardId: string): boolean {
+  return cards.some(c => c.parentId === cardId)
+}
+
 export function countDescendants(cards: Card[], cardId: string): number {
   const children = cards.filter(c => c.parentId === cardId)
   return children.reduce((sum, child) => sum + 1 + countDescendants(cards, child.id), 0)

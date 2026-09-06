@@ -10,6 +10,7 @@ import {
   deleteCard as deleteCardOp,
   moveCardToIndex as moveCardToIndexOp,
   countDescendants,
+  hasChildren as hasChildrenOp,
 } from './cardsReducer'
 
 interface CardsState {
@@ -21,6 +22,7 @@ interface CardsState {
   updateDefinition: (id: string, definition: string | undefined) => void
   deleteCard: (id: string) => void
   descendantCount: (id: string) => number
+  hasChildren: (id: string) => boolean
   moveCardToIndex: (id: string, newIndex: number) => void
   undo: () => void
   redo: () => void
@@ -57,6 +59,7 @@ export function createCardsStore(): CardsStore {
       set(state => ({ history: pushState(state.history, next) }))
     },
     descendantCount: id => countDescendants(get().history.present, id),
+    hasChildren: id => hasChildrenOp(get().history.present, id),
     moveCardToIndex: (id, newIndex) => {
       const next = moveCardToIndexOp(get().history.present, id, newIndex)
       set(state => ({ history: pushState(state.history, next) }))

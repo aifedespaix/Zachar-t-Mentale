@@ -15,10 +15,12 @@ export const levelColors: Record<CardLevel, LevelColor> = {
     text: { l: 0.32, c: 0.15, h: 25 },
   },
   2: {
-    // Orange — Sous-titre
-    bg: { l: 0.96, c: 0.03, h: 55 },
-    border: { l: 0.6, c: 0.16, h: 55 },
-    text: { l: 0.34, c: 0.14, h: 55 },
+    // Orange — Sous-titre. Hue pushed from 55° to 70° and chroma raised so it
+    // reads apart from both rouge and jaune at a glance (they used to sit
+    // within 40° of each other).
+    bg: { l: 0.96, c: 0.03, h: 70 },
+    border: { l: 0.6, c: 0.19, h: 70 },
+    text: { l: 0.34, c: 0.16, h: 70 },
   },
   3: {
     // Bleu — Sous-partie
@@ -27,9 +29,10 @@ export const levelColors: Record<CardLevel, LevelColor> = {
     text: { l: 0.32, c: 0.13, h: 235 },
   },
   4: {
-    // Jaune — Info
-    bg: { l: 0.96, c: 0.03, h: 95 },
-    border: { l: 0.62, c: 0.14, h: 95 },
-    text: { l: 0.3, c: 0.12, h: 95 },
+    // Jaune — Info. Hue pushed from 95° to 105° and chroma raised, same
+    // reason as orange above.
+    bg: { l: 0.96, c: 0.03, h: 105 },
+    border: { l: 0.62, c: 0.17, h: 105 },
+    text: { l: 0.3, c: 0.15, h: 105 },
   },
 }

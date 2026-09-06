@@ -133,3 +133,34 @@
     @apply font-sans;
   }
 }
+
+/*
+ * React Flow positions every node with an inline `transform: translate(...)`
+ * on this wrapper. Animating THAT transform is what makes a reorder, an
+ * add/delete reflow, or a freshly spawned card (see MindMapCanvas'
+ * `spawningId`) glide to its new spot instead of jumping there. It is
+ * disabled while a node is actively being dragged (`.dragging`) so the card
+ * under the cursor never lags behind the pointer.
+ */
+.react-flow__node {
+  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.react-flow__node.dragging {
+  transition: none;
+}
+/* The card under the cursor turns semi-transparent while dragging, so it
+   reads as "in flight" against the other cards gliding to make room (see
+   MindMapCanvas' `onNodeDrag` preview) rather than as just another card. */
+.react-flow__node.dragging .card-node {
+  opacity: 0.6;
+}
+
+/*
+ * React Flow marks every draggable node with a grab cursor over its whole
+ * bounding box, even though `dragHandle` restricts the actual drag gesture
+ * to `.card-drag-handle` — CardNode overrides this back to `default` inline,
+ * this rule is the fallback for anywhere that inline override doesn't reach.
+ */
+.react-flow__node.draggable {
+  cursor: default;
+}

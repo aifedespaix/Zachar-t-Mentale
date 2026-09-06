@@ -51,17 +51,28 @@ function resetStore(cards: Card[]) {
 describe('CardNode', () => {
   beforeEach(() => resetStore([testCard]))
 
-  it('displays the card title', () => {
+  it('displays the card title in an always-present field (no click needed to reveal it)', () => {
     renderCardNode(testCard)
-    expect(screen.getByText('Titre initial')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
   })
 
-  it('enters edit mode on click and commits the new title on Enter', async () => {
+  it('selects the whole title when the field is focused for the first time', async () => {
     const user = userEvent.setup()
     renderCardNode(testCard)
 
-    await user.click(screen.getByText('Titre initial'))
+    const input = screen.getByRole('textbox', { name: /titre/i }) as HTMLInputElement
+    await user.click(input)
+
+    expect(input.selectionStart).toBe(0)
+    expect(input.selectionEnd).toBe('Titre initial'.length)
+  })
+
+  it('commits the new title when the field is blurred (e.g. via Enter)', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard)
+
     const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
     await user.clear(input)
     await user.type(input, 'Nouveau titre{Enter}')
 
@@ -72,11 +83,12 @@ describe('CardNode', () => {
     const user = userEvent.setup()
     renderCardNode(testCard)
 
-    await user.click(screen.getByText('Titre initial'))
     const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
     await user.type(input, ' modifié{Escape}')
 
     expect(useCardsStore.getState().history.present[0].title).toBe('Titre initial')
+    expect(input).toHaveValue('Titre initial')
   })
 
   it('does not push a history entry when the title is committed unchanged', async () => {
@@ -84,35 +96,39 @@ describe('CardNode', () => {
     renderCardNode(testCard)
     const before = useCardsStore.getState().history
 
-    await user.click(screen.getByText('Titre initial'))
+    await user.click(screen.getByRole('textbox', { name: /titre/i }))
     await user.keyboard('{Enter}')
 
     expect(useCardsStore.getState().history).toBe(before)
   })
 
-  it('re-seeds the title draft from the card each time the editor is opened', async () => {
+  it('re-seeds the title draft from the card each time the field regains focus', async () => {
     const user = userEvent.setup()
     const { rerenderWith } = renderCardNode(testCard)
 
-    // Type a draft, then leave the editor without committing.
-    await user.click(screen.getByText('Titre initial'))
-    await user.type(screen.getByRole('textbox', { name: /titre/i }), ' brouillon{Escape}')
+    // Type a draft, then leave the field without committing.
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, ' brouillon{Escape}')
 
     // The card changes underneath us (an undo, a reload, a concurrent edit).
     rerenderWith({ ...testCard, title: 'Titre externe' })
 
-    await user.click(screen.getByText('Titre externe'))
+    await user.click(screen.getByRole('textbox', { name: /titre/i }))
     expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre externe')
   })
 
-  it('opens the title editor on mount when the node is flagged autoEdit', () => {
+  it('focuses and selects the title field on mount when the node is flagged autoEdit', () => {
     renderCardNode(testCard, true)
-    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
+    const input = screen.getByRole('textbox', { name: /titre/i }) as HTMLInputElement
+    expect(input).toHaveFocus()
+    expect(input.selectionStart).toBe(0)
+    expect(input.selectionEnd).toBe('Titre initial'.length)
   })
 
-  it('does not open the title editor when autoEdit is not set', () => {
+  it('does not focus the title field when autoEdit is not set', () => {
     renderCardNode(testCard)
-    expect(screen.queryByRole('textbox', { name: /titre/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveFocus()
   })
 })
 
@@ -135,42 +151,39 @@ describe('CardNode structural buttons', () => {
     expect(useCardsStore.getState().history.present).toHaveLength(3)
   })
 
-  it('keeps the + buttons on the root card but greys them out (single-root invariant)', () => {
+  it('does not render the + buttons on the root card (single-root invariant)', () => {
     renderCardNode(testCard)
-    expect(screen.getByRole('button', { name: /ajouter au-dessus/i })).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByRole('button', { name: /ajouter en dessous/i })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.queryByRole('button', { name: /ajouter au-dessus/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /ajouter en dessous/i })).not.toBeInTheDocument()
   })
 
-  it('does not call addSibling when a greyed-out + button is clicked anyway', () => {
-    renderCardNode(testCard)
-    // fireEvent bypasses the pointer-events guard, proving the handler itself
-    // refuses to act — defence in depth behind the disabled styling.
-    fireEvent.click(screen.getByRole('button', { name: /ajouter au-dessus/i }))
-    fireEvent.click(screen.getByRole('button', { name: /ajouter en dessous/i }))
-    expect(useCardsStore.getState().history.present).toHaveLength(1)
-  })
-
-  it('keeps the -> button on a level-4 card but greys it out', () => {
+  it('does not render the -> button on a level-4 card (no level 5)', () => {
     const level4: Card = { id: 'l4', level: 4, title: 'Info', parentId: 'root', order: 0 }
     resetStore([testCard, level4])
     renderCardNode(level4)
-    expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.queryByRole('button', { name: /ajouter un enfant/i })).not.toBeInTheDocument()
   })
 
-  it('does not call addChild when the greyed-out -> button of a level-4 card is clicked anyway', () => {
-    const level4: Card = { id: 'l4', level: 4, title: 'Info', parentId: 'root', order: 0 }
-    resetStore([testCard, level4])
-    renderCardNode(level4)
-    fireEvent.click(screen.getByRole('button', { name: /ajouter un enfant/i }))
-    expect(useCardsStore.getState().history.present).toHaveLength(2)
+  it('does not render the -> button once the card already has a child', () => {
+    const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
+    resetStore([testCard, child])
+    renderCardNode(testCard)
+    expect(screen.queryByRole('button', { name: /ajouter un enfant/i })).not.toBeInTheDocument()
   })
 
-  it('marks an applicable button as enabled', () => {
+  it('renders the -> button when the card has no child yet', () => {
     const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
     resetStore([testCard, child])
     renderCardNode(child)
-    expect(screen.getByRole('button', { name: /ajouter au-dessus/i })).toHaveAttribute('aria-disabled', 'false')
-    expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toHaveAttribute('aria-disabled', 'false')
+    expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toBeInTheDocument()
+  })
+
+  it('renders the + and -> buttons for an applicable card', () => {
+    const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
+    resetStore([testCard, child])
+    renderCardNode(child)
+    expect(screen.getByRole('button', { name: /ajouter au-dessus/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /supprimer/i })).toHaveAttribute('aria-disabled', 'false')
   })
 })
