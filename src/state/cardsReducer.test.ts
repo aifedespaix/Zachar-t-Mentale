@@ -127,3 +127,46 @@ describe('moveCardToIndex', () => {
     expect(siblings.map(c => c.id)).toEqual([second, first])
   })
 })
+
+// Undo/redo keeps previous Card[] snapshots alive in the history stack. If any
+// reducer mutated a Card object (rather than returning a fresh one), every past
+// snapshot sharing that object would silently change too, corrupting undo.
+describe('reducer immutability', () => {
+  function threeChildTree() {
+    const root = createRootCard()
+    const { cards: c1, newCardId: first } = addChild([root], root.id)
+    const { cards: c2, newCardId: second } = addChild(c1, root.id)
+    const { cards: c3, newCardId: third } = addChild(c2, root.id)
+    return { cards: c3, root, first, second, third }
+  }
+
+  it('addSibling does not mutate the input cards array or its objects', () => {
+    const { cards, first } = threeChildTree()
+    const before = structuredClone(cards)
+    addSibling(cards, first, 'below')
+    expect(cards).toEqual(before)
+  })
+
+  it('deleteCard does not mutate the input cards array or its objects', () => {
+    const { cards, first } = threeChildTree()
+    const before = structuredClone(cards)
+    deleteCard(cards, first)
+    expect(cards).toEqual(before)
+  })
+
+  it('moveCardToIndex does not mutate the input cards array or its objects', () => {
+    const { cards, first } = threeChildTree()
+    const before = structuredClone(cards)
+    moveCardToIndex(cards, first, 2)
+    expect(cards).toEqual(before)
+  })
+
+  it('addChild, updateTitle and updateDefinition do not mutate their input either', () => {
+    const { cards, root, first } = threeChildTree()
+    const before = structuredClone(cards)
+    addChild(cards, root.id)
+    updateTitle(cards, first, 'autre titre')
+    updateDefinition(cards, first, 'une définition')
+    expect(cards).toEqual(before)
+  })
+})
