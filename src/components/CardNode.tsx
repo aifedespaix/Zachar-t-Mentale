@@ -11,6 +11,7 @@ import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
+import { QcmDialog } from './quiz/QcmDialog'
 
 interface QuizData {
   type: QuizQuestionType
@@ -95,6 +96,9 @@ export function CardNode({ data }: CardNodeProps) {
   const isRecallPending = quiz?.type === 'recall' && quiz.result === 'unanswered'
   const displayMasked = isRecallPending && !quizRevealed
   const answerRecall = useQuizStore(s => s.answerRecall)
+  const answerQcm = useQuizStore(s => s.answerQcm)
+  const [qcmOpen, setQcmOpen] = useState(false)
+  const isQcmPending = quiz?.type === 'qcm' && quiz.result === 'unanswered'
   const resultBorderColor = quiz?.result === 'correct' ? '#16a34a' : quiz?.result === 'incorrect' ? '#dc2626' : undefined
 
   function handleReveal() {
@@ -475,7 +479,16 @@ export function CardNode({ data }: CardNodeProps) {
                 </TooltipTrigger>
                 <TooltipContent>Révéler la réponse</TooltipContent>
               </Tooltip>
-            ) : null /* qcm trigger wired in Task 13 */
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Répondre" onClick={() => setQcmOpen(true)}>
+                    <FlipHorizontal2 />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Répondre</TooltipContent>
+              </Tooltip>
+            )
           ) : !quiz ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -513,6 +526,19 @@ export function CardNode({ data }: CardNodeProps) {
         >
           {card.definition}
         </p>
+      )}
+
+      {isQcmPending && (
+        <QcmDialog
+          open={qcmOpen}
+          title={card.title}
+          correctDefinition={card.definition ?? ''}
+          distractors={quiz.distractorDefinitions ?? []}
+          onAnswer={chosen => {
+            answerQcm(card.id, chosen)
+            setQcmOpen(false)
+          }}
+        />
       )}
 
       <Handle type="source" position={Position.Right} isConnectable={false} style={{ visibility: 'hidden' }} />
