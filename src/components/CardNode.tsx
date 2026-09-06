@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 
-type CardNodeProps = NodeProps & { data: { card: Card; autoEdit?: boolean } }
+type CardNodeProps = NodeProps & { data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean } }
 
 /**
  * Shared "structurally unavailable" grey. Only the delete `x` still uses
@@ -80,7 +80,7 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
 }
 
 export function CardNode({ data }: CardNodeProps) {
-  const { card, autoEdit = false } = data
+  const { card, autoEdit = false, isReparentTarget = false } = data
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
   const addChild = useCardsStore(s => s.addChild)
@@ -195,7 +195,8 @@ export function CardNode({ data }: CardNodeProps) {
     <motion.div
       data-testid={`card-${card.id}`}
       data-flipped={flipped}
-      className="card-node"
+      data-reparent-target={isReparentTarget}
+      className={isReparentTarget ? 'card-node card-node--reparent-target' : 'card-node'}
       animate={{ rotateY: flipped ? 180 : 0 }}
       transition={{ duration: 0.4 }}
       style={{

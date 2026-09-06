@@ -8,10 +8,10 @@ import type { Card } from '../types/card'
 
 const testCard: Card = { id: 'root', level: 1, title: 'Titre initial', parentId: null, order: 0 }
 
-type CardNodeTestProps = NodeProps & { data: { card: Card; autoEdit?: boolean } }
+type CardNodeTestProps = NodeProps & { data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean } }
 
-function cardNodeProps(card: Card, autoEdit = false) {
-  return { id: card.id, data: { card, autoEdit } } as unknown as CardNodeTestProps
+function cardNodeProps(card: Card, autoEdit = false, isReparentTarget = false) {
+  return { id: card.id, data: { card, autoEdit, isReparentTarget } } as unknown as CardNodeTestProps
 }
 
 /**
@@ -19,10 +19,10 @@ function cardNodeProps(card: Card, autoEdit = false) {
  * measures empty handleBounds and silently stops drawing edges), and Handle
  * requires a ReactFlowProvider ancestor for its store/handle-config contexts.
  */
-function renderCardNode(card: Card, autoEdit = false) {
+function renderCardNode(card: Card, autoEdit = false, isReparentTarget = false) {
   const result = render(
     <ReactFlowProvider>
-      <CardNode {...cardNodeProps(card, autoEdit)} />
+      <CardNode {...cardNodeProps(card, autoEdit, isReparentTarget)} />
     </ReactFlowProvider>
   )
   return {
@@ -30,7 +30,7 @@ function renderCardNode(card: Card, autoEdit = false) {
     rerenderWith: (next: Card) =>
       result.rerender(
         <ReactFlowProvider>
-          <CardNode {...cardNodeProps(next, autoEdit)} />
+          <CardNode {...cardNodeProps(next, autoEdit, isReparentTarget)} />
         </ReactFlowProvider>
       ),
   }
@@ -315,5 +315,15 @@ describe('CardNode footer', () => {
     await user.keyboard('{Enter}')
 
     expect(useCardsStore.getState().history).toBe(before)
+  })
+
+  it('marks itself as a reparent drop target when data.isReparentTarget is set', () => {
+    renderCardNode(testCard, false, true)
+    expect(screen.getByTestId(`card-${testCard.id}`)).toHaveAttribute('data-reparent-target', 'true')
+  })
+
+  it('does not mark itself as a reparent drop target by default', () => {
+    renderCardNode(testCard)
+    expect(screen.getByTestId(`card-${testCard.id}`)).toHaveAttribute('data-reparent-target', 'false')
   })
 })

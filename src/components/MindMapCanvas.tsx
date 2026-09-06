@@ -87,10 +87,59 @@ function resolveDragIndex(cards: Card[], layout: Record<string, Position>, dragg
   return siblingYs.findIndex(c => c.id === draggedId)
 }
 
+export interface NodeBox {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+function boxesOverlap(a: NodeBox, b: NodeBox): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+}
+
+function centerOf(box: NodeBox): { x: number; y: number } {
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+}
+
+function distance(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return Math.hypot(a.x - b.x, a.y - b.y)
+}
+
+/**
+ * Which card the dragged card should reparent onto if dropped right now, given
+ * its live bounding box among all the others'. A candidate must be at the level
+ * directly above the dragged card (same constraint `moveCardToParent` enforces,
+ * which is also why it can never be one of the dragged card's own descendants)
+ * and must overlap it — its current parent doesn't count, since dropping there
+ * changes nothing. Ties among several overlapping candidates go to whichever
+ * center is closest to the dragged card's.
+ */
+export function resolveReparentTarget(cards: Card[], boxes: NodeBox[], draggedId: string): string | undefined {
+  const draggedCard = cards.find(c => c.id === draggedId)
+  if (!draggedCard || draggedCard.parentId === null) return undefined
+  const draggedBox = boxes.find(b => b.id === draggedId)
+  if (!draggedBox) return undefined
+
+  const validLevel = draggedCard.level - 1
+  const overlapping = boxes.filter(b => {
+    if (b.id === draggedId || b.id === draggedCard.parentId) return false
+    const card = cards.find(c => c.id === b.id)
+    return card?.level === validLevel && boxesOverlap(draggedBox, b)
+  })
+  if (overlapping.length === 0) return undefined
+
+  const draggedCenter = centerOf(draggedBox)
+  overlapping.sort((a, b) => distance(centerOf(a), draggedCenter) - distance(centerOf(b), draggedCenter))
+  return overlapping[0].id
+}
+
 function MindMapCanvasInner() {
   const cards = useCardsStore(s => s.history.present)
   const locked = useCardsStore(s => s.locked)
   const moveCardToIndex = useCardsStore(s => s.moveCardToIndex)
+  const moveCardToParent = useCardsStore(s => s.moveCardToParent)
   const { setCenter } = useReactFlow()
 
   const layout = useMemo(() => computeLayout(cards), [cards])
@@ -100,6 +149,11 @@ function MindMapCanvasInner() {
   const previousIds = useRef(new Set(cards.map(c => c.id)))
   const [autoEditId, setAutoEditId] = useState<string | null>(null)
   const [spawningId, setSpawningId] = useState<string | null>(null)
+  // Which card is currently being dragged, and which OTHER card (if any) it is
+  // hovering as a valid reparent target — see `resolveReparentTarget`. Both are
+  // only ever set between onNodeDragStart and onNodeDragStop.
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [reparentTargetId, setReparentTargetId] = useState<string | null>(null)
 
   useEffect(() => {
     const currentIds = new Set(cards.map(c => c.id))
@@ -157,45 +211,117 @@ function MindMapCanvasInner() {
     return () => cancelAnimationFrame(raf)
   }, [spawningId, layout, setNodes])
 
-  const edges: Edge[] = useMemo(
-    () =>
-      cards
-        .filter((card): card is typeof card & { parentId: string } => card.parentId !== null)
-        .map(card => ({
+  const edges: Edge[] = useMemo(() => {
+    const realEdges = cards
+      .filter((card): card is typeof card & { parentId: string } => card.parentId !== null)
+      .map(
+        (card): Edge => ({
           id: `e-${card.parentId}-${card.id}`,
           source: card.parentId,
           target: card.id,
-          style: { stroke: toCss(levelColors[card.level].border) },
-        })),
-    [cards]
-  )
+          // The real edge from the current parent fades out while a valid
+          // reparent target is active, so it doesn't compete with the dashed
+          // ghost edge previewing the future link (added below).
+          style: {
+            stroke: toCss(levelColors[card.level].border),
+            opacity: reparentTargetId && card.id === draggingId ? 0.15 : 1,
+          },
+        })
+      )
+    if (reparentTargetId && draggingId) {
+      const draggedCard = cards.find(c => c.id === draggingId)
+      if (draggedCard) {
+        realEdges.push({
+          id: 'reparent-ghost-edge',
+          source: reparentTargetId,
+          target: draggingId,
+          className: 'reparent-ghost-edge',
+          style: { stroke: toCss(levelColors[draggedCard.level].border), opacity: 1 },
+        })
+      }
+    }
+    return realEdges
+  }, [cards, reparentTargetId, draggingId])
 
-  // While dragging, the OTHER cards in the same sibling group (and, through
-  // the full re-layout, any of their descendants) glide into the slots
-  // they'd occupy if the card were dropped right now — the gap that opens up
-  // at the target row is the "preview" itself, no separate ghost element
-  // needed. The dragged node's own position stays whatever `onNodesChange`
+  const handleNodeDragStart: OnNodeDrag = useCallback((_event, draggedNode) => {
+    setDraggingId(draggedNode.id)
+  }, [])
+
+  // Two mutually exclusive previews, decided fresh every frame by whether the
+  // dragged card currently overlaps a valid reparent target (see
+  // `resolveReparentTarget`):
+  //
+  // - A target IS hovered: every other card snaps back to its real layout
+  //   slot (undoing any leftover reorder preview from a moment ago) and the
+  //   target lights up (`isReparentTarget`) — the highlight plus the dashed
+  //   ghost edge (`edges` above) IS the preview, nothing reflows.
+  // - No target: the classic reorder preview — the OTHER cards in the same
+  //   sibling group (and, through the full re-layout, any of their
+  //   descendants) glide into the slots they'd occupy if the card were
+  //   dropped right now, the gap that opens up at the target row is the
+  //   preview itself.
+  //
+  // Either way the dragged node's own position stays whatever `onNodesChange`
   // already gave it (live under the cursor); only its neighbours are
   // re-slotted here. Nothing is committed to the store until drop.
   const handleNodeDrag: OnNodeDrag = useCallback(
     (_event, draggedNode) => {
-      const previewIndex = resolveDragIndex(cards, layout, draggedNode.id, draggedNode.position.y)
-      const previewLayout = computeLayout(moveCardToIndexOp(cards, draggedNode.id, previewIndex))
-      setNodes(current =>
-        current.map(node =>
-          node.id === draggedNode.id ? node : { ...node, position: previewLayout[node.id] ?? node.position }
+      const boxes: NodeBox[] = nodes.map(node => ({
+        id: node.id,
+        x: node.id === draggedNode.id ? draggedNode.position.x : node.position.x,
+        y: node.id === draggedNode.id ? draggedNode.position.y : node.position.y,
+        width: node.measured?.width ?? NOMINAL_NODE_WIDTH,
+        height: node.measured?.height ?? NOMINAL_NODE_HEIGHT,
+      }))
+      const target = resolveReparentTarget(cards, boxes, draggedNode.id)
+      setReparentTargetId(prev => (prev === target ? prev : (target ?? null)))
+
+      if (target) {
+        setNodes(current =>
+          current.map(node => {
+            if (node.id === draggedNode.id) return node
+            const isTarget = node.id === target
+            const highlightChanged = Boolean(node.data.isReparentTarget) !== isTarget
+            const positionChanged = node.position !== layout[node.id]
+            if (!highlightChanged && !positionChanged) return node
+            return {
+              ...node,
+              position: layout[node.id] ?? node.position,
+              data: highlightChanged ? { ...node.data, isReparentTarget: isTarget } : node.data,
+            }
+          })
         )
-      )
+      } else {
+        const previewIndex = resolveDragIndex(cards, layout, draggedNode.id, draggedNode.position.y)
+        const previewLayout = computeLayout(moveCardToIndexOp(cards, draggedNode.id, previewIndex))
+        setNodes(current =>
+          current.map(node => {
+            if (node.id === draggedNode.id) return node
+            const highlightChanged = Boolean(node.data.isReparentTarget)
+            return {
+              ...node,
+              position: previewLayout[node.id] ?? node.position,
+              data: highlightChanged ? { ...node.data, isReparentTarget: false } : node.data,
+            }
+          })
+        )
+      }
     },
-    [cards, layout, setNodes]
+    [cards, layout, nodes, setNodes]
   )
 
   const handleNodeDragStop: OnNodeDrag = useCallback(
     (_event, draggedNode) => {
-      const newIndex = resolveDragIndex(cards, layout, draggedNode.id, draggedNode.position.y)
-      moveCardToIndex(draggedNode.id, newIndex)
+      if (reparentTargetId) {
+        moveCardToParent(draggedNode.id, reparentTargetId)
+      } else {
+        const newIndex = resolveDragIndex(cards, layout, draggedNode.id, draggedNode.position.y)
+        moveCardToIndex(draggedNode.id, newIndex)
+      }
+      setDraggingId(null)
+      setReparentTargetId(null)
     },
-    [cards, layout, moveCardToIndex]
+    [cards, layout, moveCardToIndex, moveCardToParent, reparentTargetId]
   )
 
   return (
@@ -204,6 +330,7 @@ function MindMapCanvasInner() {
       edges={edges}
       onNodesChange={onNodesChange}
       nodeTypes={nodeTypes}
+      onNodeDragStart={handleNodeDragStart}
       onNodeDrag={handleNodeDrag}
       onNodeDragStop={handleNodeDragStop}
       fitView

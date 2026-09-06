@@ -93,6 +93,39 @@ export function deleteCard(cards: Card[], cardId: string): Card[] {
   return [...others, ...siblings]
 }
 
+// Reattaches a card to a different parent WITHOUT changing its level/column:
+// the new parent must sit at the level directly above the card, same as the
+// current one. This makes cycles structurally impossible (an ancestor is
+// always at a strictly lower level than any of its descendants, so a level-1
+// parent match can never resolve to one of the card's own descendants) and
+// means no other card's level ever needs to cascade-update.
+export function moveCardToParent(cards: Card[], cardId: string, newParentId: string): Card[] {
+  const target = cards.find(c => c.id === cardId)
+  if (!target) throw new Error(`moveCardToParent: card ${cardId} not found`)
+  if (target.parentId === null) {
+    throw new Error('moveCardToParent: cannot reparent the root card (single-root invariant)')
+  }
+  const newParent = cards.find(c => c.id === newParentId)
+  if (!newParent) throw new Error(`moveCardToParent: new parent ${newParentId} not found`)
+  if (newParent.level !== target.level - 1) {
+    throw new Error(
+      `moveCardToParent: new parent must be at level ${target.level - 1}, got ${newParent.level}`
+    )
+  }
+  if (newParentId === target.parentId) return cards
+
+  const oldSiblings = cards
+    .filter(c => c.parentId === target.parentId && c.id !== cardId)
+    .sort((a, b) => a.order - b.order)
+    .map((c, i) => ({ ...c, order: i }))
+  const newSiblings = cards.filter(c => c.parentId === newParentId)
+  const moved: Card = { ...target, parentId: newParentId, order: newSiblings.length }
+  const untouched = cards.filter(
+    c => c.id !== cardId && c.parentId !== target.parentId && c.parentId !== newParentId
+  )
+  return [...untouched, ...oldSiblings, ...newSiblings, moved]
+}
+
 export function moveCardToIndex(cards: Card[], cardId: string, newIndex: number): Card[] {
   const target = cards.find(c => c.id === cardId)
   if (!target) throw new Error(`moveCardToIndex: card ${cardId} not found`)

@@ -164,3 +164,34 @@
 .react-flow__node.draggable {
   cursor: default;
 }
+
+/*
+ * The card currently under the dragged one (a valid reparent target — see
+ * MindMapCanvas' `resolveReparentTarget`) gets a pulsing accent ring, deliberately
+ * NOT one of the four level colors so it reads as "drop here" regardless of
+ * which level is involved on either side.
+ */
+@keyframes reparent-target-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px oklch(0.6 0.2 260 / 55%), 0 0 16px 2px oklch(0.6 0.2 260 / 45%);
+  }
+  50% {
+    box-shadow: 0 0 0 3px oklch(0.6 0.2 260 / 90%), 0 0 22px 6px oklch(0.6 0.2 260 / 70%);
+  }
+}
+.card-node--reparent-target {
+  animation: reparent-target-pulse 900ms ease-in-out infinite;
+}
+
+/* The ghost edge previewing the future parent link while a reparent target is
+   active: dashed and animated ("marching ants") to read as tentative/in-flight,
+   distinct from the solid, static real edges. */
+@keyframes reparent-ghost-edge-march {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+.reparent-ghost-edge path {
+  stroke-dasharray: 8 6;
+  animation: reparent-ghost-edge-march 600ms linear infinite;
+}

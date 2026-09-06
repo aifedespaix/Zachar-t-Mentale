@@ -36,6 +36,20 @@ describe('useCardsStore', () => {
     expect(store.getState().locked).toBe(true)
   })
 
+  it('moveCardToParent reattaches a card and is undoable', () => {
+    const store = createCardsStore()
+    const rootId = store.getState().history.present[0].id
+    const branchA = store.getState().addChild(rootId)
+    const branchB = store.getState().addChild(rootId)
+    const leaf = store.getState().addChild(branchA)
+
+    store.getState().moveCardToParent(leaf, branchB)
+    expect(store.getState().history.present.find(c => c.id === leaf)?.parentId).toBe(branchB)
+
+    store.getState().undo()
+    expect(store.getState().history.present.find(c => c.id === leaf)?.parentId).toBe(branchA)
+  })
+
   it('loadCards replaces the tree and resets history', () => {
     const store = createCardsStore()
     const rootId = store.getState().history.present[0].id

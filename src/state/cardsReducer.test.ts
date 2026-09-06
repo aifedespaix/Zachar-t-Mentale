@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createRootCard, addChild, addSibling, updateTitle, updateDefinition, countDescendants, hasChildren, deleteCard, moveCardToIndex } from './cardsReducer'
+import { createRootCard, addChild, addSibling, updateTitle, updateDefinition, countDescendants, hasChildren, deleteCard, moveCardToIndex, moveCardToParent } from './cardsReducer'
 import type { Card } from '../types/card'
 
 describe('createRootCard', () => {
@@ -138,6 +138,69 @@ describe('moveCardToIndex', () => {
     const result = moveCardToIndex(c2, first, 999)
     const siblings = result.filter(c => c.parentId === root.id).sort((a, b) => a.order - b.order)
     expect(siblings.map(c => c.id)).toEqual([second, first])
+  })
+})
+
+describe('moveCardToParent', () => {
+  function twoBranchTree() {
+    const root = createRootCard()
+    const { cards: c1, newCardId: branchA } = addChild([root], root.id)
+    const { cards: c2, newCardId: branchB } = addChild(c1, root.id)
+    const { cards: c3, newCardId: leaf } = addChild(c2, branchA)
+    return { cards: c3, root, branchA, branchB, leaf }
+  }
+
+  it('reattaches the card to the new parent, keeping its level unchanged', () => {
+    const { cards, branchB, leaf } = twoBranchTree()
+    const result = moveCardToParent(cards, leaf, branchB)
+    const moved = result.find(c => c.id === leaf)!
+    expect(moved.parentId).toBe(branchB)
+    expect(moved.level).toBe(3)
+  })
+
+  it('appends the card at the end of the new sibling group', () => {
+    const { cards, branchB, leaf } = twoBranchTree()
+    const { cards: withOtherChild, newCardId: otherChild } = addChild(cards, branchB)
+    const result = moveCardToParent(withOtherChild, leaf, branchB)
+    const siblings = result.filter(c => c.parentId === branchB).sort((a, b) => a.order - b.order)
+    expect(siblings.map(c => c.id)).toEqual([otherChild, leaf])
+  })
+
+  it('reindexes the old sibling group after the card leaves', () => {
+    const { cards, branchA, branchB, leaf } = twoBranchTree()
+    const { cards: withOtherLeaf, newCardId: otherLeaf } = addChild(cards, branchA)
+    const result = moveCardToParent(withOtherLeaf, leaf, branchB)
+    const oldSiblings = result.filter(c => c.parentId === branchA)
+    expect(oldSiblings.map(c => c.id)).toEqual([otherLeaf])
+    expect(oldSiblings[0].order).toBe(0)
+  })
+
+  it('throws when the new parent is not at the level directly above the card', () => {
+    const { cards, root, leaf } = twoBranchTree()
+    expect(() => moveCardToParent(cards, leaf, root.id)).toThrow()
+  })
+
+  it('throws when trying to reparent the root card (single-root invariant)', () => {
+    const { cards, root, branchB } = twoBranchTree()
+    expect(() => moveCardToParent(cards, root.id, branchB)).toThrow()
+  })
+
+  it('throws when the new parent does not exist', () => {
+    const { cards, leaf } = twoBranchTree()
+    expect(() => moveCardToParent(cards, leaf, 'missing')).toThrow()
+  })
+
+  it('is a no-op when the new parent is already the current parent', () => {
+    const { cards, branchA, leaf } = twoBranchTree()
+    const result = moveCardToParent(cards, leaf, branchA)
+    expect(result).toEqual(cards)
+  })
+
+  it('does not mutate the input cards array or its objects', () => {
+    const { cards, branchB, leaf } = twoBranchTree()
+    const before = structuredClone(cards)
+    moveCardToParent(cards, leaf, branchB)
+    expect(cards).toEqual(before)
   })
 })
 
