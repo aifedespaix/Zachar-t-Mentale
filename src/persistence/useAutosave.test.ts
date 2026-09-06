@@ -12,7 +12,8 @@ const cardsV2: Card[] = [{ id: 'root', level: 1, title: 'v2', parentId: null, or
 describe('useAutosave', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.mocked(saveMindMap).mockClear()
+    vi.mocked(saveMindMap).mockReset()
+    vi.mocked(saveMindMap).mockResolvedValue(undefined)
   })
   afterEach(() => vi.useRealTimers())
 
@@ -36,5 +37,47 @@ describe('useAutosave', () => {
 
     vi.advanceTimersByTime(500)
     expect(saveMindMap).not.toHaveBeenCalled()
+  })
+
+  it('saves by default (enabled defaults to true)', () => {
+    renderHook(() => useAutosave('/fake/path.json', cardsV1, 500))
+    vi.advanceTimersByTime(500)
+    expect(saveMindMap).toHaveBeenCalledTimes(1)
+  })
+
+  it('never saves while disabled, no matter how much time passes', () => {
+    renderHook(() => useAutosave('/fake/path.json', cardsV1, 500, false))
+    vi.advanceTimersByTime(10_000)
+    expect(saveMindMap).not.toHaveBeenCalled()
+  })
+
+  it('starts saving once it becomes enabled', () => {
+    const { rerender } = renderHook(({ enabled }) => useAutosave('/fake/path.json', cardsV1, 500, enabled), {
+      initialProps: { enabled: false },
+    })
+    vi.advanceTimersByTime(500)
+    expect(saveMindMap).not.toHaveBeenCalled()
+
+    rerender({ enabled: true })
+    vi.advanceTimersByTime(500)
+    expect(saveMindMap).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a rejected save through onError instead of failing silently', async () => {
+    const onError = vi.fn()
+    const failure = new Error('disk full')
+    vi.mocked(saveMindMap).mockRejectedValue(failure)
+
+    renderHook(() => useAutosave('/fake/path.json', cardsV1, 500, true, onError))
+    vi.advanceTimersByTime(500)
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(failure))
+  })
+
+  it('does not call onError when the save succeeds', async () => {
+    const onError = vi.fn()
+    renderHook(() => useAutosave('/fake/path.json', cardsV1, 500, true, onError))
+    vi.advanceTimersByTime(500)
+    await vi.waitFor(() => expect(saveMindMap).toHaveBeenCalledTimes(1))
+    expect(onError).not.toHaveBeenCalled()
   })
 })
