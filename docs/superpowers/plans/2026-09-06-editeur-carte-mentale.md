@@ -664,10 +664,10 @@ export function addSibling(
     parentId: reference.parentId,
     order: 0,
   }
-  const newGroup = [...group.slice(0, insertAt), newCard, ...group.slice(insertAt)]
-  newGroup.forEach((c, i) => {
-    c.order = i
-  })
+  const newGroup = [...group.slice(0, insertAt), newCard, ...group.slice(insertAt)].map((c, i) => ({
+    ...c,
+    order: i,
+  }))
   const otherCards = cards.filter(c => c.parentId !== reference.parentId)
   return { cards: [...otherCards, ...newGroup], newCardId: newCard.id }
 }
@@ -805,10 +805,10 @@ export function deleteCard(cards: Card[], cardId: string): Card[] {
   }
 
   const remaining = cards.filter(c => !toDelete.has(c.id))
-  const siblings = remaining.filter(c => c.parentId === target.parentId).sort((a, b) => a.order - b.order)
-  siblings.forEach((c, i) => {
-    c.order = i
-  })
+  const siblings = remaining
+    .filter(c => c.parentId === target.parentId)
+    .sort((a, b) => a.order - b.order)
+    .map((c, i) => ({ ...c, order: i }))
   const others = remaining.filter(c => c.parentId !== target.parentId)
   return [...others, ...siblings]
 }
@@ -892,12 +892,10 @@ export function moveCardToIndex(cards: Card[], cardId: string, newIndex: number)
 
   const [moved] = group.splice(currentIndex, 1)
   group.splice(clampedIndex, 0, moved)
-  group.forEach((c, i) => {
-    c.order = i
-  })
+  const reindexed = group.map((c, i) => ({ ...c, order: i }))
 
   const others = cards.filter(c => c.parentId !== target.parentId)
-  return [...others, ...group]
+  return [...others, ...reindexed]
 }
 ```
 
