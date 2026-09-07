@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { oklchWcagContrast } from './contrast'
-import { levelColors } from './levelColors'
+import { detachedColors, levelColors } from './levelColors'
 
 describe('levelColors', () => {
   it.each(Object.entries(levelColors))('level %s text meets WCAG AA (>=4.5) against its background', (_level, colors) => {
@@ -23,5 +23,11 @@ describe('levelColors', () => {
 
   it.each([1, 2, 4] as const)('level %s border keeps enough chroma to stay distinguishable', level => {
     expect(levelColors[level].border.c).toBeGreaterThanOrEqual(0.16)
+  })
+
+  it('the detached (floating card) palette is achromatic and still meets WCAG AA', () => {
+    expect(detachedColors.bg.c).toBe(0)
+    expect(detachedColors.border.c).toBe(0)
+    expect(oklchWcagContrast(detachedColors.bg, detachedColors.text)).toBeGreaterThanOrEqual(4.5)
   })
 })

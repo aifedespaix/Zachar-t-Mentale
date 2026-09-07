@@ -7,6 +7,14 @@ export const COLUMN_WIDTH = 320
 // visibly overlapped. 168 keeps a clear gap between them even so.
 export const ROW_HEIGHT = 168
 
+// The floating-cards ("cartes volantes") zone sits below the tree, as its own
+// grid: detached cards are outside the hierarchy, so they get neither a level
+// column nor a tree row. A full blank row of clearance separates the two so the
+// zone reads as a distinct area rather than as more branches.
+export const DETACHED_ZONE_GAP = ROW_HEIGHT * 1.5
+export const DETACHED_ZONE_COLUMNS = 4
+export const DETACHED_ROW_HEIGHT = ROW_HEIGHT * 0.85
+
 export interface Position {
   x: number
   y: number
@@ -24,8 +32,13 @@ export interface Position {
  */
 export function computeLayout(cards: Card[]): Record<string, Position> {
   const positions: Record<string, Position> = {}
+  // Detached cards are laid out separately (see below): they must not appear in
+  // any parent's child list, nor be walked as a subtree of their own.
+  const attached = cards.filter(c => !c.detached)
+  const detached = cards.filter(c => c.detached).sort((a, b) => a.order - b.order)
+
   const childrenByParent = new Map<string, Card[]>()
-  for (const card of cards) {
+  for (const card of attached) {
     if (card.parentId === null) continue
     if (!childrenByParent.has(card.parentId)) childrenByParent.set(card.parentId, [])
     childrenByParent.get(card.parentId)!.push(card)
@@ -50,18 +63,43 @@ export function computeLayout(cards: Card[]): Record<string, Position> {
     return y
   }
 
-  const root = cards.find(c => c.parentId === null)
+  const root = attached.find(c => c.parentId === null)
   if (root) layoutSubtree(root)
 
   // Defensive: a hand-edited/corrupt file could contain cards unreachable from
   // the root (a dangling parentId, or a second root). Lay out each such
   // orphaned subtree root too, so no card is ever left without a position.
-  const knownIds = new Set(cards.map(c => c.id))
-  for (const card of cards) {
+  const knownIds = new Set(attached.map(c => c.id))
+  for (const card of attached) {
     if (card.id in positions) continue
     const isSubtreeRoot = card.parentId === null || !knownIds.has(card.parentId)
     if (isSubtreeRoot) layoutSubtree(card)
   }
 
+  Object.assign(positions, computeDetachedZoneLayout(detached, detachedZoneTop(positions)))
+
+  return positions
+}
+
+/** Y of the floating zone: one clear gap under the lowest card of the tree. */
+function detachedZoneTop(treePositions: Record<string, Position>): number {
+  const ys = Object.values(treePositions).map(p => p.y)
+  if (ys.length === 0) return 0
+  return Math.max(...ys) + DETACHED_ZONE_GAP
+}
+
+/**
+ * The floating zone itself: a plain left-to-right grid, wrapping every
+ * `DETACHED_ZONE_COLUMNS` cards. Exported for the canvas, which pins the zone's
+ * label to the same origin.
+ */
+export function computeDetachedZoneLayout(detached: Card[], top: number): Record<string, Position> {
+  const positions: Record<string, Position> = {}
+  detached.forEach((card, index) => {
+    positions[card.id] = {
+      x: (index % DETACHED_ZONE_COLUMNS) * COLUMN_WIDTH,
+      y: top + Math.floor(index / DETACHED_ZONE_COLUMNS) * DETACHED_ROW_HEIGHT,
+    }
+  })
   return positions
 }

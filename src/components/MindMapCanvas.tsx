@@ -8,20 +8,22 @@ import {
   useReactFlow,
   type Node,
   type Edge,
+  type NodeProps,
   type OnNodeDrag,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCardsStore } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
+import { isRootCard } from '../types/card'
 import type { QuizQuestion, QuizResult } from '../types/quiz'
 import { computeLayout, type Position } from '../layout/columns'
-import { moveCardToIndex as moveCardToIndexOp } from '../state/cardsReducer'
+import { canMoveCardTo, overflowingCardCount, subtreeDepths } from '../state/cardsReducer'
 import { CardNode } from './CardNode'
 import { levelColors } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
-
-const nodeTypes = { card: CardNode }
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
+import { Button } from './ui/button'
 
 // Nominal card size. Used to offset `setCenter` onto the middle of a freshly
 // created card, and passed as `initialWidth`/`initialHeight` — a pre-measurement
@@ -32,6 +34,29 @@ const nodeTypes = { card: CardNode }
 const NOMINAL_NODE_WIDTH = 200
 const NOMINAL_NODE_HEIGHT = 92
 
+// Two chrome-only nodes, laid out in flow coordinates so they pan and zoom with
+// the cards. They are NOT cards: every card lookup filters them out by id.
+const INSERTION_NODE_ID = '__insertion-indicator__'
+const ZONE_LABEL_NODE_ID = '__detached-zone-label__'
+
+/** The blue insertion line shown when the drop would REORDER rather than reparent. */
+function InsertionLineNode({ data }: NodeProps) {
+  const { width } = data as { width: number }
+  return <div className="insertion-line" data-testid="insertion-line" style={{ width }} />
+}
+
+/** Caption pinned above the floating-cards grid so the zone reads as a zone. */
+function ZoneLabelNode({ data }: NodeProps) {
+  const { label } = data as { label: string }
+  return (
+    <div className="zone-label" data-testid="detached-zone-label">
+      {label}
+    </div>
+  )
+}
+
+const nodeTypes = { card: CardNode, insertionLine: InsertionLineNode, zoneLabel: ZoneLabelNode }
+
 function buildNodes(
   cards: Card[],
   layout: Record<string, Position>,
@@ -41,7 +66,7 @@ function buildNodes(
   quizQuestions: QuizQuestion[],
   quizResults: Record<string, QuizResult>
 ): Node[] {
-  return cards.map(card => {
+  const cardNodes = cards.map(card => {
     // For the one card just created, the FIRST pass of this function places
     // it at its parent's spot instead of its own — `spawningId` is cleared a
     // frame later, and the resulting position change is what the CSS
@@ -65,6 +90,25 @@ function buildNodes(
       zIndex: spawnParent ? -1 : undefined,
     }
   })
+
+  const zoneLabel = detachedZoneLabelNode(cards, layout)
+  return zoneLabel ? [...cardNodes, zoneLabel] : cardNodes
+}
+
+/** The floating zone's caption, anchored just above its top-left card. */
+function detachedZoneLabelNode(cards: Card[], layout: Record<string, Position>): Node | null {
+  const detachedPositions = cards.filter(c => c.detached).map(c => layout[c.id]).filter(Boolean)
+  if (detachedPositions.length === 0) return null
+  return {
+    id: ZONE_LABEL_NODE_ID,
+    type: 'zoneLabel',
+    position: { x: Math.min(...detachedPositions.map(p => p.x)), y: Math.min(...detachedPositions.map(p => p.y)) - 34 },
+    data: { label: 'Cartes volantes' },
+    draggable: false,
+    selectable: false,
+    focusable: false,
+    deletable: false,
+  }
 }
 
 // Distinguishes a genuine incremental create (addChild/addSibling — every
@@ -79,20 +123,6 @@ export function findNewlyCreatedCardId(previousIds: Set<string>, currentIds: Set
   const isIncrementalChange = [...previousIds].some(id => currentIds.has(id))
   if (!isIncrementalChange) return undefined
   return [...currentIds].find(id => !previousIds.has(id))
-}
-
-/**
- * Where a dragged card's sibling group would sort it if dropped right now,
- * given its live in-progress Y. Shared by the continuous drag preview and
- * the drop commit so they can never disagree about the target slot.
- */
-function resolveDragIndex(cards: Card[], layout: Record<string, Position>, draggedId: string, liveY: number): number {
-  const draggedCard = cards.find(c => c.id === draggedId)
-  const siblingYs = cards
-    .filter(c => c.parentId === draggedCard?.parentId)
-    .map(c => ({ id: c.id, y: c.id === draggedId ? liveY : layout[c.id].y }))
-    .sort((a, b) => a.y - b.y)
-  return siblingYs.findIndex(c => c.id === draggedId)
 }
 
 export interface NodeBox {
@@ -116,38 +146,119 @@ function distance(a: { x: number; y: number }, b: { x: number; y: number }): num
 }
 
 /**
- * Which card the dragged card should reparent onto if dropped right now, given
- * its live bounding box among all the others'. A candidate must be at the level
- * directly above the dragged card (same constraint `moveCardToParent` enforces,
- * which is also why it can never be one of the dragged card's own descendants)
- * and must overlap it — its current parent doesn't count, since dropping there
- * changes nothing. Ties among several overlapping candidates go to whichever
- * center is closest to the dragged card's.
+ * What a drop would do, decided purely by geometry. The two gestures are told
+ * apart by WHERE on the hovered card the dragged one sits:
+ *
+ * - over its top/bottom band (`INSERT_BAND` of the height, i.e. visually
+ *   *between* two cards) -> `insert`: the dragged card joins the hovered
+ *   card's sibling group at that slot. That covers plain reordering AND
+ *   "become a sibling of this card", including across parents.
+ * - over its middle -> `reparent`: the dragged card (with its whole branch)
+ *   becomes a child of the hovered card.
+ *
+ * A drop onto the parent the card already has is `null` (nothing to do) rather
+ * than a no-op move, and the dragged card's own branch is never a candidate —
+ * it travels with it, and dropping into it would make a cycle.
  */
-export function resolveReparentTarget(cards: Card[], boxes: NodeBox[], draggedId: string): string | undefined {
-  const draggedCard = cards.find(c => c.id === draggedId)
-  if (!draggedCard || draggedCard.parentId === null) return undefined
+export const INSERT_BAND = 0.3
+
+export type DropTarget =
+  | { kind: 'reparent'; parentId: string }
+  | { kind: 'insert'; parentId: string; index: number; anchorId: string; side: 'before' | 'after' }
+
+function insertTarget(cards: Card[], draggedId: string, anchor: Card, side: 'before' | 'after'): DropTarget | null {
+  // The root has no sibling group (single-root invariant) and floating cards
+  // are not a hierarchy — neither can host an insertion.
+  if (anchor.detached || anchor.parentId === null) return null
+  if (!canMoveCardTo(cards, draggedId, anchor.parentId)) return null
+  const siblings = cards
+    .filter(c => c.parentId === anchor.parentId && !c.detached && c.id !== draggedId)
+    .sort((a, b) => a.order - b.order)
+  const anchorIndex = siblings.findIndex(c => c.id === anchor.id)
+  if (anchorIndex === -1) return null
+  return {
+    kind: 'insert',
+    parentId: anchor.parentId,
+    index: side === 'after' ? anchorIndex + 1 : anchorIndex,
+    anchorId: anchor.id,
+    side,
+  }
+}
+
+export function resolveDropTarget(cards: Card[], boxes: NodeBox[], draggedId: string): DropTarget | null {
+  const dragged = cards.find(c => c.id === draggedId)
+  if (!dragged || isRootCard(dragged)) return null
   const draggedBox = boxes.find(b => b.id === draggedId)
-  if (!draggedBox) return undefined
+  if (!draggedBox) return null
 
-  const validLevel = draggedCard.level - 1
-  const overlapping = boxes.filter(b => {
-    if (b.id === draggedId || b.id === draggedCard.parentId) return false
-    const card = cards.find(c => c.id === b.id)
-    return card?.level === validLevel && boxesOverlap(draggedBox, b)
-  })
-  if (overlapping.length === 0) return undefined
+  const ownBranch = subtreeDepths(cards, draggedId)
+  const cardById = new Map(cards.map(c => [c.id, c]))
+  const overlapping = boxes.filter(
+    box => cardById.has(box.id) && !ownBranch.has(box.id) && boxesOverlap(draggedBox, box)
+  )
+  if (overlapping.length === 0) return null
 
+  // Several cards can be under the dragged one at once; the closest center wins.
   const draggedCenter = centerOf(draggedBox)
-  overlapping.sort((a, b) => distance(centerOf(a), draggedCenter) - distance(centerOf(b), draggedCenter))
-  return overlapping[0].id
+  const anchorBox = [...overlapping].sort(
+    (a, b) => distance(centerOf(a), draggedCenter) - distance(centerOf(b), draggedCenter)
+  )[0]
+  const anchor = cardById.get(anchorBox.id)!
+
+  const relativeY = (draggedCenter.y - anchorBox.y) / (anchorBox.height || NOMINAL_NODE_HEIGHT)
+  const overEdgeBand = relativeY < INSERT_BAND || relativeY > 1 - INSERT_BAND
+  if (!overEdgeBand) {
+    if (anchor.id === dragged.parentId) return null // already this card's child
+    if (canMoveCardTo(cards, draggedId, anchor.id)) return { kind: 'reparent', parentId: anchor.id }
+    // Level-4 (and other non-receiving) cards fall through: a drop onto one is
+    // read as "put me next to it" rather than rejected outright.
+  }
+  return insertTarget(cards, draggedId, anchor, relativeY < 0.5 ? 'before' : 'after')
+}
+
+/** The insertion line's own flow-coordinates node, straddling the gap it marks. */
+function insertionLineNode(target: DropTarget | null, boxes: NodeBox[]): Node | null {
+  if (target?.kind !== 'insert') return null
+  const anchorBox = boxes.find(b => b.id === target.anchorId)
+  if (!anchorBox) return null
+  return {
+    id: INSERTION_NODE_ID,
+    type: 'insertionLine',
+    position: {
+      x: anchorBox.x,
+      y: target.side === 'before' ? anchorBox.y - 14 : anchorBox.y + anchorBox.height + 10,
+    },
+    data: { width: anchorBox.width },
+    draggable: false,
+    selectable: false,
+    focusable: false,
+    deletable: false,
+    zIndex: 1000,
+  }
+}
+
+/**
+ * The warning shown when a drop would push part of the moved branch past level
+ * 4. Pure (and exported) so the exact wording — the one thing the user reads
+ * before agreeing to lose the hierarchy under those cards — is unit-tested.
+ */
+export function overflowWarningMessage(count: number): string {
+  const cards = count === 1 ? '1 carte enfant située' : `${count} cartes enfants situées`
+  const outcome = count === 1 ? 'sera transformée en carte volante' : 'seront transformées en cartes volantes'
+  return `Attention, ce déplacement dépasse la limite des 4 niveaux. ${cards} hors limite ${outcome}.`
+}
+
+interface PendingMove {
+  cardId: string
+  parentId: string
+  index?: number
+  overflowCount: number
 }
 
 function MindMapCanvasInner() {
   const cards = useCardsStore(s => s.history.present)
   const locked = useCardsStore(s => s.locked)
-  const moveCardToIndex = useCardsStore(s => s.moveCardToIndex)
-  const moveCardToParent = useCardsStore(s => s.moveCardToParent)
+  const moveCard = useCardsStore(s => s.moveCard)
   const quizQuestions = useQuizStore(s => s.questions)
   const quizResults = useQuizStore(s => s.results)
   const { setCenter } = useReactFlow()
@@ -159,11 +270,15 @@ function MindMapCanvasInner() {
   const previousIds = useRef(new Set(cards.map(c => c.id)))
   const [autoEditId, setAutoEditId] = useState<string | null>(null)
   const [spawningId, setSpawningId] = useState<string | null>(null)
-  // Which card is currently being dragged, and which OTHER card (if any) it is
-  // hovering as a valid reparent target — see `resolveReparentTarget`. Both are
-  // only ever set between onNodeDragStart and onNodeDragStop.
+  // Which card is currently being dragged and what its drop would do — see
+  // `resolveDropTarget`. Both are only ever set between onNodeDragStart and
+  // onNodeDragStop.
   const [draggingId, setDraggingId] = useState<string | null>(null)
-  const [reparentTargetId, setReparentTargetId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
+  // A drop that would push part of the moved branch past level 4: held here
+  // until the user confirms turning those cards into floating ones.
+  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null)
+  const reparentTargetId = dropTarget?.kind === 'reparent' ? dropTarget.parentId : null
 
   useEffect(() => {
     const currentIds = new Set(cards.map(c => c.id))
@@ -183,9 +298,8 @@ function MindMapCanvasInner() {
   // React Flow owns the node array so a drag moves the card live under the
   // cursor (`onNodesChange` applies position changes during the gesture).
   // `cards` + `layout` stay the source of truth: this effect resyncs the
-  // canonical positions whenever the store changes — including right after
-  // `moveCardToIndex` fires on drag stop, which is what snaps the card back
-  // onto its grid row.
+  // canonical positions whenever the store changes — including right after a
+  // drop commits, which is what snaps the card onto its new grid row.
   // Seeded with the real nodes rather than `[]` so the very first paint (and
   // the `fitView` that runs with it) already sees the whole tree.
   const initialNodes = useRef<Node[]>(undefined)
@@ -206,6 +320,14 @@ function MindMapCanvasInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cards, layout, locked, autoEditId, quizQuestions, quizResults, setNodes])
 
+  // Puts every node back on its canonical spot and drops all drag chrome (the
+  // insertion line, the reparent highlight). Used when a drag ends without a
+  // move — an empty drop zone, or a cancelled overflow confirmation: "la carte
+  // retourne à sa place initiale".
+  const resyncNodes = useCallback(() => {
+    setNodes(buildNodes(cards, layout, locked, autoEditId, null, quizQuestions, quizResults))
+  }, [cards, layout, locked, autoEditId, quizQuestions, quizResults, setNodes])
+
   // One frame after a card spawns at its parent's position (see `buildNodes`),
   // patch just that node's position/zIndex back to its real layout slot — a
   // targeted update, not a full rebuild (see note above). The position
@@ -224,7 +346,10 @@ function MindMapCanvasInner() {
 
   const edges: Edge[] = useMemo(() => {
     const realEdges = cards
-      .filter((card): card is typeof card & { parentId: string } => card.parentId !== null)
+      // `!card.detached` is belt and braces: detaching always nulls `parentId`,
+      // but a hand-edited file could carry both and would draw an edge from the
+      // floating zone back into the tree.
+      .filter((card): card is typeof card & { parentId: string } => card.parentId !== null && !card.detached)
       .map(
         (card): Edge => ({
           id: `e-${card.parentId}-${card.id}`,
@@ -258,40 +383,40 @@ function MindMapCanvasInner() {
     setDraggingId(draggedNode.id)
   }, [])
 
-  // Two mutually exclusive previews, decided fresh every frame by whether the
-  // dragged card currently overlaps a valid reparent target (see
-  // `resolveReparentTarget`):
+  // Two mutually exclusive previews, decided fresh every frame by
+  // `resolveDropTarget`:
   //
-  // - A target IS hovered: every other card snaps back to its real layout
-  //   slot (undoing any leftover reorder preview from a moment ago) and the
-  //   target lights up (`isReparentTarget`) — the highlight plus the dashed
-  //   ghost edge (`edges` above) IS the preview, nothing reflows.
-  // - No target: the classic reorder preview — the OTHER cards in the same
-  //   sibling group (and, through the full re-layout, any of their
-  //   descendants) glide into the slots they'd occupy if the card were
-  //   dropped right now, the gap that opens up at the target row is the
-  //   preview itself.
+  // - `reparent`: the target card lights up (`isReparentTarget`) and a dashed
+  //   ghost edge previews the future parent link (see `edges` above).
+  // - `insert`: a blue line is drawn in the gap the card would drop into.
   //
-  // Either way the dragged node's own position stays whatever `onNodesChange`
-  // already gave it (live under the cursor); only its neighbours are
-  // re-slotted here. Nothing is committed to the store until drop.
+  // The other cards always sit on their canonical layout spots: the indicator
+  // IS the preview, so nothing reflows under the cursor. The dragged node's own
+  // position stays whatever `onNodesChange` gave it (live under the pointer),
+  // and nothing is committed to the store until drop.
   const handleNodeDrag: OnNodeDrag = useCallback(
     (_event, draggedNode) => {
-      const boxes: NodeBox[] = nodes.map(node => ({
-        id: node.id,
-        x: node.id === draggedNode.id ? draggedNode.position.x : node.position.x,
-        y: node.id === draggedNode.id ? draggedNode.position.y : node.position.y,
-        width: node.measured?.width ?? NOMINAL_NODE_WIDTH,
-        height: node.measured?.height ?? NOMINAL_NODE_HEIGHT,
-      }))
-      const target = resolveReparentTarget(cards, boxes, draggedNode.id)
-      setReparentTargetId(prev => (prev === target ? prev : (target ?? null)))
+      const cardIds = new Set(cards.map(c => c.id))
+      const boxes: NodeBox[] = nodes
+        .filter(node => cardIds.has(node.id))
+        .map(node => ({
+          id: node.id,
+          x: node.id === draggedNode.id ? draggedNode.position.x : node.position.x,
+          y: node.id === draggedNode.id ? draggedNode.position.y : node.position.y,
+          width: node.measured?.width ?? NOMINAL_NODE_WIDTH,
+          height: node.measured?.height ?? NOMINAL_NODE_HEIGHT,
+        }))
+      const target = resolveDropTarget(cards, boxes, draggedNode.id)
+      setDropTarget(previous => (sameDropTarget(previous, target) ? previous : target))
 
-      if (target) {
-        setNodes(current =>
-          current.map(node => {
-            if (node.id === draggedNode.id) return node
-            const isTarget = node.id === target
+      const highlightedId = target?.kind === 'reparent' ? target.parentId : null
+      const indicator = insertionLineNode(target, boxes)
+      setNodes(current => {
+        const patched = current
+          .filter(node => node.id !== INSERTION_NODE_ID)
+          .map(node => {
+            if (node.id === draggedNode.id || !cardIds.has(node.id)) return node
+            const isTarget = node.id === highlightedId
             const highlightChanged = Boolean(node.data.isReparentTarget) !== isTarget
             const positionChanged = node.position !== layout[node.id]
             if (!highlightChanged && !positionChanged) return node
@@ -301,55 +426,87 @@ function MindMapCanvasInner() {
               data: highlightChanged ? { ...node.data, isReparentTarget: isTarget } : node.data,
             }
           })
-        )
-      } else {
-        const previewIndex = resolveDragIndex(cards, layout, draggedNode.id, draggedNode.position.y)
-        const previewLayout = computeLayout(moveCardToIndexOp(cards, draggedNode.id, previewIndex))
-        setNodes(current =>
-          current.map(node => {
-            if (node.id === draggedNode.id) return node
-            const highlightChanged = Boolean(node.data.isReparentTarget)
-            return {
-              ...node,
-              position: previewLayout[node.id] ?? node.position,
-              data: highlightChanged ? { ...node.data, isReparentTarget: false } : node.data,
-            }
-          })
-        )
-      }
+        return indicator ? [...patched, indicator] : patched
+      })
     },
     [cards, layout, nodes, setNodes]
   )
 
   const handleNodeDragStop: OnNodeDrag = useCallback(
     (_event, draggedNode) => {
-      if (reparentTargetId) {
-        moveCardToParent(draggedNode.id, reparentTargetId)
-      } else {
-        const newIndex = resolveDragIndex(cards, layout, draggedNode.id, draggedNode.position.y)
-        moveCardToIndex(draggedNode.id, newIndex)
-      }
+      const target = dropTarget
       setDraggingId(null)
-      setReparentTargetId(null)
+      setDropTarget(null)
+      if (!target) {
+        resyncNodes()
+        return
+      }
+      const index = target.kind === 'insert' ? target.index : undefined
+      const overflowCount = overflowingCardCount(cards, draggedNode.id, target.parentId)
+      // The card snaps home either way: on a plain move the store update
+      // immediately re-places it, and on an overflow it must not hover in
+      // limbo behind the confirmation dialog.
+      resyncNodes()
+      if (overflowCount > 0) {
+        setPendingMove({ cardId: draggedNode.id, parentId: target.parentId, index, overflowCount })
+        return
+      }
+      moveCard(draggedNode.id, target.parentId, index)
     },
-    [cards, layout, moveCardToIndex, moveCardToParent, reparentTargetId]
+    [cards, dropTarget, moveCard, resyncNodes]
   )
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      onNodesChange={onNodesChange}
-      nodeTypes={nodeTypes}
-      onNodeDragStart={handleNodeDragStart}
-      onNodeDrag={handleNodeDrag}
-      onNodeDragStop={handleNodeDragStop}
-      fitView
-    >
-      <Background />
-      <Controls showInteractive={false} />
-    </ReactFlow>
+    <>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        nodeTypes={nodeTypes}
+        onNodeDragStart={handleNodeDragStart}
+        onNodeDrag={handleNodeDrag}
+        onNodeDragStop={handleNodeDragStop}
+        fitView
+      >
+        <Background />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+
+      {pendingMove && (
+        <Dialog open onOpenChange={open => !open && setPendingMove(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{overflowWarningMessage(pendingMove.overflowCount)}</DialogTitle>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPendingMove(null)}>
+                Annuler
+              </Button>
+              <Button
+                onClick={() => {
+                  moveCard(pendingMove.cardId, pendingMove.parentId, pendingMove.index)
+                  setPendingMove(null)
+                }}
+              >
+                Confirmer
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   )
+}
+
+/** Cheap structural equality, so a drag frame that changes nothing re-renders nothing. */
+function sameDropTarget(a: DropTarget | null, b: DropTarget | null): boolean {
+  if (a === b) return true
+  if (!a || !b || a.kind !== b.kind) return false
+  if (a.kind === 'reparent' && b.kind === 'reparent') return a.parentId === b.parentId
+  if (a.kind === 'insert' && b.kind === 'insert') {
+    return a.parentId === b.parentId && a.index === b.index && a.anchorId === b.anchorId && a.side === b.side
+  }
+  return false
 }
 
 export function MindMapCanvas() {

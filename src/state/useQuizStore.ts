@@ -28,7 +28,9 @@ export function createQuizStore(): QuizStore {
     results: {},
     wasLockedBeforeQuiz: false,
     startQuiz: config => {
-      const cards = useCardsStore.getState().history.present
+      // Floating cards are a scratch area, not revision material: they are kept
+      // out of both the drawn questions and the distractor pool.
+      const cards = useCardsStore.getState().history.present.filter(c => !c.detached)
       const questions = attachDistractors(cards, selectQuizQuestions(cards, config), config.difficulty)
       const results: Record<string, QuizResult> = {}
       for (const q of questions) results[q.cardId] = 'unanswered'
