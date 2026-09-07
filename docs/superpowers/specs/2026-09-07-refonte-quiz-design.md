@@ -197,9 +197,11 @@ Actif par défaut (Paramètres). Pour toute question `recall` :
 - Le champ de saisie a un `maxLength` égal à la longueur exacte du vrai
   titre — impossible de taper plus long que la réponse.
 - Un guide visuel est affiché au-dessus du champ, reproduisant le titre sous
-  forme de tirets : **seuls les caractères lettre/chiffre sont masqués**
-  (`\p{L}` / `\p{N}` Unicode) ; espaces, ponctuation et symboles (parenthèses,
-  `+`, `−`, `=`, exposants comme `²`) restent visibles tels quels — convention
+  forme de tirets : **seuls les caractères lettre/chiffre décimal sont
+  masqués** (`\p{L}` / `\p{Nd}` Unicode — chiffres décimaux uniquement, ce
+  qui exclut les exposants comme `²`, catégorie Unicode différente) ; espaces,
+  ponctuation et symboles (parenthèses, `+`, `−`, `=`, exposants) restent
+  visibles tels quels — convention
   classique du jeu du pendu. Ceci permet de distinguer visuellement `(A+B)²`
   de `(A-B)²` avant même de taper, ce qui a été explicitement validé comme
   souhaitable pour l'apprentissage des identités remarquables en
