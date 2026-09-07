@@ -24,6 +24,7 @@ function App() {
   // load -> enable-autosave cycle, exactly like the original mount-only
   // effect did for the one hardcoded demo file.
   useEffect(() => {
+    let cancelled = false
     if (!currentFilePath) {
       setLoaded(false)
       return
@@ -32,15 +33,20 @@ function App() {
     setSaveFailed(false)
     loadMindMap(currentFilePath)
       .then(result => {
+        if (cancelled) return
         if (result !== null) loadCards(result)
         setLoaded(true)
       })
       .catch(err => {
+        if (cancelled) return
         console.error(
           'Échec du chargement de la carte mentale (le fichier existe mais est illisible ou corrompu) — autosave désactivée pour ne pas l’écraser :',
           err
         )
       })
+    return () => {
+      cancelled = true
+    }
   }, [currentFilePath, loadCards])
 
   const currentFileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : null
