@@ -8,9 +8,14 @@ import {
   updateTitle as updateTitleOp,
   updateDefinition as updateDefinitionOp,
   deleteCard as deleteCardOp,
+  deleteCardDetachingChildren as deleteCardDetachingChildrenOp,
   moveCardToIndex as moveCardToIndexOp,
   moveCardToParent as moveCardToParentOp,
+  moveCard as moveCardOp,
+  detachCard as detachCardOp,
   countDescendants,
+  flattenedCardCount,
+  overflowingCardCount,
   hasChildren as hasChildrenOp,
 } from './cardsReducer'
 
@@ -22,10 +27,19 @@ interface CardsState {
   updateTitle: (id: string, title: string) => void
   updateDefinition: (id: string, definition: string | undefined) => void
   deleteCard: (id: string) => void
+  /** Deletes the card but keeps its descendants, flattened into floating cards. */
+  deleteCardDetachingChildren: (id: string) => void
   descendantCount: (id: string) => number
   hasChildren: (id: string) => boolean
   moveCardToIndex: (id: string, newIndex: number) => void
   moveCardToParent: (id: string, newParentId: string) => void
+  /** Reparents a card (any level) and returns the ids detached past level 4. */
+  moveCard: (id: string, newParentId: string, index?: number) => string[]
+  detachCard: (id: string) => void
+  /** How many cards `detachCard` would turn into floating cards (the card included). */
+  flattenedCount: (id: string) => number
+  /** How many cards `moveCard` would detach past level 4 — 0 means the move fits. */
+  overflowCount: (id: string, newParentId: string) => number
   undo: () => void
   redo: () => void
   toggleLock: () => void
@@ -60,6 +74,10 @@ export function createCardsStore(): CardsStore {
       const next = deleteCardOp(get().history.present, id)
       set(state => ({ history: pushState(state.history, next) }))
     },
+    deleteCardDetachingChildren: id => {
+      const next = deleteCardDetachingChildrenOp(get().history.present, id)
+      set(state => ({ history: pushState(state.history, next) }))
+    },
     descendantCount: id => countDescendants(get().history.present, id),
     hasChildren: id => hasChildrenOp(get().history.present, id),
     moveCardToIndex: (id, newIndex) => {
@@ -70,6 +88,17 @@ export function createCardsStore(): CardsStore {
       const next = moveCardToParentOp(get().history.present, id, newParentId)
       set(state => ({ history: pushState(state.history, next) }))
     },
+    moveCard: (id, newParentId, index) => {
+      const { cards: next, detachedIds } = moveCardOp(get().history.present, id, newParentId, index)
+      set(state => ({ history: pushState(state.history, next) }))
+      return detachedIds
+    },
+    detachCard: id => {
+      const next = detachCardOp(get().history.present, id)
+      set(state => ({ history: pushState(state.history, next) }))
+    },
+    flattenedCount: id => flattenedCardCount(get().history.present, id),
+    overflowCount: (id, newParentId) => overflowingCardCount(get().history.present, id, newParentId),
     undo: () => set(state => ({ history: undoHistory(state.history) })),
     redo: () => set(state => ({ history: redoHistory(state.history) })),
     toggleLock: () => set(state => ({ locked: !state.locked })),

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Plus, ArrowRight, X, Check, GripVertical, AlignLeft, FlipHorizontal2, type LucideIcon } from 'lucide-react'
+import { Plus, ArrowRight, X, Check, GripVertical, AlignLeft, FlipHorizontal2, Unlink, Trash2, type LucideIcon } from 'lucide-react'
 import type { Card } from '../types/card'
+import { isRootCard } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
-import { levelColors } from '../colors/levelColors'
+import { detachedColors, levelColors } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
@@ -121,6 +122,9 @@ export function CardNode({ data }: CardNodeProps) {
   const addChild = useCardsStore(s => s.addChild)
   const addSibling = useCardsStore(s => s.addSibling)
   const deleteCard = useCardsStore(s => s.deleteCard)
+  const deleteCardDetachingChildren = useCardsStore(s => s.deleteCardDetachingChildren)
+  const detachCard = useCardsStore(s => s.detachCard)
+  const flattenedCount = useCardsStore(s => s.flattenedCount)
   const descendantCount = useCardsStore(s => s.descendantCount)
   const hasChildren = useCardsStore(s => s.hasChildren)
   const locked = useCardsStore(s => s.locked)
@@ -128,23 +132,35 @@ export function CardNode({ data }: CardNodeProps) {
   const [titleFocused, setTitleFocused] = useState(false)
   const [draftTitle, setDraftTitle] = useState(card.title)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmDetachOpen, setConfirmDetachOpen] = useState(false)
   const [definitionShown, setDefinitionShown] = useState(false)
   const [flipped, setFlipped] = useState(false)
   const [editingDefinition, setEditingDefinition] = useState(false)
   const [draftDefinition, setDraftDefinition] = useState(card.definition ?? '')
-  const colors = levelColors[card.level]
-  const childColors = card.level < 4 ? levelColors[(card.level + 1) as 1 | 2 | 3 | 4] : null
+  const isDetached = card.detached === true
+  // A floating card is painted grey whatever level it last had: its level is
+  // vestigial once it leaves the hierarchy (see the `detached` field), so
+  // colouring it by that stale value would read as "still a level-3 card".
+  const colors = isDetached ? detachedColors : levelColors[card.level]
+  const childColors = !isDetached && card.level < 4 ? levelColors[(card.level + 1) as 1 | 2 | 3 | 4] : null
 
-  const isRoot = card.parentId === null
+  const isRoot = isRootCard(card)
   // Add-actions that cannot apply here are removed outright, not greyed: a
   // root has no siblings to add above/below, and a card that already has a
   // child (or sits at level 4, where there is no level 5) has nowhere for a
   // new "->" child to go. Only the delete `x` keeps the "always present,
   // greyed when inapplicable" treatment — it is a destructive action on an
   // existing structure, not a slot for a card that cannot exist.
-  const canAddSibling = !isRoot
+  // Floating cards are excluded from both: they have no sibling group (no
+  // parent to add into) and may never have children — they are a scratch area,
+  // and getting children back is exactly what dropping one back onto the tree
+  // is for.
+  const canAddSibling = !isRoot && !isDetached
   const canAddChild = childColors !== null && !hasChildren(card.id)
-  const deleteDisabled = isRoot // the root cannot be deleted
+  // The root itself is never removed (single-root invariant), so its delete
+  // action only makes sense while it still has descendants to empty out.
+  const deleteDisabled = isRoot && !hasChildren(card.id)
+  const canDetach = !isRoot && !isDetached
 
   // A freshly created card opens its title editor straight away, so the
   // "prise de notes en direct" flow is type -> Entrée -> next card. The field
@@ -228,7 +244,22 @@ export function CardNode({ data }: CardNodeProps) {
     setEditingDefinition(false)
   }
 
+  // Detaching a leaf is a one-click, reversible (undo) change of status, so it
+  // happens straight away. Detaching a BRANCH also flattens it — every
+  // descendant becomes its own floating card — which is a structural change
+  // worth confirming, with the exact count of cards it will produce.
+  function handleDetachClick() {
+    if (hasChildren(card.id)) {
+      setConfirmDetachOpen(true)
+    } else {
+      detachCard(card.id)
+    }
+  }
+
   function handleDeleteClick() {
+    // A childless card is a one-click delete (undoable). As soon as there is a
+    // branch under it — or the card IS the root, which survives either way —
+    // the dialog asks what should happen to those descendants.
     if (descendantCount(card.id) === 0) {
       deleteCard(card.id)
     } else {
@@ -241,13 +272,22 @@ export function CardNode({ data }: CardNodeProps) {
       data-testid={`card-${card.id}`}
       data-flipped={flipped}
       data-reparent-target={isReparentTarget}
-      className={isReparentTarget ? 'card-node card-node--reparent-target' : 'card-node'}
+      data-detached={isDetached}
+      className={[
+        'card-node',
+        isDetached ? 'card-node--detached' : null,
+        isReparentTarget ? 'card-node--reparent-target' : null,
+      ]
+        .filter(Boolean)
+        .join(' ')}
       animate={{ rotateY: flipped ? 180 : 0 }}
       transition={{ duration: 0.4 }}
       style={{
         background: toCss(colors.bg),
         color: toCss(colors.text),
-        border: '2px solid',
+        // Dashed: a second, colour-independent cue that this card hangs
+        // outside the hierarchy (grey alone is easy to miss when zoomed out).
+        border: isDetached ? '2px dashed' : '2px solid',
         borderColor: resultBorderColor ?? toCss(colors.border),
         borderRadius: 8,
         // Room for the pinned edge buttons: the drag handle and the delete `x`
@@ -336,17 +376,6 @@ export function CardNode({ data }: CardNodeProps) {
         </span>
       )}
 
-      <span style={{ visibility: locked ? 'hidden' : 'visible' }}>
-        <EdgeButton
-          label="Supprimer"
-          icon={X}
-          color={toCss(colors.border)}
-          disabled={deleteDisabled}
-          onActivate={handleDeleteClick}
-          position={{ top: '-0.6rem', right: '-0.6rem' }}
-        />
-      </span>
-
       {isRecallPending && quizRevealed && (
         <>
           <EdgeButton
@@ -416,11 +445,32 @@ export function CardNode({ data }: CardNodeProps) {
         <Dialog open onOpenChange={setConfirmOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Supprimer cette card et ses {descendantCount(card.id)} enfants ?</DialogTitle>
+              <DialogTitle>
+                {isRoot
+                  ? `Supprimer les ${descendantCount(card.id)} descendants de la carte racine ?`
+                  : `Supprimer cette carte et ses ${descendantCount(card.id)} descendants ?`}
+              </DialogTitle>
             </DialogHeader>
+            <p style={{ margin: 0, fontSize: 14 }}>
+              {isRoot && 'La carte racine ne peut pas être supprimée : elle sera conservée. '}
+              <strong>Tout supprimer</strong> retire {isRoot ? 'ses' : 'la carte et ses'}{' '}
+              {descendantCount(card.id)} descendants du graphe.{' '}
+              <strong>Détacher les enfants</strong>{' '}
+              {isRoot ? 'conserve ses descendants' : 'ne supprime que cette carte et conserve ses descendants'} :
+              ils sont aplatis et deviennent {descendantCount(card.id)} cartes volantes individuelles.
+            </p>
             <DialogFooter>
               <Button variant="outline" onClick={() => setConfirmOpen(false)}>
                 Annuler
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  deleteCardDetachingChildren(card.id)
+                  setConfirmOpen(false)
+                }}
+              >
+                Détacher les enfants
               </Button>
               <Button
                 variant="destructive"
@@ -429,7 +479,40 @@ export function CardNode({ data }: CardNodeProps) {
                   setConfirmOpen(false)
                 }}
               >
-                Confirmer
+                Tout supprimer
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/*
+        Same mount-only-when-open trick as the delete dialog above:
+        `flattenedCount` walks the whole card list.
+      */}
+      {confirmDetachOpen && (
+        <Dialog open onOpenChange={setConfirmDetachOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Détacher cette carte et aplatir sa structure ?</DialogTitle>
+            </DialogHeader>
+            <p style={{ margin: 0, fontSize: 14 }}>
+              Cette action va aplatir la structure : cette carte et ses {descendantCount(card.id)} descendants
+              perdront leurs liens de parenté et deviendront {flattenedCount(card.id)} cartes volantes
+              individuelles. Les cartes volantes ne peuvent pas avoir d’enfants ; glissez-en une sur la carte
+              mentale pour la rattacher.
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmDetachOpen(false)}>
+                Annuler
+              </Button>
+              <Button
+                onClick={() => {
+                  detachCard(card.id)
+                  setConfirmDetachOpen(false)
+                }}
+              >
+                Accepter
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -487,6 +570,23 @@ export function CardNode({ data }: CardNodeProps) {
             </Tooltip>
           )}
 
+          {canDetach && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Détacher"
+                  disabled={locked}
+                  onClick={handleDetachClick}
+                >
+                  <Unlink />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Détacher (carte volante)</TooltipContent>
+            </Tooltip>
+          )}
+
           {quiz && quiz.result === 'unanswered' ? (
             quiz.type === 'recall' ? (
               <Tooltip>
@@ -517,6 +617,26 @@ export function CardNode({ data }: CardNodeProps) {
               <TooltipContent>Retourner</TooltipContent>
             </Tooltip>
           ) : null}
+
+          {/* Destructive action last in the row, and greyed rather than removed
+              on the root: the root is an existing card that cannot be deleted,
+              not a slot for something that cannot exist. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Supprimer"
+                disabled={locked || deleteDisabled}
+                onClick={handleDeleteClick}
+              >
+                <Trash2 />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isRoot ? 'Supprimer les descendants' : 'Supprimer'}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </TooltipProvider>
 

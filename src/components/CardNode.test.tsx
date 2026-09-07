@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
@@ -163,18 +163,19 @@ describe('CardNode', () => {
     // aria-label attribute directly rather than by accessible name matching.
     const hiddenButtons = screen.getAllByRole('button', { hidden: true })
     const addChildButton = hiddenButtons.find(el => el.getAttribute('aria-label') === 'Ajouter un enfant')
-    const deleteButton = hiddenButtons.find(el => el.getAttribute('aria-label') === 'Supprimer')
 
     expect(addChildButton).not.toBeVisible()
-    expect(deleteButton).not.toBeVisible()
     expect(screen.getByTestId('drag-handle')).not.toBeVisible()
+    // The footer actions stay in place (they are part of the card's own
+    // layout, not floating chrome) and are disabled instead.
+    expect(screen.getByRole('button', { name: 'Supprimer' })).toBeDisabled()
   })
 
   it('keeps the structural buttons visible when the mind map is unlocked', () => {
     renderCardNode(testCard)
 
     expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toBeVisible()
-    expect(screen.getByRole('button', { name: /supprimer/i })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Supprimer' })).toBeVisible()
     expect(screen.getByTestId('drag-handle')).toBeVisible()
   })
 })
@@ -231,47 +232,171 @@ describe('CardNode structural buttons', () => {
     renderCardNode(child)
     expect(screen.getByRole('button', { name: /ajouter au-dessus/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /supprimer/i })).toHaveAttribute('aria-disabled', 'false')
+    expect(screen.getByRole('button', { name: 'Supprimer' })).toBeEnabled()
   })
 })
 
 describe('CardNode delete', () => {
   beforeEach(() => resetStore([testCard]))
 
+  const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
+  const grandchild: Card = { id: 'grandchild', level: 3, title: 'Petit-enfant', parentId: 'child', order: 0 }
+
   it('deletes immediately when the card has no children', async () => {
     const user = userEvent.setup()
-    const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
     resetStore([testCard, child])
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: /supprimer/i }))
+    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
     expect(useCardsStore.getState().history.present).toHaveLength(1)
   })
 
-  it('shows a confirmation dialog before deleting a card with children', async () => {
+  it('offers three ways out when the card has children', async () => {
     const user = userEvent.setup()
-    const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
-    const grandchild: Card = { id: 'grandchild', level: 3, title: 'Petit-enfant', parentId: 'child', order: 0 }
     resetStore([testCard, child, grandchild])
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: /supprimer/i }))
-    expect(screen.getByText(/supprimer cette card et ses 1 enfants/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    expect(screen.getByText(/supprimer cette carte et ses 1 descendants/i)).toBeInTheDocument()
+    for (const name of [/annuler/i, /détacher les enfants/i, /tout supprimer/i]) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
+    }
     expect(useCardsStore.getState().history.present).toHaveLength(3)
-
-    await user.click(screen.getByRole('button', { name: /confirmer/i }))
-    expect(useCardsStore.getState().history.present).toHaveLength(1)
   })
 
-  it('keeps the delete button on the root card but greys it out', () => {
-    renderCardNode(testCard)
-    expect(screen.getByRole('button', { name: /supprimer/i })).toHaveAttribute('aria-disabled', 'true')
+  it('"Tout supprimer" removes the card and its whole branch', async () => {
+    const user = userEvent.setup()
+    resetStore([testCard, child, grandchild])
+    renderCardNode(child)
+
+    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await user.click(screen.getByRole('button', { name: /tout supprimer/i }))
+    expect(useCardsStore.getState().history.present.map(c => c.id)).toEqual(['root'])
   })
 
-  it('does not delete the root when its greyed-out delete button is clicked anyway', () => {
+  it('"Détacher les enfants" removes only the card, keeping its branch as floating cards', async () => {
+    const user = userEvent.setup()
+    resetStore([testCard, child, grandchild])
+    renderCardNode(child)
+
+    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await user.click(screen.getByRole('button', { name: /détacher les enfants/i }))
+
+    const cards = useCardsStore.getState().history.present
+    expect(cards.find(c => c.id === 'child')).toBeUndefined()
+    expect(cards.find(c => c.id === 'grandchild')).toMatchObject({ detached: true, parentId: null })
+  })
+
+  it('"Annuler" closes the dialog without touching anything', async () => {
+    const user = userEvent.setup()
+    resetStore([testCard, child, grandchild])
+    renderCardNode(child)
+
+    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await user.click(screen.getByRole('button', { name: /annuler/i }))
+    expect(useCardsStore.getState().history.present).toHaveLength(3)
+  })
+
+  it('disables the delete button on a childless root (nothing to remove)', () => {
     renderCardNode(testCard)
-    fireEvent.click(screen.getByRole('button', { name: /supprimer/i }))
-    expect(useCardsStore.getState().history.present).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Supprimer' })).toBeDisabled()
+  })
+
+  it('lets the root empty itself, saying the root card is kept', async () => {
+    const user = userEvent.setup()
+    resetStore([testCard, child, grandchild])
+    renderCardNode(testCard)
+
+    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    expect(screen.getByText(/supprimer les 2 descendants de la carte racine/i)).toBeInTheDocument()
+    expect(screen.getByText(/la carte racine ne peut pas être supprimée/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /tout supprimer/i }))
+    expect(useCardsStore.getState().history.present.map(c => c.id)).toEqual(['root'])
+  })
+})
+
+describe('CardNode detach', () => {
+  const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
+  const grandchild: Card = { id: 'grandchild', level: 3, title: 'Petit-enfant', parentId: 'child', order: 0 }
+
+  beforeEach(() => resetStore([testCard, child]))
+
+  it('detaches a childless card straight away, no dialog', async () => {
+    const user = userEvent.setup()
+    renderCardNode(child)
+
+    await user.click(screen.getByRole('button', { name: /détacher/i }))
+    expect(useCardsStore.getState().history.present.find(c => c.id === 'child')).toMatchObject({
+      detached: true,
+      parentId: null,
+    })
+  })
+
+  it('warns how many floating cards a branch would be flattened into', async () => {
+    const user = userEvent.setup()
+    resetStore([testCard, child, grandchild])
+    renderCardNode(child)
+
+    await user.click(screen.getByRole('button', { name: /détacher/i }))
+    expect(screen.getByText(/deviendront 2 cartes volantes individuelles/i)).toBeInTheDocument()
+    // Nothing happens until the user accepts.
+    expect(useCardsStore.getState().history.present.some(c => c.detached)).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: /accepter/i }))
+    const cards = useCardsStore.getState().history.present
+    expect(cards.filter(c => c.detached).map(c => c.id)).toEqual(['child', 'grandchild'])
+  })
+
+  it('cancelling the flatten dialog leaves the branch alone', async () => {
+    const user = userEvent.setup()
+    resetStore([testCard, child, grandchild])
+    renderCardNode(child)
+
+    await user.click(screen.getByRole('button', { name: /détacher/i }))
+    await user.click(screen.getByRole('button', { name: /annuler/i }))
+    expect(useCardsStore.getState().history.present.some(c => c.detached)).toBe(false)
+  })
+
+  it('offers no detach action on the root card', () => {
+    renderCardNode(testCard)
+    expect(screen.queryByRole('button', { name: /détacher/i })).not.toBeInTheDocument()
+  })
+
+  it('disables the detach action while the mind map is locked', () => {
+    useCardsStore.getState().toggleLock()
+    renderCardNode(child)
+    expect(screen.getByRole('button', { name: /détacher/i })).toBeDisabled()
+  })
+})
+
+describe('CardNode floating (detached) cards', () => {
+  const floating: Card = { id: 'floating', level: 3, title: 'Volante', parentId: null, order: 0, detached: true }
+
+  beforeEach(() => resetStore([testCard, floating]))
+
+  it('marks itself as detached so the canvas can grey it out', () => {
+    renderCardNode(floating)
+    expect(screen.getByTestId('card-floating')).toHaveAttribute('data-detached', 'true')
+    expect(screen.getByTestId('card-floating').className).toContain('card-node--detached')
+  })
+
+  it('offers no way to give it children or siblings (it is a scratch area)', () => {
+    renderCardNode(floating)
+    expect(screen.queryByRole('button', { name: /ajouter un enfant/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /ajouter au-dessus/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /ajouter en dessous/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /détacher/i })).not.toBeInTheDocument()
+  })
+
+  it('can still be deleted — it is not the root, despite having no parent', async () => {
+    const user = userEvent.setup()
+    renderCardNode(floating)
+
+    const deleteButton = screen.getByRole('button', { name: 'Supprimer' })
+    expect(deleteButton).toBeEnabled()
+    await user.click(deleteButton)
+    expect(useCardsStore.getState().history.present.map(c => c.id)).toEqual(['root'])
   })
 })
 
