@@ -32,3 +32,6 @@ dist-ssr
 # Rust / Tauri
 src-tauri/target/
 src-tauri/gen/schemas
+
+# Isolated worktrees for subagent-driven-development
+.worktrees/

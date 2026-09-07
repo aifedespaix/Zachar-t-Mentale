@@ -34,8 +34,11 @@ export default defineConfig(() => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri` and the user's mind-map
+      // data folder — both live inside the project root but are written to
+      // at runtime (autosave, import/export), and a reload on every write
+      // would wipe the in-memory app state (open file, undo history).
+      ignored: ["**/src-tauri/**", "**/.cartes-mentales/**"],
     },
   },
 }));

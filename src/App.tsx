@@ -1,8 +1,9 @@
 // src/App.tsx
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { MindMapCanvas } from './components/MindMapCanvas'
 import { CanvasErrorBoundary } from './components/CanvasErrorBoundary'
 import { CorruptedMapDialog } from './components/CorruptedMapDialog'
+import { SaveFailedDialog } from './components/SaveFailedDialog'
 import { LockToggle } from './components/LockToggle'
 import { FileSidebar } from './components/sidebar/FileSidebar'
 import { QuizButton } from './components/quiz/QuizButton'
@@ -18,6 +19,9 @@ import { loadMindMap, saveMindMap, mindMapExists } from './persistence/fileStore
 import { fileNameOf, parentDirOf, repairedCopyPath } from './persistence/paths'
 import { repairCards, validateCards, type CardIssue } from './validation/cardsValidation'
 import { useUndoRedoShortcuts } from './hooks/useUndoRedoShortcuts'
+import { useWindowTitle } from './hooks/useWindowTitle'
+import { useUnsavedChangesGuard } from './hooks/useUnsavedChangesGuard'
+import { useFileDropZone } from './hooks/useFileDropZone'
 import type { Card } from './types/card'
 
 /** A map that failed validation, held until the user decides what to do with it. */
@@ -63,10 +67,18 @@ function App() {
   // and gated on, and what autosave writes to — so nothing can ever render, or
   // be written, for a file the app has not fully loaded.
   const [loadedPath, setLoadedPath] = useState<string | null>(null)
+  const mainRef = useRef<HTMLElement | null>(null)
   useUndoRedoShortcuts()
-  useAutosave(loadedPath ?? '', cards, 500, loadedPath !== null && loadedPath === currentFilePath, () =>
-    setSaveFailed(true)
+  useWindowTitle(currentFilePath)
+  const { flush } = useAutosave(
+    loadedPath ?? '',
+    cards,
+    500,
+    loadedPath !== null && loadedPath === currentFilePath,
+    () => setSaveFailed(true)
   )
+  const { requestOpenFile, prompt, dismissPrompt } = useUnsavedChangesGuard(flush, setCurrentFile)
+  const { isDragActive, dropError } = useFileDropZone(mainRef, requestOpenFile)
 
   useEffect(() => {
     useQuizSettingsStore.getState().init()
@@ -175,7 +187,7 @@ function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
-      <FileSidebar onOpenFile={setCurrentFile} />
+      <FileSidebar onOpenFile={requestOpenFile} />
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
         <header style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
           {!quizActive && <LockToggle />}
@@ -217,7 +229,47 @@ function App() {
             </button>
           </div>
         )}
-        <main style={{ flex: 1 }}>
+        {dropError && (
+          <div
+            role="alert"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              margin: '0 8px 8px',
+              padding: '6px 8px',
+              border: '1px solid #f59e0b',
+              borderRadius: 4,
+              background: '#fef3c7',
+              color: '#92400e',
+              fontSize: 13,
+            }}
+          >
+            <span style={{ flex: 1 }}>⚠ {dropError}</span>
+          </div>
+        )}
+        <main ref={mainRef} style={{ flex: 1, position: 'relative' }}>
+          {isDragActive && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 8,
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '2px dashed var(--primary)',
+                borderRadius: 8,
+                background: 'color-mix(in oklch, var(--primary), transparent 90%)',
+                color: 'var(--primary)',
+                fontSize: 16,
+                fontWeight: 500,
+                pointerEvents: 'none',
+              }}
+            >
+              Déposez la carte mentale ici pour l’ouvrir
+            </div>
+          )}
           {loadedPath ? (
             // Keyed by the loaded file: switching maps REMOUNTS the canvas
             // instead of feeding a new card set to the previous one. React Flow
@@ -251,6 +303,15 @@ function App() {
           error={repairError}
           onCancel={() => setPendingRepair(null)}
           onRepair={handleRepair}
+        />
+      )}
+
+      {prompt && (
+        <SaveFailedDialog
+          message={prompt.message}
+          continueLabel={prompt.continueLabel}
+          onCancel={dismissPrompt}
+          onContinue={prompt.onContinue}
         />
       )}
     </div>

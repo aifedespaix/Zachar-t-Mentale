@@ -2,6 +2,7 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type { FileTreeNode, RootFolder } from '../types/workspace'
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../persistence/workspaceConfig'
 import { scanFolder } from '../persistence/fileTree'
+import { loadSessionState, saveSessionState } from '../persistence/sessionState'
 
 interface WorkspaceState {
   rootFolders: RootFolder[]
@@ -93,7 +94,17 @@ export function createWorkspaceStore(): WorkspaceStore {
         failed.push(path)
         return { path, tree: [] }
       })
-      set({ rootFolders, workspaceError: failed.length > 0 ? scanFailureMessage(failed) : null })
+      // `state.currentFilePath` may already be set by the time this scan
+      // resolves — the user opened a file while init was still in flight.
+      // That choice wins; the session is only a fallback for a truly fresh
+      // start, never something that overrides what's already on screen.
+      const session = loadSessionState()
+      set(state => ({
+        rootFolders,
+        workspaceError: failed.length > 0 ? scanFailureMessage(failed) : null,
+        currentFilePath: state.currentFilePath ?? session.currentFilePath,
+        expandedPaths: new Set([...state.expandedPaths, ...session.expandedPaths]),
+      }))
     },
     addRootFolder: async path => {
       if (get().rootFolders.some(f => f.path === path)) return
@@ -161,9 +172,14 @@ export function createWorkspaceStore(): WorkspaceStore {
         const next = new Set(state.expandedPaths)
         if (next.has(path)) next.delete(path)
         else next.add(path)
+        saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next] })
         return { expandedPaths: next }
       }),
-    setCurrentFile: path => set({ currentFilePath: path }),
+    setCurrentFile: path =>
+      set(state => {
+        saveSessionState({ currentFilePath: path, expandedPaths: [...state.expandedPaths] })
+        return { currentFilePath: path }
+      }),
     setWorkspaceError: message => set({ workspaceError: message }),
   }))
 }

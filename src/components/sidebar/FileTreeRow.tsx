@@ -12,16 +12,24 @@ import {
   Pencil,
   Trash2,
   X,
+  Download,
+  FileUp,
   type LucideIcon,
 } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
+import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
-import { createMindMapFile, createSubfolder, renamePath, deletePath } from '../../persistence/fileOps'
+import { createMindMapFile, createSubfolder, renamePath, deletePath, freeMindMapPath } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
-import { parentDirOf, separatorOf } from '../../persistence/paths'
+import { parentDirOf, separatorOf, fileNameOf } from '../../persistence/paths'
+import { loadMindMap, saveMindMap } from '../../persistence/fileStore'
+import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
+import { readXmindFile } from '../../xmind/importXmind'
+import { validateCards } from '../../validation/cardsValidation'
 import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
+import { ExportDialog } from './ExportDialog'
 
 interface FileTreeRowProps {
   node: FileTreeNode
@@ -85,6 +93,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
   const [renaming, setRenaming] = useState(false)
   const [draftRenameName, setDraftRenameName] = useState(node.name)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [exportCards, setExportCards] = useState<Card[] | null>(null)
 
   const indent = { paddingLeft: 8 + depth * 16 }
 
@@ -151,6 +160,49 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     await refreshFolder(parentPath)
   }
 
+  async function handleImportXmind() {
+    let path: string | null = null
+    let sheetsWritten = 0
+    try {
+      path = await pickXmindFile()
+      if (!path) return
+      const bytes = await readBinaryFile(path)
+      const sheets = await readXmindFile(bytes)
+      for (const sheet of sheets) {
+        const target = await freeMindMapPath(node.path, sheet.sheetTitle)
+        await saveMindMap(target, sheet.cards)
+        sheetsWritten += 1
+      }
+      await refreshFolder(node.path)
+    } catch (error) {
+      // Refresh BEFORE reporting the error: a successful refreshFolder resets
+      // workspaceError to null as part of its own state update, which would
+      // otherwise immediately clobber the message we're about to set below.
+      if (sheetsWritten > 0) await refreshFolder(node.path)
+      const partial = sheetsWritten > 0 ? ` (${sheetsWritten} carte(s) mentale(s) déjà importée(s) avant l’échec)` : ''
+      setWorkspaceError(`Impossible d’importer « ${path ? fileNameOf(path) : 'le fichier XMind'} » : ${describeError(error)}${partial}`)
+    }
+  }
+
+  async function openExport() {
+    let raw: Card[] | null
+    try {
+      raw = await loadMindMap(node.path)
+    } catch (error) {
+      setWorkspaceError(`Impossible d’exporter « ${node.name} » : ${describeError(error)}`)
+      return
+    }
+    if (raw === null) {
+      setWorkspaceError(`Impossible d’exporter « ${node.name} » : ce fichier n’existe plus.`)
+      return
+    }
+    if (!validateCards(raw).valid) {
+      setWorkspaceError(`Impossible d’exporter « ${node.name} » : la structure du fichier est invalide.`)
+      return
+    }
+    setExportCards(raw)
+  }
+
   if (node.type === 'folder') {
     const isExpanded = expandedPaths.has(node.path)
     return (
@@ -193,6 +245,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
                 setDraftCreateName('')
               }}
             />
+            <ActionButton label="Importer XMind" icon={FileUp} onClick={handleImportXmind} />
             {!isRoot && <ActionButton label="Renommer" icon={Pencil} onClick={() => setRenaming(true)} />}
             {!isRoot && <ActionButton label="Supprimer" icon={Trash2} onClick={() => setConfirmDeleteOpen(true)} />}
             {isRoot && (
@@ -294,6 +347,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
         )}
         <TooltipProvider>
           <ActionButton label="Renommer" icon={Pencil} onClick={() => setRenaming(true)} />
+          <ActionButton label="Exporter" icon={Download} onClick={openExport} />
           <ActionButton label="Supprimer" icon={Trash2} onClick={() => setConfirmDeleteOpen(true)} />
         </TooltipProvider>
 
@@ -302,6 +356,16 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
             title={`Supprimer le fichier « ${node.name} » ?`}
             onCancel={() => setConfirmDeleteOpen(false)}
             onConfirm={confirmDelete}
+          />
+        )}
+
+        {exportCards && (
+          <ExportDialog
+            fileName={node.name}
+            cards={exportCards}
+            open
+            onClose={() => setExportCards(null)}
+            onError={setWorkspaceError}
           />
         )}
       </div>

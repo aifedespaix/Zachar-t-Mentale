@@ -1,4 +1,5 @@
 import { render, screen, act } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import App from './App'
 import type { Card } from './types/card'
@@ -24,11 +25,16 @@ vi.mock('./persistence/fileTree', async importOriginal => {
   return { ...actual, scanFolder: vi.fn() }
 })
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
+vi.mock('./persistence/sessionState', () => ({
+  loadSessionState: vi.fn(),
+  saveSessionState: vi.fn(),
+}))
 
 import { loadMindMap, saveMindMap, mindMapExists } from './persistence/fileStore'
 import { CORRUPTED_MAP_MESSAGE } from './components/CorruptedMapDialog'
 import { loadWorkspaceConfig } from './persistence/workspaceConfig'
 import { scanFolder } from './persistence/fileTree'
+import { loadSessionState } from './persistence/sessionState'
 
 const PATH_A = '/cours/chapitre-a.json'
 const PATH_B = '/cours/chapitre-b.json'
@@ -70,6 +76,7 @@ describe('App file switching', () => {
     vi.mocked(loadMindMap).mockReset()
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
   })
   afterEach(() => {
@@ -161,6 +168,7 @@ describe('App quiz wiring', () => {
     vi.mocked(saveMindMap).mockReset()
     vi.mocked(loadMindMap).mockResolvedValue(null)
     vi.mocked(saveMindMap).mockResolvedValue(undefined)
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
     const pristine = createQuizStore().getState()
     useQuizStore.setState({
       active: pristine.active,
@@ -213,6 +221,7 @@ describe('App corrupted-map guard', () => {
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
   })
   afterEach(() => {
@@ -350,6 +359,7 @@ describe('App canvas mounting', () => {
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
   })
   afterEach(() => {
@@ -390,5 +400,74 @@ describe('App canvas mounting', () => {
     // measurements, `fitView`) is rebuilt for the new map rather than inheriting
     // the previous file's framing.
     expect(canvasForB).not.toBe(canvasForA)
+  })
+})
+
+describe('App unsaved changes guard', () => {
+  beforeEach(() => {
+    resetStores()
+    vi.useFakeTimers()
+    vi.mocked(loadMindMap).mockReset()
+    vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
+    vi.mocked(loadWorkspaceConfig)
+      .mockReset()
+      .mockResolvedValue({ rootFolders: ['/cours'] })
+    vi.mocked(scanFolder)
+      .mockReset()
+      .mockResolvedValue([
+        { type: 'mindmap', name: 'chapitre-a.json', path: PATH_A },
+        { type: 'mindmap', name: 'chapitre-b.json', path: PATH_B },
+      ])
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('clicking another file flushes the pending edit before switching, with no prompt when it succeeds', async () => {
+    vi.mocked(loadMindMap).mockImplementation(async path => (path === PATH_A ? cardsA : cardsB))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'cours' }))
+    await user.click(await screen.findByRole('button', { name: 'chapitre-a.json' }))
+    await settle()
+    const rootId = useCardsStore.getState().history.present[0].id
+    await act(async () => {
+      useCardsStore.getState().addChild(rootId)
+    })
+    vi.mocked(saveMindMap).mockClear()
+
+    await user.click(screen.getByRole('button', { name: 'chapitre-b.json' }))
+    await settle()
+
+    // The edit made just before switching was written under PATH_A, not lost.
+    expect(saveMindMap).toHaveBeenCalledWith(PATH_A, expect.arrayContaining([expect.objectContaining({})]))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(useWorkspaceStore.getState().currentFilePath).toBe(PATH_B)
+  })
+
+  it('prompts instead of silently dropping the edit when the flush fails, and opens the new file on confirm', async () => {
+    vi.mocked(loadMindMap).mockImplementation(async path => (path === PATH_A ? cardsA : cardsB))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'cours' }))
+    await user.click(await screen.findByRole('button', { name: 'chapitre-a.json' }))
+    await settle()
+    const rootId = useCardsStore.getState().history.present[0].id
+    await act(async () => {
+      useCardsStore.getState().addChild(rootId)
+    })
+    vi.mocked(saveMindMap).mockReset().mockRejectedValue(new Error('disque plein'))
+
+    await user.click(screen.getByRole('button', { name: 'chapitre-b.json' }))
+
+    expect(await screen.findByText(/disque plein/)).toBeInTheDocument()
+    // Still on A: the switch has not happened yet, pending the user's decision.
+    expect(useWorkspaceStore.getState().currentFilePath).toBe(PATH_A)
+
+    await user.click(screen.getByRole('button', { name: 'Ouvrir quand même' }))
+
+    expect(useWorkspaceStore.getState().currentFilePath).toBe(PATH_B)
   })
 })

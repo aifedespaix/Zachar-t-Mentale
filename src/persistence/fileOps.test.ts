@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createMindMapFile, createSubfolder, renamePath, deletePath } from './fileOps'
+import { createMindMapFile, createSubfolder, renamePath, deletePath, freeMindMapPath } from './fileOps'
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
   mkdir: vi.fn(),
@@ -10,8 +10,10 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 vi.mock('@tauri-apps/api/path', () => ({
   join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
 }))
+vi.mock('./fileStore', () => ({ mindMapExists: vi.fn() }))
 
 import { mkdir, remove, rename, writeTextFile } from '@tauri-apps/plugin-fs'
+import { mindMapExists } from './fileStore'
 
 describe('createMindMapFile', () => {
   beforeEach(() => vi.mocked(writeTextFile).mockReset())
@@ -64,5 +66,24 @@ describe('deletePath', () => {
   it('deletes a folder recursively', async () => {
     await deletePath('/cours/chimie', true)
     expect(remove).toHaveBeenCalledWith('/cours/chimie', { recursive: true })
+  })
+})
+
+describe('freeMindMapPath', () => {
+  beforeEach(() => vi.mocked(mindMapExists).mockReset())
+
+  it('returns the plain sanitized name when nothing collides', async () => {
+    vi.mocked(mindMapExists).mockResolvedValue(false)
+    const path = await freeMindMapPath('/cours', 'Vecteurs: Forces')
+    expect(path).toBe('/cours/Vecteurs Forces.json')
+  })
+
+  it('appends a numbered suffix until it finds a free name', async () => {
+    vi.mocked(mindMapExists)
+      .mockResolvedValueOnce(true) // "Chapitre.json" taken
+      .mockResolvedValueOnce(true) // "Chapitre (2).json" taken
+      .mockResolvedValueOnce(false) // "Chapitre (3).json" free
+    const path = await freeMindMapPath('/cours', 'Chapitre')
+    expect(path).toBe('/cours/Chapitre (3).json')
   })
 })
