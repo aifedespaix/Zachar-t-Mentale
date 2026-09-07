@@ -15,9 +15,11 @@ vi.mock('../../persistence/fileTree', async importOriginal => {
   const actual = await importOriginal<typeof import('../../persistence/fileTree')>()
   return { ...actual, scanFolder: vi.fn() }
 })
+vi.mock('../../persistence/fileStore', () => ({ loadMindMap: vi.fn() }))
 
 import { createMindMapFile, createSubfolder, renamePath, deletePath } from '../../persistence/fileOps'
 import { scanFolder } from '../../persistence/fileTree'
+import { loadMindMap } from '../../persistence/fileStore'
 
 function resetWorkspaceStore() {
   const pristine = createWorkspaceStore().getState()
@@ -37,6 +39,7 @@ describe('FileTreeRow', () => {
     vi.mocked(renamePath).mockReset()
     vi.mocked(deletePath).mockReset()
     vi.mocked(scanFolder).mockReset()
+    vi.mocked(loadMindMap).mockReset()
   })
 
   it('renders a mindmap file and opens it on click', async () => {
@@ -310,5 +313,44 @@ describe('FileTreeRow', () => {
     expect(screen.queryByRole('button', { name: 'Supprimer' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Nouvelle carte mentale' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Nouveau sous-dossier' })).toBeInTheDocument()
+  })
+
+  it('opens the export dialog with the file\'s cards once they are loaded and validated', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadMindMap).mockResolvedValue([
+      { id: 'root', level: 1, title: 'Racine', parentId: null, order: 0 },
+    ])
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: 'Exporter' }))
+
+    expect(await screen.findByText('Exporter « chapitre1 »')).toBeInTheDocument()
+  })
+
+  it('reports an error instead of opening the dialog when the file no longer exists', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadMindMap).mockResolvedValue(null)
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: 'Exporter' }))
+
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/n’existe plus/))
+    expect(screen.queryByText(/^Exporter «/)).not.toBeInTheDocument()
+  })
+
+  it('reports an error instead of opening the dialog when the file fails validation', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadMindMap).mockResolvedValue([
+      { id: 'a', level: 1, title: 'A', parentId: null, order: 0 },
+      { id: 'b', level: 1, title: 'B', parentId: null, order: 0 }, // a second root: invalid
+    ])
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: 'Exporter' }))
+
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/structure du fichier est invalide/))
   })
 })
