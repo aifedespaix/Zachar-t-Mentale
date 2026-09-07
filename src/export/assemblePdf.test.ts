@@ -4,9 +4,7 @@ const addImage = vi.fn()
 const addPage = vi.fn()
 const output = vi.fn(() => new ArrayBuffer(4))
 vi.mock('jspdf', () => ({
-  jsPDF: vi.fn(function() {
-    return { addImage, addPage, output }
-  }),
+  jsPDF: vi.fn().mockImplementation(function() { return { addImage, addPage, output } }),
 }))
 
 import { assemblePdf } from './assemblePdf'
