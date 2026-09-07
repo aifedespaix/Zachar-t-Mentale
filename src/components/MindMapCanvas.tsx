@@ -76,7 +76,13 @@ function buildNodes(
     const spawnParent = card.id === spawningId ? cards.find(c => c.id === card.parentId) : undefined
     const question = quizQuestions.find(q => q.cardId === card.id)
     const quiz = question
-      ? { type: question.type, result: quizResults[card.id] ?? 'unanswered', distractorDefinitions: question.distractorDefinitions }
+      ? {
+          type: question.type,
+          result: quizResults[card.id] ?? 'unanswered',
+          distractorDefinitions: question.distractorDefinitions,
+          distractorTitles: question.distractorTitles,
+          hint: question.hint,
+        }
       : undefined
     return {
       id: card.id,

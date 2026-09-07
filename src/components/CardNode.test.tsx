@@ -8,7 +8,13 @@ import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 
-type QuizData = { type: QuizQuestionType; result: QuizResult; distractorDefinitions?: string[] }
+type QuizData = {
+  type: QuizQuestionType
+  result: QuizResult
+  distractorDefinitions?: string[]
+  distractorTitles?: string[]
+  hint?: string
+}
 
 const testCard: Card = { id: 'root', level: 1, title: 'Titre initial', parentId: null, order: 0 }
 
@@ -670,12 +676,12 @@ describe('CardNode footer', () => {
     expect(screen.queryByRole('textbox', { name: /définition/i })).not.toBeInTheDocument()
   })
 
-  it('opens the QCM dialog when a pending qcm question\'s "Répondre" button is clicked', async () => {
+  it('opens the QCM dialog when a pending qcm-definition question\'s "Répondre" button is clicked', async () => {
     const user = userEvent.setup()
     const cardWithDef: Card = { ...testCard, definition: 'Bonne définition' }
     resetStore([cardWithDef])
     renderCardNode(cardWithDef, false, false, {
-      type: 'qcm',
+      type: 'qcm-definition',
       result: 'unanswered',
       distractorDefinitions: ['Fausse A', 'Fausse B'],
     })
@@ -687,13 +693,13 @@ describe('CardNode footer', () => {
     expect(screen.getByText('Fausse A')).toBeInTheDocument()
   })
 
-  it('records the qcm answer in the quiz store once a choice is made', async () => {
+  it('records the qcm-definition answer in the quiz store once a choice is made', async () => {
     vi.useFakeTimers()
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     const cardWithDef: Card = { ...testCard, definition: 'Bonne définition' }
     resetStore([cardWithDef])
     renderCardNode(cardWithDef, false, false, {
-      type: 'qcm',
+      type: 'qcm-definition',
       result: 'unanswered',
       distractorDefinitions: ['Fausse A'],
     })
@@ -703,6 +709,40 @@ describe('CardNode footer', () => {
     vi.advanceTimersByTime(700)
 
     expect(useQuizStore.getState().results[cardWithDef.id]).toBe('correct')
+    vi.useRealTimers()
+  })
+
+  it('opens a qcm-title question showing the hint and title options, without leaking the real title as the heading', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, {
+      type: 'qcm-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+      hint: 'Un indice',
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+
+    expect(screen.queryByRole('heading', { name: testCard.title })).not.toBeInTheDocument()
+    expect(screen.getByText('Un indice')).toBeInTheDocument()
+    expect(screen.getByText(testCard.title)).toBeInTheDocument()
+    expect(screen.getByText('Autre titre')).toBeInTheDocument()
+  })
+
+  it('records the qcm-title answer in the quiz store once a choice is made', async () => {
+    vi.useFakeTimers()
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderCardNode(testCard, false, false, {
+      type: 'qcm-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+    await user.click(screen.getByText(testCard.title))
+    vi.advanceTimersByTime(700)
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
     vi.useRealTimers()
   })
 })

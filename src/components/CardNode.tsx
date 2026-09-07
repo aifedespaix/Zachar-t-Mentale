@@ -22,6 +22,8 @@ interface QuizData {
   type: QuizQuestionType
   result: QuizResult
   distractorDefinitions?: string[]
+  distractorTitles?: string[]
+  hint?: string
 }
 
 type CardNodeProps = NodeProps & {
@@ -109,8 +111,9 @@ export function CardNode({ data }: CardNodeProps) {
   const displayMasked = isRecallPending && !recallFeedback
   const answerRecall = useQuizStore(s => s.answerRecall)
   const answerQcmDefinition = useQuizStore(s => s.answerQcmDefinition)
+  const answerQcmTitle = useQuizStore(s => s.answerQcmTitle)
   const [qcmOpen, setQcmOpen] = useState(false)
-  const isQcmPending = quiz?.type === 'qcm' && quiz.result === 'unanswered'
+  const isQcmPending = (quiz?.type === 'qcm-definition' || quiz?.type === 'qcm-title') && quiz.result === 'unanswered'
   const resultBorderColor = quiz?.result === 'correct' ? '#16a34a' : quiz?.result === 'incorrect' ? '#dc2626' : undefined
 
   // React Flow keeps CardNode mounted for the life of the app (nodes are
@@ -675,11 +678,16 @@ export function CardNode({ data }: CardNodeProps) {
       {isQcmPending && (
         <QcmDialog
           open={qcmOpen}
-          heading={card.title}
-          correctOption={card.definition ?? ''}
-          distractors={quiz.distractorDefinitions ?? []}
+          heading={quiz.type === 'qcm-definition' ? card.title : 'Quel est le titre de cette carte ?'}
+          hint={quiz.type === 'qcm-title' ? quiz.hint : undefined}
+          noHintNote={
+            quiz.type === 'qcm-title' && !quiz.hint ? 'Aide-toi de la position de la carte dans l’arbre.' : undefined
+          }
+          correctOption={quiz.type === 'qcm-definition' ? (card.definition ?? '') : card.title}
+          distractors={quiz.type === 'qcm-definition' ? (quiz.distractorDefinitions ?? []) : (quiz.distractorTitles ?? [])}
           onAnswer={chosen => {
-            answerQcmDefinition(card.id, chosen)
+            if (quiz.type === 'qcm-definition') answerQcmDefinition(card.id, chosen)
+            else answerQcmTitle(card.id, chosen)
             setQcmOpen(false)
           }}
           onCancel={() => setQcmOpen(false)}
