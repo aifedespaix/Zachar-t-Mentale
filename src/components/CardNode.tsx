@@ -675,8 +675,8 @@ export function CardNode({ data }: CardNodeProps) {
       {isQcmPending && (
         <QcmDialog
           open={qcmOpen}
-          title={card.title}
-          correctDefinition={card.definition ?? ''}
+          heading={card.title}
+          correctOption={card.definition ?? ''}
           distractors={quiz.distractorDefinitions ?? []}
           onAnswer={chosen => {
             answerQcmDefinition(card.id, chosen)

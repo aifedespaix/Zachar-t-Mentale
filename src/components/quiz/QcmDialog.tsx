@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import { Check, X } from 'lucide-react'
+import { Check, X, Lightbulb, Network } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 
 interface QcmDialogProps {
   open: boolean
-  title: string
-  correctDefinition: string
+  heading: string
+  hint?: string
+  noHintNote?: string
+  correctOption: string
   distractors: string[]
-  onAnswer: (chosenDefinition: string) => void
+  onAnswer: (chosen: string) => void
   onCancel: () => void
   random?: () => number
 }
@@ -21,16 +23,20 @@ function shuffle<T>(items: T[], random: () => number): T[] {
   return copy
 }
 
+const LETTERS = ['A', 'B', 'C', 'D']
+
 export function QcmDialog({
   open,
-  title,
-  correctDefinition,
+  heading,
+  hint,
+  noHintNote,
+  correctOption,
   distractors,
   onAnswer,
   onCancel,
   random = Math.random,
 }: QcmDialogProps) {
-  const [options] = useState(() => shuffle([correctDefinition, ...distractors], random))
+  const [options] = useState(() => shuffle([correctOption, ...distractors], random))
   const [chosen, setChosen] = useState<string | null>(null)
 
   function handleChoose(option: string) {
@@ -50,13 +56,43 @@ export function QcmDialog({
         if (!next && chosen === null) onCancel()
       }}
     >
-      <DialogContent showCloseButton={false}>
+      <DialogContent showCloseButton={false} style={{ maxWidth: 480, overflow: 'hidden' }}>
+        <div
+          style={{
+            height: 5,
+            margin: '-1rem -1rem 0',
+            background:
+              'linear-gradient(90deg, oklch(0.55 0.18 25), oklch(0.6 0.19 70), oklch(0.55 0.14 235), oklch(0.62 0.17 105))',
+          }}
+        />
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle>{heading}</DialogTitle>
         </DialogHeader>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {options.map(option => {
-            const isCorrectOption = option === correctDefinition
+
+        {(hint || noHintNote) && (
+          <div
+            style={{
+              display: 'flex',
+              gap: 10,
+              alignItems: 'flex-start',
+              border: '1px dashed var(--border)',
+              borderRadius: 10,
+              padding: '10px 12px',
+              fontSize: 13,
+            }}
+          >
+            {hint ? (
+              <Lightbulb size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+            ) : (
+              <Network size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+            )}
+            <span>{hint ?? noHintNote}</span>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {options.map((option, index) => {
+            const isCorrectOption = option === correctOption
             const revealCorrect = chosen !== null && isCorrectOption
             const revealWrong = chosen === option && !isCorrectOption
             return (
@@ -66,20 +102,37 @@ export function QcmDialog({
                 disabled={chosen !== null}
                 onClick={() => handleChoose(option)}
                 style={{
-                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
                   textAlign: 'left',
-                  padding: '0.5rem 0.75rem',
-                  borderRadius: 6,
+                  padding: '12px 14px',
+                  borderRadius: 10,
                   border: `2px solid ${revealCorrect ? '#16a34a' : revealWrong ? '#dc2626' : 'var(--border)'}`,
                   background: 'var(--background)',
+                  opacity: chosen !== null && !revealCorrect && !revealWrong ? 0.55 : 1,
                   cursor: chosen === null ? 'pointer' : 'default',
                 }}
               >
-                {option}
-                {revealCorrect && (
-                  <Check color="#16a34a" size={16} style={{ position: 'absolute', top: -8, right: -8 }} />
-                )}
-                {revealWrong && <X color="#dc2626" size={16} style={{ position: 'absolute', top: -8, left: -8 }} />}
+                <span
+                  style={{
+                    flexShrink: 0,
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    border: `2px solid ${revealCorrect ? '#16a34a' : 'var(--border)'}`,
+                    background: revealCorrect ? '#16a34a' : 'var(--muted)',
+                    color: revealCorrect ? '#fff' : 'inherit',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700,
+                    fontSize: 13,
+                  }}
+                >
+                  {revealCorrect ? <Check size={16} /> : revealWrong ? <X size={16} /> : LETTERS[index]}
+                </span>
+                <span>{option}</span>
               </button>
             )
           })}

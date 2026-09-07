@@ -7,12 +7,12 @@ describe('QcmDialog', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('shows the title and all four options (correct + distractors)', () => {
+  it('shows the heading and all four options (correct + distractors)', () => {
     render(
       <QcmDialog
         open
-        title="Photosynthèse"
-        correctDefinition="Bonne définition"
+        heading="Photosynthèse"
+        correctOption="Bonne définition"
         distractors={['Fausse A', 'Fausse B', 'Fausse C']}
         onAnswer={() => {}}
         onCancel={() => {}}
@@ -25,30 +25,55 @@ describe('QcmDialog', () => {
     }
   })
 
+  it('shows a hint box when a hint is provided', () => {
+    render(
+      <QcmDialog
+        open
+        heading="Quel est le titre de cette carte ?"
+        hint="Processus par lequel les plantes..."
+        correctOption="La photosynthèse"
+        distractors={['La respiration']}
+        onAnswer={() => {}}
+        onCancel={() => {}}
+      />
+    )
+
+    expect(screen.getByText(/processus par lequel les plantes/i)).toBeInTheDocument()
+  })
+
+  it('shows the no-hint note instead when there is no hint', () => {
+    render(
+      <QcmDialog
+        open
+        heading="Quel est le titre de cette carte ?"
+        noHintNote="Aide-toi de la position de la carte dans l'arbre."
+        correctOption="La photosynthèse"
+        distractors={['La respiration']}
+        onAnswer={() => {}}
+        onCancel={() => {}}
+      />
+    )
+
+    expect(screen.getByText(/aide-toi de la position/i)).toBeInTheDocument()
+  })
+
   it('disables every option once one has been chosen', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(
-      <QcmDialog open title="T" correctDefinition="Bonne" distractors={['Fausse']} onAnswer={() => {}} onCancel={() => {}} />
+      <QcmDialog open heading="T" correctOption="Bonne" distractors={['Fausse']} onAnswer={() => {}} onCancel={() => {}} />
     )
 
     await user.click(screen.getByText('Fausse'))
 
-    expect(screen.getByText('Bonne')).toBeDisabled()
-    expect(screen.getByText('Fausse')).toBeDisabled()
+    expect(screen.getByText('Bonne').closest('button')).toBeDisabled()
+    expect(screen.getByText('Fausse').closest('button')).toBeDisabled()
   })
 
-  it('calls onAnswer with the chosen definition after a short delay', async () => {
+  it('calls onAnswer with the chosen option after a short delay', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     const onAnswer = vi.fn()
     render(
-      <QcmDialog
-        open
-        title="T"
-        correctDefinition="Bonne"
-        distractors={['Fausse']}
-        onAnswer={onAnswer}
-        onCancel={() => {}}
-      />
+      <QcmDialog open heading="T" correctOption="Bonne" distractors={['Fausse']} onAnswer={onAnswer} onCancel={() => {}} />
     )
 
     await user.click(screen.getByText('Fausse'))
@@ -63,14 +88,7 @@ describe('QcmDialog', () => {
     const onAnswer = vi.fn()
     const onCancel = vi.fn()
     render(
-      <QcmDialog
-        open
-        title="T"
-        correctDefinition="Bonne"
-        distractors={['Fausse']}
-        onAnswer={onAnswer}
-        onCancel={onCancel}
-      />
+      <QcmDialog open heading="T" correctOption="Bonne" distractors={['Fausse']} onAnswer={onAnswer} onCancel={onCancel} />
     )
 
     await user.keyboard('{Escape}')
@@ -81,22 +99,12 @@ describe('QcmDialog', () => {
 
   it('shows green/red visual feedback immediately after choosing a wrong option, and shows neither before any choice', () => {
     render(
-      <QcmDialog
-        open
-        title="T"
-        correctDefinition="Bonne"
-        distractors={['Fausse']}
-        onAnswer={() => {}}
-        onCancel={() => {}}
-      />
+      <QcmDialog open heading="T" correctOption="Bonne" distractors={['Fausse']} onAnswer={() => {}} onCancel={() => {}} />
     )
 
     const correctButton = screen.getByText('Bonne').closest('button') as HTMLButtonElement
     const wrongButton = screen.getByText('Fausse').closest('button') as HTMLButtonElement
 
-    // Before any choice: no Check/X feedback icons anywhere (lucide-react
-    // renders each icon as an <svg class="lucide lucide-check|x ...">, with
-    // no accessible role, so a class-based query is the reliable check here).
     expect(correctButton.querySelector('svg.lucide-check')).toBeNull()
     expect(wrongButton.querySelector('svg.lucide-x')).toBeNull()
 
