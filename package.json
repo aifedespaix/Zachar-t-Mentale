@@ -20,6 +20,7 @@
     "@xyflow/react": "^12.11.6",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.2.5",
+    "html-to-image": "^1.11.13",
     "lucide-react": "^1.41.0",
     "motion": "^13.2.0",
     "radix-ui": "^1.6.7",
