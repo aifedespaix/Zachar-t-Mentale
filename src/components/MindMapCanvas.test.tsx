@@ -1,7 +1,7 @@
 import { render, screen, act, within } from '@testing-library/react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { MindMapCanvas, findNewlyCreatedCardId, resolveReparentTarget } from './MindMapCanvas'
+import { MindMapCanvas, findNewlyCreatedCardId, overflowWarningMessage, resolveDropTarget } from './MindMapCanvas'
 import { useCardsStore } from '../state/useCardsStore'
 import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
@@ -114,52 +114,124 @@ describe('MindMapCanvas auto-focus', () => {
   })
 })
 
-describe('resolveReparentTarget', () => {
-  // Two level-2 branches (branchA, branchB) under root, each with a level-3 leaf.
+describe('resolveDropTarget', () => {
+  // root(1) -> branchA(2) -> leaf(3), plus a second level-2 branch branchB.
   const branchA: Card = { id: 'branchA', level: 2, title: 'A', parentId: 'root', order: 0 }
   const branchB: Card = { id: 'branchB', level: 2, title: 'B', parentId: 'root', order: 1 }
   const leaf: Card = { id: 'leaf', level: 3, title: 'leaf', parentId: 'branchA', order: 0 }
   const cards: Card[] = [root, branchA, branchB, leaf]
 
-  const box = (id: string, x: number, y: number) => ({ id, x, y, width: 200, height: 92 })
+  const WIDTH = 200
+  const HEIGHT = 100
+  const box = (id: string, x: number, y: number) => ({ id, x, y, width: WIDTH, height: HEIGHT })
 
-  it('targets the same-level card the dragged card overlaps', () => {
+  it('reparents when the dragged card sits over the MIDDLE of another card', () => {
+    // leaf's center (y = 250) is dead center of branchB's box (200..300).
     const boxes = [box('root', 0, 0), box('branchA', 320, 0), box('branchB', 320, 200), box('leaf', 320, 200)]
-    expect(resolveReparentTarget(cards, boxes, 'leaf')).toBe('branchB')
+    expect(resolveDropTarget(cards, boxes, 'leaf')).toEqual({ kind: 'reparent', parentId: 'branchB' })
   })
 
-  it('returns undefined when the dragged card overlaps nothing', () => {
+  it('reparents onto a card at any level, not just the one above (cross-level move)', () => {
+    // leaf (level 3) dropped on the middle of root (level 1).
+    const boxes = [box('root', 0, 200), box('branchA', 320, 0), box('branchB', 320, 600), box('leaf', 0, 200)]
+    expect(resolveDropTarget(cards, boxes, 'leaf')).toEqual({ kind: 'reparent', parentId: 'root' })
+  })
+
+  it('inserts BEFORE the hovered card when hovering its top band', () => {
+    // leaf's center (y = 210) is 10% down branchB's box (200..300).
+    const boxes = [box('root', 0, 0), box('branchA', 320, 0), box('branchB', 320, 200), box('leaf', 320, 160)]
+    expect(resolveDropTarget(cards, boxes, 'leaf')).toEqual({
+      kind: 'insert',
+      parentId: 'root',
+      index: 1,
+      anchorId: 'branchB',
+      side: 'before',
+    })
+  })
+
+  it('inserts AFTER the hovered card when hovering its bottom band', () => {
+    // leaf's center (y = 290) is 90% down branchB's box (200..300).
+    const boxes = [box('root', 0, 0), box('branchA', 320, 0), box('branchB', 320, 200), box('leaf', 320, 240)]
+    expect(resolveDropTarget(cards, boxes, 'leaf')).toEqual({
+      kind: 'insert',
+      parentId: 'root',
+      index: 2,
+      anchorId: 'branchB',
+      side: 'after',
+    })
+  })
+
+  it('computes the insertion index on the group WITHOUT the dragged card', () => {
+    // Reordering inside one group: `second` dropped on `first`'s top band.
+    const first: Card = { id: 'first', level: 2, title: '1', parentId: 'root', order: 0 }
+    const second: Card = { id: 'second', level: 2, title: '2', parentId: 'root', order: 1 }
+    const third: Card = { id: 'third', level: 2, title: '3', parentId: 'root', order: 2 }
+    const group = [root, first, second, third]
+    const boxes = [box('root', 0, 0), box('first', 320, 200), box('second', 320, 160), box('third', 320, 400)]
+    expect(resolveDropTarget(group, boxes, 'second')).toEqual({
+      kind: 'insert',
+      parentId: 'root',
+      index: 0,
+      anchorId: 'first',
+      side: 'before',
+    })
+  })
+
+  it('returns null when the dragged card overlaps nothing', () => {
     const boxes = [box('root', 0, 0), box('branchA', 320, 0), box('branchB', 320, 400), box('leaf', 900, 900)]
-    expect(resolveReparentTarget(cards, boxes, 'leaf')).toBeUndefined()
+    expect(resolveDropTarget(cards, boxes, 'leaf')).toBeNull()
   })
 
-  it('ignores an overlap with a card at the wrong level', () => {
-    // leaf overlaps root (level 1), which is not level 2 (branchA/leaf's level - 1)
-    const boxes = [box('root', 320, 200), box('branchA', 640, 0), box('branchB', 640, 400), box('leaf', 320, 200)]
-    expect(resolveReparentTarget(cards, boxes, 'leaf')).toBeUndefined()
-  })
-
-  it('ignores an overlap with the card’s current parent (no-op target)', () => {
+  it('returns null over the middle of the parent the card already has', () => {
     const boxes = [box('root', 0, 0), box('branchA', 320, 0), box('branchB', 640, 400), box('leaf', 320, 0)]
-    expect(resolveReparentTarget(cards, boxes, 'leaf')).toBeUndefined()
+    expect(resolveDropTarget(cards, boxes, 'leaf')).toBeNull()
   })
 
-  it('picks the closest-center target when overlapping several valid candidates', () => {
-    const branchD: Card = { id: 'branchD', level: 2, title: 'D', parentId: 'root', order: 2 }
-    const withD = [...cards, branchD]
-    const boxes = [
-      box('root', 0, 0),
-      box('branchA', 900, 900), // out of the way — not the overlap under test
-      box('branchB', 340, 20), // center (440, 66) — closer to leaf's center (420, 46)
-      box('branchD', 280, -40), // center (380, 6) — farther
-      box('leaf', 320, 0),
-    ]
-    expect(resolveReparentTarget(withD, boxes, 'leaf')).toBe('branchB')
+  it('promotes instead: the parent’s top band inserts the card NEXT TO its parent', () => {
+    const boxes = [box('root', 0, 0), box('branchA', 320, 200), box('branchB', 640, 900), box('leaf', 320, 160)]
+    expect(resolveDropTarget(cards, boxes, 'leaf')).toEqual({
+      kind: 'insert',
+      parentId: 'root',
+      index: 0,
+      anchorId: 'branchA',
+      side: 'before',
+    })
   })
 
-  it('returns undefined for the root card (no parent to change)', () => {
-    const boxes = [box('root', 0, 0), box('branchA', 0, 0)]
-    expect(resolveReparentTarget(cards, boxes, 'root')).toBeUndefined()
+  it('never targets the dragged card’s own branch (no cycle, and it travels along)', () => {
+    const boxes = [box('root', 0, 0), box('branchA', 320, 200), box('branchB', 900, 900), box('leaf', 320, 200)]
+    expect(resolveDropTarget(cards, boxes, 'branchA')).toBeNull()
+  })
+
+  it('falls back to an insertion when the hovered card cannot receive children', () => {
+    // A level-4 card has no level 5 to host a child: dropping on its middle
+    // means "put me next to it", not "reject the drop".
+    const deep: Card = { id: 'deep', level: 4, title: 'deep', parentId: 'leaf', order: 0 }
+    const withDeep = [...cards, deep]
+    // branchB is dropped over the middle of `deep`, whose parent is `leaf`.
+    const boxes = [box('root', 0, 0), box('branchA', 900, 900), box('leaf', 900, 500), box('deep', 640, 200), box('branchB', 640, 190)]
+    expect(resolveDropTarget(withDeep, boxes, 'branchB')).toEqual({
+      kind: 'insert',
+      parentId: 'leaf',
+      index: 0,
+      anchorId: 'deep',
+      side: 'before',
+    })
+  })
+
+  it('returns null for the root card (it never moves)', () => {
+    const boxes = [box('root', 320, 0), box('branchA', 320, 0)]
+    expect(resolveDropTarget(cards, boxes, 'root')).toBeNull()
+  })
+
+  it('lets a floating card be dropped back onto the tree, and refuses drops onto one', () => {
+    const floating: Card = { id: 'floating', level: 3, title: 'f', parentId: null, order: 0, detached: true }
+    const withFloating = [...cards, floating]
+    const onTree = [box('root', 0, 0), box('branchA', 320, 200), box('branchB', 900, 900), box('leaf', 900, 500), box('floating', 320, 200)]
+    expect(resolveDropTarget(withFloating, onTree, 'floating')).toEqual({ kind: 'reparent', parentId: 'branchA' })
+
+    const ontoFloating = [box('root', 0, 0), box('branchA', 900, 900), box('branchB', 320, 200), box('leaf', 900, 500), box('floating', 320, 200)]
+    expect(resolveDropTarget(withFloating, ontoFloating, 'branchB')).toBeNull()
   })
 })
 
@@ -204,5 +276,19 @@ describe('findNewlyCreatedCardId', () => {
     const previous = new Set(['a', 'b'])
     const current = new Set(['a', 'b'])
     expect(findNewlyCreatedCardId(previous, current)).toBeUndefined()
+  })
+})
+
+describe('overflowWarningMessage', () => {
+  it('names the 4-level limit and how many cards would go floating', () => {
+    expect(overflowWarningMessage(3)).toBe(
+      'Attention, ce déplacement dépasse la limite des 4 niveaux. 3 cartes enfants situées hors limite seront transformées en cartes volantes.'
+    )
+  })
+
+  it('reads correctly for a single card', () => {
+    expect(overflowWarningMessage(1)).toBe(
+      'Attention, ce déplacement dépasse la limite des 4 niveaux. 1 carte enfant située hors limite sera transformée en carte volante.'
+    )
   })
 })

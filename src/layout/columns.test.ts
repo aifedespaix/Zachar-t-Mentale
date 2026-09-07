@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeLayout, COLUMN_WIDTH, ROW_HEIGHT } from './columns'
+import { computeLayout, COLUMN_WIDTH, DETACHED_ZONE_COLUMNS, ROW_HEIGHT } from './columns'
 import type { Card } from '../types/card'
 
 describe('computeLayout', () => {
@@ -68,5 +68,49 @@ describe('computeLayout', () => {
     expect(positions.bc.y).toBe(ROW_HEIGHT)
     expect(positions.b.y).toBe(ROW_HEIGHT)
     expect(positions.root.y).toBe(0.5 * ROW_HEIGHT)
+  })
+})
+
+describe('computeLayout — floating cards zone', () => {
+  const root: Card = { id: 'root', level: 1, title: 'r', parentId: null, order: 0 }
+  const child: Card = { id: 'child', level: 2, title: 'c', parentId: 'root', order: 0 }
+
+  it('parks detached cards in their own grid below the tree', () => {
+    const detachedA: Card = { id: 'da', level: 3, title: 'da', parentId: null, order: 0, detached: true }
+    const detachedB: Card = { id: 'db', level: 4, title: 'db', parentId: null, order: 1, detached: true }
+    const positions = computeLayout([root, child, detachedA, detachedB])
+
+    const treeBottom = Math.max(positions.root.y, positions.child.y)
+    expect(positions.da.y).toBeGreaterThan(treeBottom)
+    // Side by side on the zone's first row, whatever level they used to be at.
+    expect(positions.da.y).toBe(positions.db.y)
+    expect(positions.da.x).toBe(0)
+    expect(positions.db.x).toBe(COLUMN_WIDTH)
+  })
+
+  it('wraps the zone onto a second row past its column count', () => {
+    const detached = Array.from({ length: DETACHED_ZONE_COLUMNS + 1 }, (_, i): Card => ({
+      id: `d${i}`,
+      level: 2,
+      title: `d${i}`,
+      parentId: null,
+      order: i,
+      detached: true,
+    }))
+    const positions = computeLayout([root, ...detached])
+    expect(positions.d0.x).toBe(0)
+    expect(positions[`d${DETACHED_ZONE_COLUMNS}`].x).toBe(0)
+    expect(positions[`d${DETACHED_ZONE_COLUMNS}`].y).toBeGreaterThan(positions.d0.y)
+  })
+
+  it('keeps detached cards out of the tree layout entirely', () => {
+    // A detached card that still carries a stale level must not claim a level
+    // column, nor shift the rows the real tree is laid out on.
+    const detached: Card = { id: 'd', level: 2, title: 'd', parentId: null, order: 0, detached: true }
+    const withoutDetached = computeLayout([root, child])
+    const withDetached = computeLayout([root, child, detached])
+    expect(withDetached.root).toEqual(withoutDetached.root)
+    expect(withDetached.child).toEqual(withoutDetached.child)
+    expect(withDetached.d.x).toBe(0)
   })
 })

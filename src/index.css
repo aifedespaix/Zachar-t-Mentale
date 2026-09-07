@@ -195,3 +195,50 @@
   stroke-dasharray: 8 6;
   animation: reparent-ghost-edge-march 600ms linear infinite;
 }
+/*
+ * Floating ("volante") cards: greyed out by CardNode's palette, plus a slight
+ * desaturation/opacity here so a whole draft zone reads as secondary next to
+ * the coloured tree, without ever getting so faint it can't be read or grabbed.
+ */
+.card-node--detached {
+  opacity: 0.9;
+  filter: grayscale(1);
+}
+
+/*
+ * The drop indicator for a REORDER: a blue line drawn in the gap the dragged
+ * card would fall into, with a dot on its leading edge. Deliberately a
+ * different visual language from the reparent highlight above (a line BETWEEN
+ * cards vs. a ring AROUND one), so the two possible drops are never confused.
+ */
+.insertion-line {
+  height: 4px;
+  border-radius: 9999px;
+  background: oklch(0.55 0.22 258);
+  box-shadow: 0 0 8px 1px oklch(0.55 0.22 258 / 60%);
+  position: relative;
+  pointer-events: none;
+}
+.insertion-line::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 3px solid oklch(0.55 0.22 258);
+  background: var(--background);
+  transform: translateY(-50%);
+}
+
+/* Caption above the floating-cards grid. */
+.zone-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  white-space: nowrap;
+}
