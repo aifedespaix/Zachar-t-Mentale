@@ -1,17 +1,32 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
 import { CardNode } from './CardNode'
 import { useCardsStore, createCardsStore } from '../state/useCardsStore'
+import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
+import type { QuizQuestionType, QuizResult } from '../types/quiz'
+
+type QuizData = { type: QuizQuestionType; result: QuizResult; distractorDefinitions?: string[] }
 
 const testCard: Card = { id: 'root', level: 1, title: 'Titre initial', parentId: null, order: 0 }
 
-type CardNodeTestProps = NodeProps & { data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean } }
+const cardWithDefinition: Card = {
+  id: 'root',
+  level: 1,
+  title: 'Titre initial',
+  definition: 'Définition existante',
+  parentId: null,
+  order: 0,
+}
 
-function cardNodeProps(card: Card, autoEdit = false, isReparentTarget = false) {
-  return { id: card.id, data: { card, autoEdit, isReparentTarget } } as unknown as CardNodeTestProps
+type CardNodeTestProps = NodeProps & {
+  data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean; quiz?: QuizData }
+}
+
+function cardNodeProps(card: Card, autoEdit = false, isReparentTarget = false, quiz?: QuizData) {
+  return { id: card.id, data: { card, autoEdit, isReparentTarget, quiz } } as unknown as CardNodeTestProps
 }
 
 /**
@@ -19,18 +34,21 @@ function cardNodeProps(card: Card, autoEdit = false, isReparentTarget = false) {
  * measures empty handleBounds and silently stops drawing edges), and Handle
  * requires a ReactFlowProvider ancestor for its store/handle-config contexts.
  */
-function renderCardNode(card: Card, autoEdit = false, isReparentTarget = false) {
+function renderCardNode(card: Card, autoEdit = false, isReparentTarget = false, quiz?: QuizData) {
   const result = render(
     <ReactFlowProvider>
-      <CardNode {...cardNodeProps(card, autoEdit, isReparentTarget)} />
+      <CardNode {...cardNodeProps(card, autoEdit, isReparentTarget, quiz)} />
     </ReactFlowProvider>
   )
   return {
     ...result,
-    rerenderWith: (next: Card) =>
+    // `nextQuiz` always reflects the caller's intent exactly (including an
+    // explicit `undefined`, e.g. to simulate a quiz ending) — no fallback to
+    // the initial `quiz` closure, since no existing caller needs one.
+    rerenderWith: (next: Card, nextQuiz?: QuizData) =>
       result.rerender(
         <ReactFlowProvider>
-          <CardNode {...cardNodeProps(next, autoEdit, isReparentTarget)} />
+          <CardNode {...cardNodeProps(next, autoEdit, isReparentTarget, nextQuiz)} />
         </ReactFlowProvider>
       ),
   }
@@ -273,7 +291,18 @@ describe('CardNode drag handle', () => {
 })
 
 describe('CardNode footer', () => {
-  beforeEach(() => resetStore([testCard]))
+  beforeEach(() => {
+    resetStore([testCard])
+    const pristineQuiz = createQuizStore().getState()
+    useQuizStore.setState({
+      active: pristineQuiz.active,
+      showSummary: pristineQuiz.showSummary,
+      config: pristineQuiz.config,
+      questions: pristineQuiz.questions,
+      results: pristineQuiz.results,
+      wasLockedBeforeQuiz: pristineQuiz.wasLockedBeforeQuiz,
+    })
+  })
 
   it('shows an "add definition" affordance when there is none yet', () => {
     renderCardNode(testCard)
@@ -308,6 +337,55 @@ describe('CardNode footer', () => {
 
     await user.hover(screen.getByRole('button', { name: /retourner/i }))
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Retourner')
+  })
+
+  it('masks the title while a quiz recall question on this card is unanswered', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveValue('Titre initial')
+  })
+
+  it('does not mask the title when no quiz question applies to this card', () => {
+    renderCardNode(testCard)
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
+  })
+
+  it('reveals the real title after clicking "Révéler la réponse"', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
+  })
+
+  it('resets quizRevealed when the quiz ends, so a second quiz session drawing the same card masks it again', async () => {
+    const user = userEvent.setup()
+    const { rerenderWith } = renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
+
+    // The quiz ends: this card is no longer part of any question.
+    rerenderWith(testCard, undefined)
+    // A second quiz later draws the SAME card again as a recall question.
+    rerenderWith(testCard, { type: 'recall', result: 'unanswered' })
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveValue('Titre initial')
+    expect(screen.queryByRole('button', { name: /je savais/i })).not.toBeInTheDocument()
+  })
+
+  it('does not reveal the real title or show grading buttons when the masked title field is focused', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+
+    expect(input).not.toHaveValue('Titre initial')
+    expect(screen.queryByRole('button', { name: /je savais/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /je ne savais pas/i })).not.toBeInTheDocument()
   })
 
   it('opens an editable field when "add definition" is clicked and commits the typed text on Enter', async () => {
@@ -354,5 +432,126 @@ describe('CardNode footer', () => {
   it('does not mark itself as a reparent drop target by default', () => {
     renderCardNode(testCard)
     expect(screen.getByTestId(`card-${testCard.id}`)).toHaveAttribute('data-reparent-target', 'false')
+  })
+
+  it('makes the title read-only when the mind map is locked', async () => {
+    const user = userEvent.setup()
+    useCardsStore.setState({ locked: true })
+    renderCardNode(testCard)
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, ' modifié{Enter}')
+
+    expect(useCardsStore.getState().history.present[0].title).toBe('Titre initial')
+  })
+
+  it('disables the "add definition" button when the mind map is locked', () => {
+    useCardsStore.setState({ locked: true })
+    renderCardNode(testCard)
+
+    expect(screen.getByRole('button', { name: /ajouter une définition/i })).toBeDisabled()
+  })
+
+  it('shows self-grade buttons once a revealed recall question is unanswered', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+
+    expect(screen.getByRole('button', { name: /je savais/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /je ne savais pas/i })).toBeInTheDocument()
+  })
+
+  it('clicking "Je savais" records a correct answer in the quiz store', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+
+    await user.click(screen.getByRole('button', { name: /je savais/i }))
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
+  })
+
+  it('clicking "Je ne savais pas" records an incorrect answer in the quiz store', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
+
+    await user.click(screen.getByRole('button', { name: /je ne savais pas/i }))
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('incorrect')
+  })
+
+  it('shows a green border and no grading buttons once graded correct', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'correct' })
+
+    expect(screen.queryByRole('button', { name: /je savais/i })).not.toBeInTheDocument()
+    expect(screen.getByTestId(`card-${testCard.id}`)).toHaveStyle({ borderColor: '#16a34a' })
+  })
+
+  it('shows a red border once graded incorrect', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'incorrect' })
+
+    expect(screen.getByTestId(`card-${testCard.id}`)).toHaveStyle({ borderColor: '#dc2626' })
+  })
+
+  it('opens the definition for editing when the shown definition text is clicked', async () => {
+    const user = userEvent.setup()
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    await user.click(screen.getByText('Définition existante'))
+
+    expect(screen.getByRole('textbox', { name: /définition/i })).toHaveValue('Définition existante')
+  })
+
+  it('does not open the definition for editing when the mind map is locked', async () => {
+    const user = userEvent.setup()
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    useCardsStore.setState({ locked: true })
+
+    await user.click(screen.getByText('Définition existante'))
+
+    expect(screen.queryByRole('textbox', { name: /définition/i })).not.toBeInTheDocument()
+  })
+
+  it('opens the QCM dialog when a pending qcm question\'s "Répondre" button is clicked', async () => {
+    const user = userEvent.setup()
+    const cardWithDef: Card = { ...testCard, definition: 'Bonne définition' }
+    resetStore([cardWithDef])
+    renderCardNode(cardWithDef, false, false, {
+      type: 'qcm',
+      result: 'unanswered',
+      distractorDefinitions: ['Fausse A', 'Fausse B'],
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+
+    expect(screen.getByRole('heading', { name: cardWithDef.title })).toBeInTheDocument()
+    expect(screen.getByText('Bonne définition')).toBeInTheDocument()
+    expect(screen.getByText('Fausse A')).toBeInTheDocument()
+  })
+
+  it('records the qcm answer in the quiz store once a choice is made', async () => {
+    vi.useFakeTimers()
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const cardWithDef: Card = { ...testCard, definition: 'Bonne définition' }
+    resetStore([cardWithDef])
+    renderCardNode(cardWithDef, false, false, {
+      type: 'qcm',
+      result: 'unanswered',
+      distractorDefinitions: ['Fausse A'],
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+    await user.click(screen.getByText('Bonne définition'))
+    vi.advanceTimersByTime(700)
+
+    expect(useQuizStore.getState().results[cardWithDef.id]).toBe('correct')
+    vi.useRealTimers()
   })
 })

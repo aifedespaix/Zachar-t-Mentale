@@ -4,6 +4,7 @@ import App from './App'
 import type { Card } from './types/card'
 import { useCardsStore, createCardsStore } from './state/useCardsStore'
 import { useWorkspaceStore, createWorkspaceStore } from './state/useWorkspaceStore'
+import { useQuizStore, createQuizStore } from './state/useQuizStore'
 
 vi.mock('./persistence/fileStore', () => ({
   loadMindMap: vi.fn(),
@@ -144,5 +145,48 @@ describe('App file switching', () => {
     })
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('App quiz wiring', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(loadMindMap).mockReset()
+    vi.mocked(saveMindMap).mockReset()
+    vi.mocked(loadMindMap).mockResolvedValue(null)
+    vi.mocked(saveMindMap).mockResolvedValue(undefined)
+    const pristine = createQuizStore().getState()
+    useQuizStore.setState({
+      active: pristine.active,
+      showSummary: pristine.showSummary,
+      config: pristine.config,
+      questions: pristine.questions,
+      results: pristine.results,
+      wasLockedBeforeQuiz: pristine.wasLockedBeforeQuiz,
+    })
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('shows the quiz launch button when no quiz is active', async () => {
+    render(<App />)
+    await settle()
+    expect(screen.getByRole('button', { name: /lancer un quiz/i })).toBeInTheDocument()
+  })
+
+  it('hides the quiz launch button and shows the HUD while a quiz is active', async () => {
+    useQuizStore.setState({ active: true, questions: [{ cardId: 'x', type: 'recall' }], results: { x: 'unanswered' } })
+    render(<App />)
+    await settle()
+
+    expect(screen.queryByRole('button', { name: /lancer un quiz/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /terminer le quiz/i })).toBeInTheDocument() // proves the HUD rendered
+  })
+
+  it('hides the lock toggle while a quiz is active (quiz mode inherits locked mode for its whole duration)', async () => {
+    useQuizStore.setState({ active: true, questions: [{ cardId: 'x', type: 'recall' }], results: { x: 'unanswered' } })
+    render(<App />)
+    await settle()
+
+    expect(screen.queryByRole('button', { name: /verrouiller|déverrouiller/i })).not.toBeInTheDocument()
   })
 })

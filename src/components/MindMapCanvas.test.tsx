@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { MindMapCanvas, findNewlyCreatedCardId, resolveReparentTarget } from './MindMapCanvas'
 import { useCardsStore } from '../state/useCardsStore'
+import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
 
 // Spy on setCenter without disturbing any other @xyflow/react behavior —
@@ -159,6 +160,30 @@ describe('resolveReparentTarget', () => {
   it('returns undefined for the root card (no parent to change)', () => {
     const boxes = [box('root', 0, 0), box('branchA', 0, 0)]
     expect(resolveReparentTarget(cards, boxes, 'root')).toBeUndefined()
+  })
+})
+
+describe('MindMapCanvas quiz mode', () => {
+  beforeEach(() => {
+    useCardsStore.getState().loadCards([root, child])
+    const pristine = createQuizStore().getState()
+    useQuizStore.setState({
+      active: true,
+      showSummary: pristine.showSummary,
+      config: pristine.config,
+      questions: [{ cardId: 'child', type: 'recall' }],
+      results: { child: 'unanswered' },
+      wasLockedBeforeQuiz: pristine.wasLockedBeforeQuiz,
+    })
+  })
+
+  it('masks only the card that has an active quiz question', () => {
+    render(<MindMapCanvas />)
+
+    const rootInput = within(screen.getByTestId('card-root')).getByRole('textbox', { name: /titre/i })
+    const childInput = within(screen.getByTestId('card-child')).getByRole('textbox', { name: /titre/i })
+    expect(rootInput).toHaveValue('Racine')
+    expect(childInput).not.toHaveValue('Enfant')
   })
 })
 

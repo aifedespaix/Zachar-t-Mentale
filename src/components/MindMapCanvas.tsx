@@ -12,7 +12,9 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCardsStore } from '../state/useCardsStore'
+import { useQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
+import type { QuizQuestion, QuizResult } from '../types/quiz'
 import { computeLayout, type Position } from '../layout/columns'
 import { moveCardToIndex as moveCardToIndexOp } from '../state/cardsReducer'
 import { CardNode } from './CardNode'
@@ -35,7 +37,9 @@ function buildNodes(
   layout: Record<string, Position>,
   locked: boolean,
   autoEditId: string | null,
-  spawningId: string | null
+  spawningId: string | null,
+  quizQuestions: QuizQuestion[],
+  quizResults: Record<string, QuizResult>
 ): Node[] {
   return cards.map(card => {
     // For the one card just created, the FIRST pass of this function places
@@ -45,11 +49,15 @@ function buildNodes(
     // visibly grows out of the card that spawned it, briefly behind it
     // (negative z-index) rather than popping directly into its own slot.
     const spawnParent = card.id === spawningId ? cards.find(c => c.id === card.parentId) : undefined
+    const question = quizQuestions.find(q => q.cardId === card.id)
+    const quiz = question
+      ? { type: question.type, result: quizResults[card.id] ?? 'unanswered', distractorDefinitions: question.distractorDefinitions }
+      : undefined
     return {
       id: card.id,
       type: 'card',
       position: spawnParent ? layout[spawnParent.id] : layout[card.id],
-      data: { card, autoEdit: card.id === autoEditId },
+      data: { card, autoEdit: card.id === autoEditId, quiz },
       draggable: !locked,
       dragHandle: '.card-drag-handle',
       initialWidth: NOMINAL_NODE_WIDTH,
@@ -140,6 +148,8 @@ function MindMapCanvasInner() {
   const locked = useCardsStore(s => s.locked)
   const moveCardToIndex = useCardsStore(s => s.moveCardToIndex)
   const moveCardToParent = useCardsStore(s => s.moveCardToParent)
+  const quizQuestions = useQuizStore(s => s.questions)
+  const quizResults = useQuizStore(s => s.results)
   const { setCenter } = useReactFlow()
 
   const layout = useMemo(() => computeLayout(cards), [cards])
@@ -179,11 +189,12 @@ function MindMapCanvasInner() {
   // Seeded with the real nodes rather than `[]` so the very first paint (and
   // the `fitView` that runs with it) already sees the whole tree.
   const initialNodes = useRef<Node[]>(undefined)
-  if (!initialNodes.current) initialNodes.current = buildNodes(cards, layout, locked, null, null)
+  if (!initialNodes.current)
+    initialNodes.current = buildNodes(cards, layout, locked, null, null, quizQuestions, quizResults)
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes.current)
 
   useEffect(() => {
-    setNodes(buildNodes(cards, layout, locked, autoEditId, spawningId))
+    setNodes(buildNodes(cards, layout, locked, autoEditId, spawningId, quizQuestions, quizResults))
     // `spawningId` intentionally excluded below: it is only read here to seed
     // the spawn override at CREATION time (when `cards` changes anyway). The
     // effect right after this one clears it via a targeted position patch
@@ -193,7 +204,7 @@ function MindMapCanvasInner() {
     // selection (Chrome resets it when a controlled input's value is
     // re-committed, even to the same string).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cards, layout, locked, autoEditId, setNodes])
+  }, [cards, layout, locked, autoEditId, quizQuestions, quizResults, setNodes])
 
   // One frame after a card spawns at its parent's position (see `buildNodes`),
   // patch just that node's position/zIndex back to its real layout slot — a

@@ -1,16 +1,27 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Plus, ArrowRight, X, GripVertical, AlignLeft, FlipHorizontal2, type LucideIcon } from 'lucide-react'
+import { Plus, ArrowRight, X, Check, GripVertical, AlignLeft, FlipHorizontal2, type LucideIcon } from 'lucide-react'
 import type { Card } from '../types/card'
+import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
+import { useQuizStore } from '../state/useQuizStore'
 import { levelColors } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
+import { QcmDialog } from './quiz/QcmDialog'
 
-type CardNodeProps = NodeProps & { data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean } }
+interface QuizData {
+  type: QuizQuestionType
+  result: QuizResult
+  distractorDefinitions?: string[]
+}
+
+type CardNodeProps = NodeProps & {
+  data: { card: Card; autoEdit?: boolean; isReparentTarget?: boolean; quiz?: QuizData }
+}
 
 /**
  * Shared "structurally unavailable" grey. Only the delete `x` still uses
@@ -80,7 +91,31 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
 }
 
 export function CardNode({ data }: CardNodeProps) {
-  const { card, autoEdit = false, isReparentTarget = false } = data
+  const { card, autoEdit = false, isReparentTarget = false, quiz } = data
+  const [quizRevealed, setQuizRevealed] = useState(false)
+  const isRecallPending = quiz?.type === 'recall' && quiz.result === 'unanswered'
+  const displayMasked = isRecallPending && !quizRevealed
+  const answerRecall = useQuizStore(s => s.answerRecall)
+  const answerQcm = useQuizStore(s => s.answerQcm)
+  const [qcmOpen, setQcmOpen] = useState(false)
+  const isQcmPending = quiz?.type === 'qcm' && quiz.result === 'unanswered'
+  const resultBorderColor = quiz?.result === 'correct' ? '#16a34a' : quiz?.result === 'incorrect' ? '#dc2626' : undefined
+
+  function handleReveal() {
+    setQuizRevealed(true)
+    setFlipped(true)
+    window.setTimeout(() => setFlipped(false), 400)
+  }
+
+  // React Flow keeps CardNode mounted for the life of the app (nodes are
+  // keyed by card id, not remounted between quizzes), so `quizRevealed` must
+  // be reset by hand whenever this card leaves an active quiz question —
+  // otherwise a SECOND quiz drawing the same card as a recall question would
+  // inherit the first quiz's "already revealed" state and skip masking.
+  useEffect(() => {
+    if (!quiz) setQuizRevealed(false)
+  }, [quiz])
+
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
   const addChild = useCardsStore(s => s.addChild)
@@ -124,11 +159,21 @@ export function CardNode({ data }: CardNodeProps) {
   }, [autoEdit])
 
   function startEditingDefinition() {
+    if (locked) return
     setDraftDefinition(card.definition ?? '')
     setEditingDefinition(true)
   }
 
   function handleTitleFocus() {
+    // `readOnly` on the <input> below blocks typing but NOT focus. Without
+    // this guard, focusing a masked title would seed the draft with the REAL
+    // title and render it via the `titleFocused` branch of the value
+    // ternary — bypassing the mask (and the reveal/grading flow) with a
+    // single click. Block focus itself while masked instead.
+    if (displayMasked) {
+      titleInputRef.current?.blur()
+      return
+    }
     // Re-seed the draft from the card as it is NOW: a stale draft (from a
     // previous focus session) committed on blur would silently re-write the
     // card with an old value. The actual `select()` happens in the effect
@@ -201,9 +246,9 @@ export function CardNode({ data }: CardNodeProps) {
       transition={{ duration: 0.4 }}
       style={{
         background: toCss(colors.bg),
-        borderColor: toCss(colors.border),
         color: toCss(colors.text),
         border: '2px solid',
+        borderColor: resultBorderColor ?? toCss(colors.border),
         borderRadius: 8,
         // Room for the pinned edge buttons: the drag handle and the delete `x`
         // sit in the top corners, the `->` on the right edge.
@@ -302,6 +347,27 @@ export function CardNode({ data }: CardNodeProps) {
         />
       </span>
 
+      {isRecallPending && quizRevealed && (
+        <>
+          <EdgeButton
+            label="Je savais"
+            icon={Check}
+            color="#16a34a"
+            disabled={false}
+            onActivate={() => answerRecall(card.id, true)}
+            position={{ top: '-0.6rem', right: '-0.6rem' }}
+          />
+          <EdgeButton
+            label="Je ne savais pas"
+            icon={X}
+            color="#dc2626"
+            disabled={false}
+            onActivate={() => answerRecall(card.id, false)}
+            position={{ top: '-0.6rem', left: '-0.6rem' }}
+          />
+        </>
+      )}
+
       {/*
         Always an <input>, never swapped for a <span>: the two elements
         default to different intrinsic sizes (padding, line-height), so
@@ -314,7 +380,8 @@ export function CardNode({ data }: CardNodeProps) {
       <input
         ref={titleInputRef}
         aria-label="Titre"
-        value={titleFocused ? draftTitle : card.title}
+        readOnly={locked}
+        value={titleFocused ? draftTitle : displayMasked ? '???' : card.title}
         onFocus={handleTitleFocus}
         onChange={e => setDraftTitle(e.target.value)}
         onBlur={commitTitle}
@@ -397,6 +464,7 @@ export function CardNode({ data }: CardNodeProps) {
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Ajouter une définition"
+                  disabled={locked}
                   onClick={startEditingDefinition}
                 >
                   <span style={{ position: 'relative', display: 'inline-flex' }}>
@@ -419,14 +487,36 @@ export function CardNode({ data }: CardNodeProps) {
             </Tooltip>
           )}
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Retourner" onClick={() => setFlipped(v => !v)}>
-                <FlipHorizontal2 />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Retourner</TooltipContent>
-          </Tooltip>
+          {quiz && quiz.result === 'unanswered' ? (
+            quiz.type === 'recall' ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Révéler la réponse" onClick={handleReveal}>
+                    <FlipHorizontal2 />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Révéler la réponse</TooltipContent>
+              </Tooltip>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Répondre" onClick={() => setQcmOpen(true)}>
+                    <FlipHorizontal2 />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Répondre</TooltipContent>
+              </Tooltip>
+            )
+          ) : !quiz ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" aria-label="Retourner" onClick={() => setFlipped(v => !v)}>
+                  <FlipHorizontal2 />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Retourner</TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
       </TooltipProvider>
 
@@ -447,7 +537,28 @@ export function CardNode({ data }: CardNodeProps) {
         />
       )}
 
-      {definitionShown && card.definition && <p>{card.definition}</p>}
+      {definitionShown && card.definition && (
+        <p
+          onClick={startEditingDefinition}
+          style={{ cursor: locked ? 'default' : 'text', margin: 0 }}
+        >
+          {card.definition}
+        </p>
+      )}
+
+      {isQcmPending && (
+        <QcmDialog
+          open={qcmOpen}
+          title={card.title}
+          correctDefinition={card.definition ?? ''}
+          distractors={quiz.distractorDefinitions ?? []}
+          onAnswer={chosen => {
+            answerQcm(card.id, chosen)
+            setQcmOpen(false)
+          }}
+          onCancel={() => setQcmOpen(false)}
+        />
+      )}
 
       <Handle type="source" position={Position.Right} isConnectable={false} style={{ visibility: 'hidden' }} />
     </motion.div>

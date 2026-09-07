@@ -3,8 +3,12 @@ import { useEffect, useRef, useState } from 'react'
 import { MindMapCanvas } from './components/MindMapCanvas'
 import { LockToggle } from './components/LockToggle'
 import { FileSidebar } from './components/sidebar/FileSidebar'
+import { QuizButton } from './components/quiz/QuizButton'
+import { QuizHud } from './components/quiz/QuizHud'
+import { QuizSummaryModal } from './components/quiz/QuizSummaryModal'
 import { useCardsStore } from './state/useCardsStore'
 import { useWorkspaceStore } from './state/useWorkspaceStore'
+import { useQuizStore } from './state/useQuizStore'
 import { useAutosave } from './persistence/useAutosave'
 import { loadMindMap } from './persistence/fileStore'
 import { useUndoRedoShortcuts } from './hooks/useUndoRedoShortcuts'
@@ -18,6 +22,7 @@ function App() {
   const loadCards = useCardsStore(s => s.loadCards)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
+  const quizActive = useQuizStore(s => s.active)
   const [loaded, setLoaded] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -100,7 +105,8 @@ function App() {
       <FileSidebar onOpenFile={setCurrentFile} />
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
         <header style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <LockToggle />
+          {!quizActive && <LockToggle />}
+          {!quizActive && <QuizButton />}
           <span title={currentFilePath ?? undefined} style={{ fontSize: 13, fontWeight: 500 }}>
             {currentFileName ?? 'Aucun fichier ouvert'}
           </span>
@@ -139,7 +145,11 @@ function App() {
         )}
         <main style={{ flex: 1 }}>
           {currentFilePath ? (
-            <MindMapCanvas />
+            <>
+              <MindMapCanvas />
+              <QuizHud />
+              <QuizSummaryModal />
+            </>
           ) : (
             <div style={{ padding: 24, color: 'var(--muted-foreground)' }}>
               Aucun fichier ouvert. Sélectionnez ou créez une carte mentale dans la barre latérale.
