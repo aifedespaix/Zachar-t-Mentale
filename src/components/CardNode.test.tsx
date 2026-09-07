@@ -476,41 +476,95 @@ describe('CardNode footer', () => {
     expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
   })
 
-  it('reveals the real title after clicking "Révéler la réponse"', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-
-    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
-
-    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
-  })
-
-  it('resets quizRevealed when the quiz ends, so a second quiz session drawing the same card masks it again', async () => {
-    const user = userEvent.setup()
-    const { rerenderWith } = renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-
-    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
-    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
-
-    // The quiz ends: this card is no longer part of any question.
-    rerenderWith(testCard, undefined)
-    // A second quiz later draws the SAME card again as a recall question.
-    rerenderWith(testCard, { type: 'recall', result: 'unanswered' })
-
-    expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveValue('Titre initial')
-    expect(screen.queryByRole('button', { name: /je savais/i })).not.toBeInTheDocument()
-  })
-
-  it('does not reveal the real title or show grading buttons when the masked title field is focused', async () => {
+  it('opens the title for typing when a masked (pending recall) title is clicked, with an empty draft', async () => {
     const user = userEvent.setup()
     renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
 
     const input = screen.getByRole('textbox', { name: /titre/i })
     await user.click(input)
 
-    expect(input).not.toHaveValue('Titre initial')
-    expect(screen.queryByRole('button', { name: /je savais/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /je ne savais pas/i })).not.toBeInTheDocument()
+    expect(input).toHaveValue('')
+  })
+
+  it('grades an exact typed answer as correct and reveals the real title', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, `${testCard.title}{Enter}`)
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue(testCard.title)
+  })
+
+  it('grades a wrong typed answer as incorrect', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, 'Complètement faux{Enter}')
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('incorrect')
+  })
+
+  it('never writes the typed guess back into the card title, whatever the grading outcome', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, 'Une tentative{Enter}')
+
+    expect(useCardsStore.getState().history.present[0].title).toBe('Titre initial')
+  })
+
+  it('cancels on Escape without grading anything', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, 'Brouillon{Escape}')
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('unanswered')
+    expect(input).not.toHaveValue(testCard.title)
+  })
+
+  it('limits how many characters can be typed to the length of the real title', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveAttribute('maxLength', String(testCard.title.length))
+  })
+
+  it('shows a length-guide row of blanks above the masked title by default', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+    // "Titre initial" -> letters blanked, the space between the two words kept.
+    expect(screen.getByText('_____ _______')).toBeInTheDocument()
+  })
+
+  it('shows a similarity badge when the typed answer is close but not exact', async () => {
+    const user = userEvent.setup()
+    const card: Card = { ...testCard, title: 'Chat' }
+    resetStore([card])
+    renderCardNode(card, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, 'Chah{Enter}')
+
+    expect(screen.getByText(/75%/)).toBeInTheDocument()
+  })
+
+  it('shows no similarity badge for an exact match', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, `${testCard.title}{Enter}`)
+
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument()
   })
 
   it('opens an editable field when "add definition" is clicked and commits the typed text on Enter', async () => {
@@ -578,40 +632,8 @@ describe('CardNode footer', () => {
     expect(screen.getByRole('button', { name: /ajouter une définition/i })).toBeDisabled()
   })
 
-  it('shows self-grade buttons once a revealed recall question is unanswered', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-
-    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
-
-    expect(screen.getByRole('button', { name: /je savais/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /je ne savais pas/i })).toBeInTheDocument()
-  })
-
-  it('clicking "Je savais" records a correct answer in the quiz store', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
-
-    await user.click(screen.getByRole('button', { name: /je savais/i }))
-
-    expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
-  })
-
-  it('clicking "Je ne savais pas" records an incorrect answer in the quiz store', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-    await user.click(screen.getByRole('button', { name: /révéler la réponse/i }))
-
-    await user.click(screen.getByRole('button', { name: /je ne savais pas/i }))
-
-    expect(useQuizStore.getState().results[testCard.id]).toBe('incorrect')
-  })
-
-  it('shows a green border and no grading buttons once graded correct', () => {
+  it('shows a green border once graded correct', () => {
     renderCardNode(testCard, false, false, { type: 'recall', result: 'correct' })
-
-    expect(screen.queryByRole('button', { name: /je savais/i })).not.toBeInTheDocument()
     expect(screen.getByTestId(`card-${testCard.id}`)).toHaveStyle({ borderColor: '#16a34a' })
   })
 

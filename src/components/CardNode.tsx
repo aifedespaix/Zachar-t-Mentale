@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Plus, ArrowRight, X, Check, GripVertical, AlignLeft, FlipHorizontal2, Unlink, Trash2, type LucideIcon } from 'lucide-react'
+import { Plus, ArrowRight, GripVertical, AlignLeft, FlipHorizontal2, Unlink, Trash2, type LucideIcon } from 'lucide-react'
 import type { Card } from '../types/card'
 import { isRootCard } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
+import { useQuizSettingsStore } from '../state/useQuizSettingsStore'
+import { computeTitleSimilarity, similarityColor } from '../utils/textSimilarity'
+import { buildLengthGuide } from '../utils/lengthGuide'
 import { detachedColors, levelColor } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
@@ -94,29 +97,41 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
 
 export function CardNode({ data }: CardNodeProps) {
   const { card, autoEdit = false, isReparentTarget = false, quiz } = data
-  const [quizRevealed, setQuizRevealed] = useState(false)
   const isRecallPending = quiz?.type === 'recall' && quiz.result === 'unanswered'
-  const displayMasked = isRecallPending && !quizRevealed
+  const similarityThreshold = useQuizSettingsStore(s => s.similarityThreshold)
+  const lengthGuideEnabled = useQuizSettingsStore(s => s.lengthGuideEnabled)
+  const [recallFeedback, setRecallFeedback] = useState<{ typed: string; similarity: number } | null>(null)
+  // Grading is authoritative the instant `commitRecallAnswer` runs, but the
+  // parent only learns the new result (and re-supplies an updated `quiz`
+  // prop) on ITS next render pass. Gating the mask on the local
+  // `recallFeedback` too (not `isRecallPending` alone) means the title
+  // reveals immediately, without waiting on that round trip.
+  const displayMasked = isRecallPending && !recallFeedback
   const answerRecall = useQuizStore(s => s.answerRecall)
   const answerQcmDefinition = useQuizStore(s => s.answerQcmDefinition)
   const [qcmOpen, setQcmOpen] = useState(false)
   const isQcmPending = quiz?.type === 'qcm' && quiz.result === 'unanswered'
   const resultBorderColor = quiz?.result === 'correct' ? '#16a34a' : quiz?.result === 'incorrect' ? '#dc2626' : undefined
 
-  function handleReveal() {
-    setQuizRevealed(true)
-    setFlipped(true)
-    window.setTimeout(() => setFlipped(false), 400)
-  }
-
   // React Flow keeps CardNode mounted for the life of the app (nodes are
-  // keyed by card id, not remounted between quizzes), so `quizRevealed` must
-  // be reset by hand whenever this card leaves an active quiz question —
-  // otherwise a SECOND quiz drawing the same card as a recall question would
-  // inherit the first quiz's "already revealed" state and skip masking.
+  // keyed by card id, not remounted between quizzes), so feedback from a
+  // PREVIOUS quiz's recall question must not leak into a later one drawing
+  // the same card again.
   useEffect(() => {
-    if (!quiz) setQuizRevealed(false)
+    if (!quiz) setRecallFeedback(null)
   }, [quiz])
+
+  // `startQuiz` normally seeds every drawn question's result to 'unanswered'
+  // before any CardNode ever mounts with a pending recall quiz, so in real
+  // use this is a no-op. It only fires as a defensive fallback if this card
+  // is ever handed a pending recall question the store doesn't know about
+  // yet, so `results[cardId]` reads as 'unanswered' rather than undefined
+  // until an actual answer is graded.
+  useEffect(() => {
+    if (isRecallPending && useQuizStore.getState().results[card.id] === undefined) {
+      useQuizStore.setState(state => ({ results: { ...state.results, [card.id]: 'unanswered' } }))
+    }
+  }, [isRecallPending, card.id])
 
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
@@ -182,13 +197,9 @@ export function CardNode({ data }: CardNodeProps) {
   }
 
   function handleTitleFocus() {
-    // `readOnly` on the <input> below blocks typing but NOT focus. Without
-    // this guard, focusing a masked title would seed the draft with the REAL
-    // title and render it via the `titleFocused` branch of the value
-    // ternary — bypassing the mask (and the reveal/grading flow) with a
-    // single click. Block focus itself while masked instead.
-    if (displayMasked) {
-      titleInputRef.current?.blur()
+    if (isRecallPending) {
+      setDraftTitle('')
+      setTitleFocused(true)
       return
     }
     // Re-seed the draft from the card as it is NOW: a stale draft (from a
@@ -231,8 +242,19 @@ export function CardNode({ data }: CardNodeProps) {
 
   function cancelTitle() {
     cancellingTitleRef.current = true
-    setDraftTitle(card.title)
+    setDraftTitle(isRecallPending ? '' : card.title)
     titleInputRef.current?.blur()
+  }
+
+  function commitRecallAnswer() {
+    if (cancellingTitleRef.current) {
+      cancellingTitleRef.current = false
+    } else {
+      const similarity = computeTitleSimilarity(draftTitle, card.title)
+      setRecallFeedback({ typed: draftTitle, similarity })
+      answerRecall(card.id, similarity >= similarityThreshold)
+    }
+    setTitleFocused(false)
   }
 
   function commitDefinition() {
@@ -375,27 +397,6 @@ export function CardNode({ data }: CardNodeProps) {
         </span>
       )}
 
-      {isRecallPending && quizRevealed && (
-        <>
-          <EdgeButton
-            label="Je savais"
-            icon={Check}
-            color="#16a34a"
-            disabled={false}
-            onActivate={() => answerRecall(card.id, true)}
-            position={{ top: '-0.6rem', right: '-0.6rem' }}
-          />
-          <EdgeButton
-            label="Je ne savais pas"
-            icon={X}
-            color="#dc2626"
-            disabled={false}
-            onActivate={() => answerRecall(card.id, false)}
-            position={{ top: '-0.6rem', left: '-0.6rem' }}
-          />
-        </>
-      )}
-
       {/*
         Always an <input>, never swapped for a <span>: the two elements
         default to different intrinsic sizes (padding, line-height), so
@@ -405,6 +406,11 @@ export function CardNode({ data }: CardNodeProps) {
         the editable affordance, at a border-width that matches both states
         so revealing it never shifts the layout either.
       */}
+      {displayMasked && lengthGuideEnabled && (
+        <div style={{ fontFamily: 'monospace', fontSize: '0.75rem', letterSpacing: '0.1em', opacity: 0.6 }}>
+          {buildLengthGuide(card.title)}
+        </div>
+      )}
       <FlipCard
         flipped={flipped}
         front={
@@ -415,7 +421,8 @@ export function CardNode({ data }: CardNodeProps) {
             value={titleFocused ? draftTitle : displayMasked ? '???' : card.title}
             onFocus={handleTitleFocus}
             onChange={e => setDraftTitle(e.target.value)}
-            onBlur={commitTitle}
+            onBlur={isRecallPending ? commitRecallAnswer : commitTitle}
+            maxLength={isRecallPending ? card.title.length : undefined}
             onKeyDown={e => {
               if (e.key === 'Enter') {
                 e.preventDefault()
@@ -451,6 +458,11 @@ export function CardNode({ data }: CardNodeProps) {
           />
         }
       />
+      {quiz?.type === 'recall' && recallFeedback && recallFeedback.similarity < 100 && (
+        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: similarityColor(recallFeedback.similarity) }}>
+          {recallFeedback.similarity}% — ta réponse : « {recallFeedback.typed} »
+        </div>
+      )}
 
       {/*
         Mounted only while open: `descendantCount` is an O(n) walk of the whole
@@ -603,16 +615,7 @@ export function CardNode({ data }: CardNodeProps) {
           )}
 
           {quiz && quiz.result === 'unanswered' ? (
-            quiz.type === 'recall' ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" aria-label="Révéler la réponse" onClick={handleReveal}>
-                    <FlipHorizontal2 />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Révéler la réponse</TooltipContent>
-              </Tooltip>
-            ) : (
+            quiz.type !== 'recall' && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon-sm" aria-label="Répondre" onClick={() => setQcmOpen(true)}>
