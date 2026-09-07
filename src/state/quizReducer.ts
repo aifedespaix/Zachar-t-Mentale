@@ -1,11 +1,14 @@
 import type { Card } from '../types/card'
 import type { QuizConfig, QuizDifficulty, QuizQuestion, QuizQuestionType, QuizResult } from '../types/quiz'
 
-const DIFFICULTY_SETTINGS: Record<QuizDifficulty, { sampleRatio: number; qcmRatio: number }> = {
-  facile: { sampleRatio: 0.3, qcmRatio: 0.2 },
-  moyen: { sampleRatio: 0.6, qcmRatio: 0.5 },
-  difficile: { sampleRatio: 1, qcmRatio: 0.7 },
+const DIFFICULTY_SETTINGS: Record<QuizDifficulty, { sampleRatio: number }> = {
+  facile: { sampleRatio: 0.2 },
+  moyen: { sampleRatio: 0.5 },
+  difficile: { sampleRatio: 0.75 },
 }
+
+const HINT_TRUNCATE_RATIO = 0.5
+const MAX_DISTRACTORS = 3
 
 function shuffle<T>(items: T[], random: () => number): T[] {
   const copy = [...items]
@@ -21,13 +24,13 @@ export function selectQuizQuestions(
   config: QuizConfig,
   random: () => number = Math.random
 ): QuizQuestion[] {
-  const { sampleRatio, qcmRatio } = DIFFICULTY_SETTINGS[config.difficulty]
+  const { sampleRatio } = DIFFICULTY_SETTINGS[config.difficulty]
 
   const drawn: Card[] = []
   for (const level of config.levels) {
     const levelCards = cards.filter(c => c.level === level)
     // A plain round() can hit 0 for a small non-empty level (e.g. exactly 1
-    // card at "facile", 1 * 0.3 rounds to 0) — level 1 (the root) always has
+    // card at "facile", 1 * 0.2 rounds to 0) — level 1 (the root) always has
     // exactly 1 card, so a fresh mind map's only card would never be drawn.
     // Guarantee at least 1 card from any level that has cards at all.
     const count = levelCards.length === 0 ? 0 : Math.max(1, Math.round(levelCards.length * sampleRatio))
@@ -35,12 +38,48 @@ export function selectQuizQuestions(
   }
 
   return drawn.map(card => {
-    const type: QuizQuestionType = card.definition && random() < qcmRatio ? 'qcm' : 'recall'
+    if (config.qcmMode) return { cardId: card.id, type: 'qcm-title' as QuizQuestionType }
+    const type: QuizQuestionType = card.definition ? 'qcm-definition' : 'recall'
     return { cardId: card.id, type }
   })
 }
 
-const MAX_DISTRACTORS = 3
+function distractorScopes(cards: Card[], targetCard: Card, difficulty: QuizDifficulty): Card[][] {
+  const branch = cards.filter(c => c.parentId === targetCard.parentId)
+  const level = cards.filter(c => c.level === targetCard.level)
+  const whole = cards
+  const scopesByDifficulty: Record<QuizDifficulty, Card[][]> = {
+    facile: [whole],
+    moyen: [level, whole],
+    difficile: [branch, level, whole],
+  }
+  return scopesByDifficulty[difficulty]
+}
+
+/** Shared branch->level->whole-map degradation, parameterized over which text field to pool. */
+function buildDistractorPoolFrom(
+  cards: Card[],
+  targetCard: Card,
+  difficulty: QuizDifficulty,
+  pick: (card: Card) => string | undefined,
+  exclude: string,
+  random: () => number
+): string[] {
+  const seen = new Set<string>([exclude])
+  const pool: string[] = []
+  for (const scope of distractorScopes(cards, targetCard, difficulty)) {
+    for (const card of shuffle(scope, random)) {
+      if (pool.length >= MAX_DISTRACTORS) break
+      if (card.id === targetCard.id) continue
+      const value = pick(card)
+      if (!value || seen.has(value)) continue
+      seen.add(value)
+      pool.push(value)
+    }
+    if (pool.length >= MAX_DISTRACTORS) break
+  }
+  return pool
+}
 
 export function buildDistractorPool(
   cards: Card[],
@@ -48,31 +87,32 @@ export function buildDistractorPool(
   difficulty: QuizDifficulty,
   random: () => number = Math.random
 ): string[] {
-  const withDefinitions = (pool: Card[]) =>
-    pool.filter(c => c.id !== targetCard.id && c.definition && c.definition !== targetCard.definition)
+  return buildDistractorPoolFrom(cards, targetCard, difficulty, c => c.definition, targetCard.definition ?? '', random)
+}
 
-  const branch = withDefinitions(cards.filter(c => c.parentId === targetCard.parentId))
-  const level = withDefinitions(cards.filter(c => c.level === targetCard.level))
-  const whole = withDefinitions(cards)
+export function buildTitleDistractorPool(
+  cards: Card[],
+  targetCard: Card,
+  difficulty: QuizDifficulty,
+  random: () => number = Math.random
+): string[] {
+  return buildDistractorPoolFrom(cards, targetCard, difficulty, c => c.title, targetCard.title, random)
+}
 
-  const scopesByDifficulty: Record<QuizDifficulty, Card[][]> = {
-    facile: [whole],
-    moyen: [level, whole],
-    difficile: [branch, level, whole],
-  }
+function truncateAtWordBoundary(text: string, ratio: number): string {
+  const targetLength = Math.max(1, Math.round(text.length * ratio))
+  if (targetLength >= text.length) return text
+  const cut = text.lastIndexOf(' ', targetLength)
+  const truncated = cut > 0 ? text.slice(0, cut) : text.slice(0, targetLength)
+  return `${truncated}…`
+}
 
-  const seen = new Set<string>()
-  const pool: string[] = []
-  for (const scope of scopesByDifficulty[difficulty]) {
-    for (const card of shuffle(scope, random)) {
-      if (pool.length >= MAX_DISTRACTORS) break
-      if (!card.definition || seen.has(card.definition)) continue
-      seen.add(card.definition)
-      pool.push(card.definition)
-    }
-    if (pool.length >= MAX_DISTRACTORS) break
-  }
-  return pool
+/** facile = full definition, moyen = truncated, difficile = no textual hint. */
+function buildHint(card: Card, difficulty: QuizDifficulty): string | undefined {
+  if (!card.definition) return undefined
+  if (difficulty === 'facile') return card.definition
+  if (difficulty === 'moyen') return truncateAtWordBoundary(card.definition, HINT_TRUNCATE_RATIO)
+  return undefined
 }
 
 export function attachDistractors(
@@ -82,14 +122,24 @@ export function attachDistractors(
   random: () => number = Math.random
 ): QuizQuestion[] {
   return questions.map(question => {
-    if (question.type !== 'qcm') return question
     const card = cards.find(c => c.id === question.cardId)
     // Defensive only (should not happen in practice): always degrade to
-    // recall rather than returning the original, unmodified qcm question.
+    // recall rather than returning the original, unmodified question.
     if (!card) return { cardId: question.cardId, type: 'recall' }
-    const pool = buildDistractorPool(cards, card, difficulty, random)
-    if (pool.length === 0) return { cardId: question.cardId, type: 'recall' }
-    return { ...question, distractorDefinitions: pool }
+
+    if (question.type === 'qcm-definition') {
+      const pool = buildDistractorPool(cards, card, difficulty, random)
+      if (pool.length === 0) return { cardId: question.cardId, type: 'recall' }
+      return { ...question, distractorDefinitions: pool }
+    }
+
+    if (question.type === 'qcm-title') {
+      const pool = buildTitleDistractorPool(cards, card, difficulty, random)
+      if (pool.length === 0) return { cardId: question.cardId, type: 'recall' }
+      return { ...question, distractorTitles: pool, hint: buildHint(card, difficulty) }
+    }
+
+    return question
   })
 }
 

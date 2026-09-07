@@ -1,5 +1,6 @@
+// src/state/quizReducer.test.ts
 import { describe, it, expect } from 'vitest'
-import { selectQuizQuestions, buildDistractorPool, attachDistractors, computeScore } from './quizReducer'
+import { selectQuizQuestions, buildDistractorPool, buildTitleDistractorPool, attachDistractors, computeScore } from './quizReducer'
 import type { Card } from '../types/card'
 import type { QuizConfig } from '../types/quiz'
 
@@ -20,65 +21,74 @@ function sequence(values: number[]): () => number {
   return () => values[i++ % values.length]
 }
 
+function baseConfig(overrides: Partial<QuizConfig> = {}): QuizConfig {
+  return { levels: [2], difficulty: 'moyen', qcmMode: false, ...overrides }
+}
+
 describe('selectQuizQuestions', () => {
-  it('draws round(levelCount * sampleRatio) cards for a level, with "moyen" at 60%', () => {
+  it('draws round(levelCount * sampleRatio) cards for a level, with "moyen" at 50%', () => {
     const cards = [root, ...makeLevel2(10)]
-    const config: QuizConfig = { levels: [2], difficulty: 'moyen' }
-    const questions = selectQuizQuestions(cards, config, sequence([0.1]))
-    expect(questions).toHaveLength(6)
+    const questions = selectQuizQuestions(cards, baseConfig(), sequence([0.1]))
+    expect(questions).toHaveLength(5)
   })
 
-  it('draws 100% of the perimeter for "difficile"', () => {
-    const cards = [root, ...makeLevel2(5)]
-    const config: QuizConfig = { levels: [2], difficulty: 'difficile' }
-    const questions = selectQuizQuestions(cards, config, sequence([0.9]))
-    expect(questions).toHaveLength(5)
+  it('draws 75% of the perimeter for "difficile"', () => {
+    const cards = [root, ...makeLevel2(4)]
+    const questions = selectQuizQuestions(cards, baseConfig({ difficulty: 'difficile' }), sequence([0.9]))
+    expect(questions).toHaveLength(3)
+  })
+
+  it('draws 20% of the perimeter for "facile"', () => {
+    const cards = [root, ...makeLevel2(10)]
+    const questions = selectQuizQuestions(cards, baseConfig({ difficulty: 'facile' }), sequence([0.9]))
+    expect(questions).toHaveLength(2)
   })
 
   it('never draws the same card twice', () => {
     const cards = [root, ...makeLevel2(8)]
-    const config: QuizConfig = { levels: [2], difficulty: 'difficile' }
-    const questions = selectQuizQuestions(cards, config, sequence([0.1, 0.4, 0.7, 0.2, 0.9]))
+    const questions = selectQuizQuestions(cards, baseConfig({ difficulty: 'difficile' }), sequence([0.1, 0.4, 0.7, 0.2, 0.9]))
     const ids = questions.map(q => q.cardId)
     expect(new Set(ids).size).toBe(ids.length)
   })
 
   it('only draws from the levels listed in the config', () => {
     const cards = [root, ...makeLevel2(4)]
-    const config: QuizConfig = { levels: [1], difficulty: 'difficile' }
-    const questions = selectQuizQuestions(cards, config)
+    const questions = selectQuizQuestions(cards, baseConfig({ levels: [1], difficulty: 'difficile' }))
     expect(questions).toEqual([{ cardId: 'root', type: 'recall' }])
   })
 
-  it('always types a card with no definition as "recall", regardless of the qcm ratio roll', () => {
-    // "difficile" rolls qcm 70% of the time — feed a random() that would
-    // otherwise pick qcm (a low value) and confirm it's overridden.
-    const config: QuizConfig = { levels: [1], difficulty: 'difficile' }
-    const questions = selectQuizQuestions([root], config, sequence([0.01]))
+  it('types a card with no definition as "recall" in normal mode', () => {
+    const questions = selectQuizQuestions([root], baseConfig({ levels: [1], difficulty: 'difficile' }))
     expect(questions).toEqual([{ cardId: 'root', type: 'recall' }])
+  })
+
+  it('types a card WITH a definition as "qcm-definition" in normal mode', () => {
+    const withDefinition: Card = { ...root, definition: 'Une définition' }
+    const questions = selectQuizQuestions([withDefinition], baseConfig({ levels: [1], difficulty: 'difficile' }))
+    expect(questions).toEqual([{ cardId: 'root', type: 'qcm-definition' }])
+  })
+
+  it('types every drawn card as "qcm-title" when qcmMode is on, definition or not', () => {
+    const withDefinition: Card = { ...root, definition: 'Une définition' }
+    const withoutDefinition: Card = { id: 'other', level: 1, title: 'Autre', parentId: null, order: 0 }
+
+    expect(
+      selectQuizQuestions([withDefinition], baseConfig({ levels: [1], difficulty: 'difficile', qcmMode: true }))
+    ).toEqual([{ cardId: 'root', type: 'qcm-title' }])
+
+    expect(
+      selectQuizQuestions([withoutDefinition], baseConfig({ levels: [1], difficulty: 'difficile', qcmMode: true }))
+    ).toEqual([{ cardId: 'other', type: 'qcm-title' }])
   })
 
   it('still draws the single card of a level with exactly 1 card at "facile" (round-to-zero must not drop it)', () => {
-    // Math.round(1 * 0.3) === 0 — a level with exactly 1 card (e.g. level 1,
-    // the root, which is always exactly 1 card) must still draw that card.
-    const config: QuizConfig = { levels: [1], difficulty: 'facile' }
-    const questions = selectQuizQuestions([root], config)
+    const questions = selectQuizQuestions([root], baseConfig({ levels: [1], difficulty: 'facile' }))
     expect(questions).toEqual([{ cardId: 'root', type: 'recall' }])
   })
 
   it('draws 0 cards for an empty level (no cards to guarantee a minimum from)', () => {
-    const config: QuizConfig = { levels: [3], difficulty: 'facile' }
-    const questions = selectQuizQuestions([root, ...makeLevel2(2)], config)
+    const questions = selectQuizQuestions([root, ...makeLevel2(2)], baseConfig({ levels: [3], difficulty: 'facile' }))
     expect(questions).toEqual([])
-  })
-
-  it('can type a card WITH a definition as "qcm" when the ratio roll says so', () => {
-    const withDefinition: Card = { ...root, definition: 'Une définition' }
-    const config: QuizConfig = { levels: [1], difficulty: 'difficile' } // 70% qcm
-    // A single-card level never calls the shuffle's random() (nothing to swap),
-    // so this one value goes straight to the qcm-ratio roll: 0.5 < 0.7 -> qcm.
-    const questions = selectQuizQuestions([withDefinition], config, sequence([0.5]))
-    expect(questions).toEqual([{ cardId: 'root', type: 'qcm' }])
   })
 })
 
@@ -122,7 +132,7 @@ describe('buildDistractorPool', () => {
       id: 'duplicate',
       level: 3,
       title: 'Doublon',
-      definition: 'Bonne définition', // identical text to `target`'s definition, different id
+      definition: 'Bonne définition',
       parentId: 'p1',
       order: 3,
     }
@@ -132,17 +142,76 @@ describe('buildDistractorPool', () => {
   })
 })
 
+describe('buildTitleDistractorPool', () => {
+  const target: Card = { id: 'target', level: 3, title: 'Cible', parentId: 'p1', order: 0 }
+  const sibling: Card = { id: 'sibling', level: 3, title: 'Frère', parentId: 'p1', order: 1 }
+  const sameLevelOtherBranch: Card = { id: 'other-branch', level: 3, title: 'Autre branche', parentId: 'p2', order: 0 }
+  const otherLevel: Card = { id: 'other-level', level: 2, title: 'Autre niveau', parentId: 'root', order: 0 }
+  const allCards = [target, sibling, sameLevelOtherBranch, otherLevel]
+
+  it('never includes the target card itself', () => {
+    const pool = buildTitleDistractorPool(allCards, target, 'facile')
+    expect(pool).not.toContain('Cible')
+  })
+
+  it('"facile" pulls distractors from anywhere in the map', () => {
+    const pool = buildTitleDistractorPool(allCards, target, 'facile')
+    expect(pool.sort()).toEqual(['Autre branche', 'Autre niveau', 'Frère'].sort())
+  })
+
+  it('"difficile" prioritizes the same branch (same parent) first', () => {
+    const pool = buildTitleDistractorPool(allCards, target, 'difficile')
+    expect(pool[0]).toBe('Frère')
+  })
+
+  it('returns an empty pool when no other card exists', () => {
+    const pool = buildTitleDistractorPool([target], target, 'facile')
+    expect(pool).toEqual([])
+  })
+})
+
 describe('attachDistractors', () => {
   const cardWithDef: Card = { id: 'a', level: 1, title: 'A', definition: 'Def A', parentId: null, order: 0 }
   const otherWithDef: Card = { id: 'b', level: 2, title: 'B', definition: 'Def B', parentId: 'a', order: 0 }
+  const cardNoDef: Card = { id: 'c', level: 1, title: 'C', parentId: null, order: 0 }
+  const otherNoDef: Card = { id: 'd', level: 2, title: 'D', parentId: 'c', order: 0 }
 
-  it('fills distractorDefinitions for a qcm question when distractors exist', () => {
-    const questions = attachDistractors([cardWithDef, otherWithDef], [{ cardId: 'a', type: 'qcm' }], 'facile')
-    expect(questions).toEqual([{ cardId: 'a', type: 'qcm', distractorDefinitions: ['Def B'] }])
+  it('fills distractorDefinitions for a qcm-definition question when distractors exist', () => {
+    const questions = attachDistractors([cardWithDef, otherWithDef], [{ cardId: 'a', type: 'qcm-definition' }], 'facile')
+    expect(questions).toEqual([{ cardId: 'a', type: 'qcm-definition', distractorDefinitions: ['Def B'] }])
   })
 
-  it('falls back to "recall" when a qcm question has no possible distractor', () => {
-    const questions = attachDistractors([cardWithDef], [{ cardId: 'a', type: 'qcm' }], 'facile')
+  it('falls back to "recall" when a qcm-definition question has no possible distractor', () => {
+    const questions = attachDistractors([cardWithDef], [{ cardId: 'a', type: 'qcm-definition' }], 'facile')
+    expect(questions).toEqual([{ cardId: 'a', type: 'recall' }])
+  })
+
+  it('fills distractorTitles and a full-definition hint for "facile" qcm-title', () => {
+    const questions = attachDistractors([cardWithDef, otherWithDef], [{ cardId: 'a', type: 'qcm-title' }], 'facile')
+    expect(questions).toEqual([{ cardId: 'a', type: 'qcm-title', distractorTitles: ['B'], hint: 'Def A' }])
+  })
+
+  it('truncates the hint for "moyen" qcm-title', () => {
+    const longDef: Card = { ...cardWithDef, definition: 'Un long texte de définition pour vérifier la troncature' }
+    const questions = attachDistractors([longDef, otherWithDef], [{ cardId: 'a', type: 'qcm-title' }], 'moyen')
+    const [question] = questions
+    expect(question.type).toBe('qcm-title')
+    expect(question.hint).toMatch(/…$/)
+    expect(question.hint!.length).toBeLessThan(longDef.definition!.length)
+  })
+
+  it('gives no hint for "difficile" qcm-title even when a definition exists', () => {
+    const questions = attachDistractors([cardWithDef, otherWithDef], [{ cardId: 'a', type: 'qcm-title' }], 'difficile')
+    expect(questions[0].hint).toBeUndefined()
+  })
+
+  it('gives no hint for qcm-title when the card has no definition at all', () => {
+    const questions = attachDistractors([cardNoDef, otherNoDef], [{ cardId: 'c', type: 'qcm-title' }], 'facile')
+    expect(questions[0].hint).toBeUndefined()
+  })
+
+  it('falls back to "recall" when a qcm-title question has no possible title distractor', () => {
+    const questions = attachDistractors([cardWithDef], [{ cardId: 'a', type: 'qcm-title' }], 'facile')
     expect(questions).toEqual([{ cardId: 'a', type: 'recall' }])
   })
 
