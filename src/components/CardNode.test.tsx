@@ -522,6 +522,10 @@ describe('CardNode footer', () => {
 
   it('cancels on Escape without grading anything', async () => {
     const user = userEvent.setup()
+    // The real app's `startQuiz` always seeds `results[cardId]` to
+    // 'unanswered' before a recall question is ever drawn; seed it here too
+    // so this test doesn't depend on CardNode itself patching the store.
+    useQuizStore.setState({ results: { [testCard.id]: 'unanswered' } })
     renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
 
     const input = screen.getByRole('textbox', { name: /titre/i })

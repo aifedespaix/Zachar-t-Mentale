@@ -121,18 +121,6 @@ export function CardNode({ data }: CardNodeProps) {
     if (!quiz) setRecallFeedback(null)
   }, [quiz])
 
-  // `startQuiz` normally seeds every drawn question's result to 'unanswered'
-  // before any CardNode ever mounts with a pending recall quiz, so in real
-  // use this is a no-op. It only fires as a defensive fallback if this card
-  // is ever handed a pending recall question the store doesn't know about
-  // yet, so `results[cardId]` reads as 'unanswered' rather than undefined
-  // until an actual answer is graded.
-  useEffect(() => {
-    if (isRecallPending && useQuizStore.getState().results[card.id] === undefined) {
-      useQuizStore.setState(state => ({ results: { ...state.results, [card.id]: 'unanswered' } }))
-    }
-  }, [isRecallPending, card.id])
-
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
   const addChild = useCardsStore(s => s.addChild)
