@@ -5,21 +5,29 @@ import { FileTreeRow } from './FileTreeRow'
 import { useWorkspaceStore, createWorkspaceStore } from '../../state/useWorkspaceStore'
 import type { FileTreeNode } from '../../types/workspace'
 
-vi.mock('../../persistence/fileOps', () => ({
-  createMindMapFile: vi.fn(),
-  createSubfolder: vi.fn(),
-  renamePath: vi.fn(),
-  deletePath: vi.fn(),
-}))
+vi.mock('../../persistence/fileOps', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../persistence/fileOps')>()
+  return {
+    ...actual,
+    createMindMapFile: vi.fn(),
+    createSubfolder: vi.fn(),
+    renamePath: vi.fn(),
+    deletePath: vi.fn(),
+  }
+})
 vi.mock('../../persistence/fileTree', async importOriginal => {
   const actual = await importOriginal<typeof import('../../persistence/fileTree')>()
   return { ...actual, scanFolder: vi.fn() }
 })
-vi.mock('../../persistence/fileStore', () => ({ loadMindMap: vi.fn() }))
+vi.mock('../../persistence/fileStore', () => ({ loadMindMap: vi.fn(), saveMindMap: vi.fn(), mindMapExists: vi.fn() }))
+vi.mock('../../persistence/exportIO', () => ({ pickXmindFile: vi.fn(), readBinaryFile: vi.fn() }))
+vi.mock('../../xmind/importXmind', () => ({ readXmindFile: vi.fn() }))
 
 import { createMindMapFile, createSubfolder, renamePath, deletePath } from '../../persistence/fileOps'
 import { scanFolder } from '../../persistence/fileTree'
-import { loadMindMap } from '../../persistence/fileStore'
+import { loadMindMap, saveMindMap } from '../../persistence/fileStore'
+import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
+import { readXmindFile } from '../../xmind/importXmind'
 
 function resetWorkspaceStore() {
   const pristine = createWorkspaceStore().getState()
@@ -40,6 +48,10 @@ describe('FileTreeRow', () => {
     vi.mocked(deletePath).mockReset()
     vi.mocked(scanFolder).mockReset()
     vi.mocked(loadMindMap).mockReset()
+    vi.mocked(saveMindMap).mockReset()
+    vi.mocked(pickXmindFile).mockReset()
+    vi.mocked(readBinaryFile).mockReset()
+    vi.mocked(readXmindFile).mockReset()
   })
 
   it('renders a mindmap file and opens it on click', async () => {
@@ -352,5 +364,53 @@ describe('FileTreeRow', () => {
     await user.click(screen.getByRole('button', { name: 'Exporter' }))
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/structure du fichier est invalide/))
+  })
+
+  it('imports every sheet of a picked XMind file as its own .json in the folder, then refreshes it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pickXmindFile).mockResolvedValue('/downloads/vieux-cours.xmind')
+    vi.mocked(readBinaryFile).mockResolvedValue(new Uint8Array([1]))
+    vi.mocked(readXmindFile).mockResolvedValue([
+      { sheetTitle: 'Chapitre 1', cards: [{ id: 'r1', level: 1, title: 'R1', parentId: null, order: 0 }] },
+      { sheetTitle: 'Chapitre 2', cards: [{ id: 'r2', level: 1, title: 'R2', parentId: null, order: 0 }] },
+    ])
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const node: FileTreeNode = { type: 'folder', name: 'cours', path: '/cours', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
+
+    await user.click(screen.getByRole('button', { name: 'Importer XMind' }))
+
+    await waitFor(() => expect(saveMindMap).toHaveBeenCalledTimes(2))
+    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 1.json', [
+      { id: 'r1', level: 1, title: 'R1', parentId: null, order: 0 },
+    ])
+    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 2.json', [
+      { id: 'r2', level: 1, title: 'R2', parentId: null, order: 0 },
+    ])
+    expect(scanFolder).toHaveBeenCalledWith('/cours')
+  })
+
+  it('does nothing when the XMind file picker is cancelled', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pickXmindFile).mockResolvedValue(null)
+    const node: FileTreeNode = { type: 'folder', name: 'cours', path: '/cours', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
+
+    await user.click(screen.getByRole('button', { name: 'Importer XMind' }))
+
+    expect(saveMindMap).not.toHaveBeenCalled()
+  })
+
+  it('reports an XMind import failure through the workspace error channel', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pickXmindFile).mockResolvedValue('/downloads/corrompu.xmind')
+    vi.mocked(readBinaryFile).mockResolvedValue(new Uint8Array([1]))
+    vi.mocked(readXmindFile).mockRejectedValue(new Error('archive corrompue'))
+    const node: FileTreeNode = { type: 'folder', name: 'cours', path: '/cours', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
+
+    await user.click(screen.getByRole('button', { name: 'Importer XMind' }))
+
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/corrompu\.xmind.*archive corrompue/))
   })
 })

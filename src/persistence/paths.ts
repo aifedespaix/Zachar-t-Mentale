@@ -6,6 +6,7 @@
  */
 
 const MIND_MAP_EXTENSION = '.json'
+const ILLEGAL_FILENAME_CHARS = /[\\/:*?"<>|]/g
 
 /** The separator a path already uses, so a derived path stays consistent with it. */
 export function separatorOf(path: string): '\\' | '/' {
@@ -41,4 +42,10 @@ export function repairedCopyPath(path: string, attempt = 1): string {
   const dir = parentDirOf(path)
   const name = `${mindMapBaseName(path)} ${suffix}${MIND_MAP_EXTENSION}`
   return dir === '' ? name : `${dir}${separatorOf(path)}${name}`
+}
+
+/** A sheet/topic title turned into a safe file name component: illegal characters stripped, never empty. */
+export function sanitizeFileName(name: string): string {
+  const cleaned = name.replace(ILLEGAL_FILENAME_CHARS, ' ').replace(/\s+/g, ' ').trim()
+  return cleaned === '' ? 'Sans titre' : cleaned
 }

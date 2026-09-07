@@ -13,15 +13,18 @@ import {
   Trash2,
   X,
   Download,
+  FileUp,
   type LucideIcon,
 } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
-import { createMindMapFile, createSubfolder, renamePath, deletePath } from '../../persistence/fileOps'
+import { createMindMapFile, createSubfolder, renamePath, deletePath, freeMindMapPath } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
-import { parentDirOf, separatorOf } from '../../persistence/paths'
-import { loadMindMap } from '../../persistence/fileStore'
+import { parentDirOf, separatorOf, fileNameOf } from '../../persistence/paths'
+import { loadMindMap, saveMindMap } from '../../persistence/fileStore'
+import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
+import { readXmindFile } from '../../xmind/importXmind'
 import { validateCards } from '../../validation/cardsValidation'
 import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
@@ -157,6 +160,22 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     await refreshFolder(parentPath)
   }
 
+  async function handleImportXmind() {
+    const path = await pickXmindFile()
+    if (!path) return
+    try {
+      const bytes = await readBinaryFile(path)
+      const sheets = await readXmindFile(bytes)
+      for (const sheet of sheets) {
+        const target = await freeMindMapPath(node.path, sheet.sheetTitle)
+        await saveMindMap(target, sheet.cards)
+      }
+      await refreshFolder(node.path)
+    } catch (error) {
+      setWorkspaceError(`Impossible d’importer « ${fileNameOf(path)} » : ${describeError(error)}`)
+    }
+  }
+
   async function openExport() {
     let raw: Card[] | null
     try {
@@ -218,6 +237,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
                 setDraftCreateName('')
               }}
             />
+            <ActionButton label="Importer XMind" icon={FileUp} onClick={handleImportXmind} />
             {!isRoot && <ActionButton label="Renommer" icon={Pencil} onClick={() => setRenaming(true)} />}
             {!isRoot && <ActionButton label="Supprimer" icon={Trash2} onClick={() => setConfirmDeleteOpen(true)} />}
             {isRoot && (

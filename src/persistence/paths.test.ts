@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fileNameOf, mindMapBaseName, parentDirOf, repairedCopyPath, separatorOf } from './paths'
+import { fileNameOf, mindMapBaseName, parentDirOf, repairedCopyPath, sanitizeFileName, separatorOf } from './paths'
 
 describe('path helpers', () => {
   it('reads the file name off both separators', () => {
@@ -39,5 +39,19 @@ describe('repairedCopyPath', () => {
   it('always produces a .json file, even from a path that had no extension', () => {
     expect(repairedCopyPath('/cours/fractions')).toBe('/cours/fractions (Réparée).json')
     expect(repairedCopyPath('fractions.json')).toBe('fractions (Réparée).json')
+  })
+})
+
+describe('sanitizeFileName', () => {
+  it('strips characters illegal in a file name', () => {
+    expect(sanitizeFileName('Chapitre 3: Vecteurs/Forces')).toBe('Chapitre 3 Vecteurs Forces')
+  })
+
+  it('falls back to a placeholder when nothing usable remains', () => {
+    expect(sanitizeFileName('///')).toBe('Sans titre')
+  })
+
+  it('leaves an already-safe name untouched', () => {
+    expect(sanitizeFileName('Chimie organique')).toBe('Chimie organique')
   })
 })
