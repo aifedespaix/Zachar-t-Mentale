@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { QcmDialog } from './quiz/QcmDialog'
+import { FlipCard } from './FlipCard'
 
 interface QuizData {
   type: QuizQuestionType
@@ -280,8 +281,6 @@ export function CardNode({ data }: CardNodeProps) {
       ]
         .filter(Boolean)
         .join(' ')}
-      animate={{ rotateY: flipped ? 180 : 0 }}
-      transition={{ duration: 0.4 }}
       style={{
         background: toCss(colors.bg),
         color: toCss(colors.text),
@@ -406,35 +405,51 @@ export function CardNode({ data }: CardNodeProps) {
         the editable affordance, at a border-width that matches both states
         so revealing it never shifts the layout either.
       */}
-      <input
-        ref={titleInputRef}
-        aria-label="Titre"
-        readOnly={locked}
-        value={titleFocused ? draftTitle : displayMasked ? '???' : card.title}
-        onFocus={handleTitleFocus}
-        onChange={e => setDraftTitle(e.target.value)}
-        onBlur={commitTitle}
-        onKeyDown={e => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            titleInputRef.current?.blur()
-          }
-          if (e.key === 'Escape') cancelTitle()
-        }}
-        style={{
-          display: 'block',
-          width: '100%',
-          font: 'inherit',
-          color: 'inherit',
-          background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
-          border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
-          borderRadius: 4,
-          padding: '0.1rem 0.3rem',
-          margin: '-0.1rem -0.3rem',
-          outline: 'none',
-          cursor: 'text',
-          transition: 'background 0.15s ease, border-color 0.15s ease',
-        }}
+      <FlipCard
+        flipped={flipped}
+        front={
+          <input
+            ref={titleInputRef}
+            aria-label="Titre"
+            readOnly={locked}
+            value={titleFocused ? draftTitle : displayMasked ? '???' : card.title}
+            onFocus={handleTitleFocus}
+            onChange={e => setDraftTitle(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                titleInputRef.current?.blur()
+              }
+              if (e.key === 'Escape') cancelTitle()
+            }}
+            style={{
+              display: 'block',
+              width: '100%',
+              font: 'inherit',
+              color: 'inherit',
+              background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+              border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
+              borderRadius: 4,
+              padding: '0.1rem 0.3rem',
+              margin: '-0.1rem -0.3rem',
+              outline: 'none',
+              cursor: 'text',
+              transition: 'background 0.15s ease, border-color 0.15s ease',
+            }}
+          />
+        }
+        back={
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              minHeight: '1.4rem',
+              borderRadius: 4,
+              background: toCss(colors.border),
+            }}
+          />
+        }
       />
 
       {/*
