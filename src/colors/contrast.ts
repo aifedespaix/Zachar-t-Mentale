@@ -43,3 +43,11 @@ export function oklchWcagContrast(a: Oklch, b: Oklch): number {
 export function toCss({ l, c, h }: Oklch): string {
   return `oklch(${l} ${c} ${h})`
 }
+
+const WHITE: Oklch = { l: 1, c: 0, h: 0 }
+const NEAR_BLACK: Oklch = { l: 0.18, c: 0, h: 0 }
+
+/** Picks whichever of white/near-black text reads better (higher WCAG contrast) against `bg`. */
+export function pickReadableTextColor(bg: Oklch): Oklch {
+  return oklchWcagContrast(bg, WHITE) >= oklchWcagContrast(bg, NEAR_BLACK) ? WHITE : NEAR_BLACK
+}
