@@ -1,4 +1,24 @@
+import { vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
+
+/*
+ * @testing-library/react's async event wrapper (used by userEvent's `await user.click(...)`
+ * etc.) drains the microtask queue with a real `setTimeout(fn, 0)`, then flushes it itself —
+ * but only if it detects fake timers, and it only ever looks for Jest's, via a global `jest`
+ * with a faked `setTimeout` (`_isMockFunction` or a `.clock` property). Vitest's `vi.useFakeTimers()`
+ * gives `setTimeout` that `.clock` property but never defines a global `jest`, so that detection
+ * always reports "no fake timers" and the library never advances its own flush timer: any
+ * `await user.<action>()` issued while `vi.useFakeTimers()` is active hangs forever.
+ *
+ * This shim gives the detection a `jest` global that forwards to Vitest's real fake-timer
+ * control, so it correctly recognizes Vitest's fake timers when they're active (the `.clock`
+ * check on `setTimeout` still gates it — this is a no-op under real timers).
+ */
+if (typeof (globalThis as { jest?: unknown }).jest === 'undefined') {
+  ;(globalThis as unknown as { jest: { advanceTimersByTime: typeof vi.advanceTimersByTime } }).jest = {
+    advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms),
+  }
+}
 
 /*
  * jsdom implements neither ResizeObserver nor layout, and React Flow depends on
