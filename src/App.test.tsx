@@ -15,6 +15,10 @@ vi.mock('./persistence/workspaceConfig', () => ({
   loadWorkspaceConfig: vi.fn(),
   saveWorkspaceConfig: vi.fn(),
 }))
+vi.mock('./persistence/quizSettings', () => ({
+  loadQuizSettings: vi.fn().mockResolvedValue({ similarityThreshold: 100, lengthGuideEnabled: true }),
+  saveQuizSettings: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock('./persistence/fileTree', async importOriginal => {
   const actual = await importOriginal<typeof import('./persistence/fileTree')>()
   return { ...actual, scanFolder: vi.fn() }

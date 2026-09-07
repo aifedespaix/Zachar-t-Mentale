@@ -6,8 +6,10 @@ import { CorruptedMapDialog } from './components/CorruptedMapDialog'
 import { LockToggle } from './components/LockToggle'
 import { FileSidebar } from './components/sidebar/FileSidebar'
 import { QuizButton } from './components/quiz/QuizButton'
+import { QuizSettingsButton } from './components/quiz/QuizSettingsButton'
 import { QuizHud } from './components/quiz/QuizHud'
 import { QuizSummaryModal } from './components/quiz/QuizSummaryModal'
+import { useQuizSettingsStore } from './state/useQuizSettingsStore'
 import { useCardsStore } from './state/useCardsStore'
 import { useWorkspaceStore, describeError } from './state/useWorkspaceStore'
 import { useQuizStore } from './state/useQuizStore'
@@ -65,6 +67,10 @@ function App() {
   useAutosave(loadedPath ?? '', cards, 500, loadedPath !== null && loadedPath === currentFilePath, () =>
     setSaveFailed(true)
   )
+
+  useEffect(() => {
+    useQuizSettingsStore.getState().init()
+  }, [])
 
   // Re-runs on every file switch (open a different file, or a rename that
   // moves the current file to a new path): each switch starts a fresh
@@ -174,6 +180,7 @@ function App() {
         <header style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
           {!quizActive && <LockToggle />}
           {!quizActive && <QuizButton />}
+          {!quizActive && <QuizSettingsButton />}
           <span title={currentFilePath ?? undefined} style={{ fontSize: 13, fontWeight: 500 }}>
             {currentFileName ?? 'Aucun fichier ouvert'}
           </span>
