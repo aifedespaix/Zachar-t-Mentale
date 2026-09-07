@@ -37,26 +37,36 @@ export function ExportDialog({ fileName, cards, open, onClose, onError }: Export
     setExporting(true)
     try {
       const options = { showDefinitions, includeDetached }
+      let saved = false
       if (format === 'pdf') {
         const bytes = await exportToPdfBytes(cards, options)
-        await saveBytesAs(bytes, `${baseName}.pdf`, [{ name: 'PDF', extensions: ['pdf'] }])
+        const path = await saveBytesAs(bytes, `${baseName}.pdf`, [{ name: 'PDF', extensions: ['pdf'] }])
+        saved = path !== null
       } else if (format === 'image') {
         const dataUrls = await exportToImageDataUrls(cards, options)
+        saved = dataUrls.length > 0
         for (const [index, dataUrl] of dataUrls.entries()) {
           const suffix = dataUrls.length > 1 ? ` (${index + 1})` : ''
           // Cancelling any one page's save dialog stops the whole batch —
           // asking for a destination once per page with no way out
           // otherwise would trap the user in N unavoidable dialogs.
-          const saved = await saveBytesAs(dataUrlToBytes(dataUrl), `${baseName}${suffix}.png`, [
+          const path = await saveBytesAs(dataUrlToBytes(dataUrl), `${baseName}${suffix}.png`, [
             { name: 'Image PNG', extensions: ['png'] },
           ])
-          if (saved === null) break
+          if (path === null) {
+            saved = false
+            break
+          }
         }
       } else {
         const bytes = await writeXmindFile(includeDetached ? cards : cards.filter(c => !c.detached))
-        await saveBytesAs(bytes, `${baseName}.xmind`, [{ name: 'XMind', extensions: ['xmind'] }])
+        const path = await saveBytesAs(bytes, `${baseName}.xmind`, [{ name: 'XMind', extensions: ['xmind'] }])
+        saved = path !== null
       }
-      onClose()
+      // A cancelled native save dialog isn't an error (see saveBytesAs's
+      // contract) — leave the dialog open with no message, as if nothing
+      // happened, rather than closing it as though the export succeeded.
+      if (saved) onClose()
     } catch (error) {
       onError(`Échec de l’export : ${error instanceof Error ? error.message : 'erreur inconnue'}`)
     } finally {
