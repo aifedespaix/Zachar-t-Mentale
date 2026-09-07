@@ -656,6 +656,18 @@ describe('CardNode footer', () => {
     )
   })
 
+  it('renders the definition outside the card element (portaled), so the card never has to resize to fit it', async () => {
+    const user = userEvent.setup()
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    const definitionText = screen.getByText('Définition existante')
+    const cardElement = screen.getByTestId(`card-${cardWithDefinition.id}`)
+
+    expect(cardElement).not.toContainElement(definitionText)
+  })
+
   it('opens the QCM dialog when a pending qcm-definition question\'s "Répondre" button is clicked', async () => {
     const user = userEvent.setup()
     const cardWithDef: Card = { ...testCard, definition: 'Bonne définition' }
