@@ -50,6 +50,52 @@ describe('useCardsStore', () => {
     expect(store.getState().history.present.find(c => c.id === leaf)?.parentId).toBe(branchA)
   })
 
+  it('moveCard reparents across levels, reporting and detaching what falls past level 4', () => {
+    const store = createCardsStore()
+    const rootId = store.getState().history.present[0].id
+    const a = store.getState().addChild(rootId)
+    const b = store.getState().addChild(a)
+    const c = store.getState().addChild(b)
+    const other = store.getState().addChild(rootId)
+
+    expect(store.getState().overflowCount(a, other)).toBe(1)
+    const detachedIds = store.getState().moveCard(a, other)
+    expect(detachedIds).toEqual([c])
+    expect(store.getState().history.present.find(x => x.id === c)?.detached).toBe(true)
+    expect(store.getState().history.present.find(x => x.id === a)?.level).toBe(3)
+
+    store.getState().undo()
+    expect(store.getState().history.present.find(x => x.id === c)?.parentId).toBe(b)
+  })
+
+  it('detachCard flattens a branch into floating cards and is undoable', () => {
+    const store = createCardsStore()
+    const rootId = store.getState().history.present[0].id
+    const a = store.getState().addChild(rootId)
+    const b = store.getState().addChild(a)
+
+    expect(store.getState().flattenedCount(a)).toBe(2)
+    store.getState().detachCard(a)
+    expect(store.getState().history.present.filter(c => c.detached).map(c => c.id)).toEqual([a, b])
+
+    store.getState().undo()
+    expect(store.getState().history.present.some(c => c.detached)).toBe(false)
+  })
+
+  it('deleteCardDetachingChildren drops the card and keeps its branch afloat', () => {
+    const store = createCardsStore()
+    const rootId = store.getState().history.present[0].id
+    const a = store.getState().addChild(rootId)
+    const b = store.getState().addChild(a)
+
+    store.getState().deleteCardDetachingChildren(a)
+    expect(store.getState().history.present.find(c => c.id === a)).toBeUndefined()
+    expect(store.getState().history.present.find(c => c.id === b)?.detached).toBe(true)
+
+    store.getState().undo()
+    expect(store.getState().history.present.find(c => c.id === a)).toBeDefined()
+  })
+
   it('loadCards replaces the tree and resets history', () => {
     const store = createCardsStore()
     const rootId = store.getState().history.present[0].id

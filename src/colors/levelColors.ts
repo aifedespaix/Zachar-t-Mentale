@@ -36,3 +36,14 @@ export const levelColors: Record<CardLevel, LevelColor> = {
     text: { l: 0.3, c: 0.15, h: 105 },
   },
 }
+
+/**
+ * Floating ("volante") cards: deliberately achromatic, so a detached card reads
+ * as OUT of the four-level hierarchy at a glance rather than as a fifth level.
+ * Kept above the WCAG AA text/background ratio like every level palette.
+ */
+export const detachedColors: LevelColor = {
+  bg: { l: 0.95, c: 0, h: 0 },
+  border: { l: 0.72, c: 0, h: 0 },
+  text: { l: 0.42, c: 0, h: 0 },
+}
