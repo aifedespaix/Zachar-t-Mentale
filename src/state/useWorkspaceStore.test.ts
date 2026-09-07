@@ -109,6 +109,135 @@ describe('useWorkspaceStore', () => {
     ])
   })
 
+  // A rejected `Promise.all` used to leave rootFolders empty, so the next
+  // add/remove persisted that empty list — permanently erasing every other
+  // configured folder from workspace.json.
+  it('init keeps a root folder whose scan failed, with an empty tree and an explicit error', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours-svt', '/hors-home', '/cours-maths'] })
+    vi.mocked(scanFolder).mockImplementation(async (path: string) => {
+      if (path === '/hors-home') throw new Error('forbidden path')
+      return [{ type: 'mindmap', name: 'a.json', path: `${path}/a.json` }]
+    })
+    const store = createWorkspaceStore()
+
+    await store.getState().init()
+
+    expect(store.getState().rootFolders.map(f => f.path)).toEqual(['/cours-svt', '/hors-home', '/cours-maths'])
+    expect(store.getState().rootFolders[1].tree).toEqual([])
+    expect(store.getState().rootFolders[0].tree).toHaveLength(1)
+    expect(store.getState().workspaceError).toMatch(/hors-home/)
+  })
+
+  it('a later addRootFolder never drops a root folder that merely failed to scan at init', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cassé', '/ok'] })
+    vi.mocked(scanFolder).mockImplementation(async (path: string) => {
+      if (path === '/cassé') throw new Error('unreadable')
+      return []
+    })
+    const store = createWorkspaceStore()
+    await store.getState().init()
+
+    await store.getState().addRootFolder('/nouveau')
+
+    expect(saveWorkspaceConfig).toHaveBeenCalledWith({ rootFolders: ['/cassé', '/ok', '/nouveau'] })
+  })
+
+  it('init reports a config read failure instead of failing silently', async () => {
+    vi.mocked(loadWorkspaceConfig).mockRejectedValue(new Error('disque illisible'))
+    const store = createWorkspaceStore()
+
+    await store.getState().init()
+
+    expect(store.getState().workspaceError).toMatch(/disque illisible/)
+  })
+
+  it('addRootFolder reports a scan failure and adds nothing', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: [] })
+    vi.mocked(scanFolder).mockRejectedValue(new Error('accès refusé'))
+    const store = createWorkspaceStore()
+    await store.getState().init()
+
+    await store.getState().addRootFolder('/interdit')
+
+    expect(store.getState().rootFolders).toEqual([])
+    expect(saveWorkspaceConfig).not.toHaveBeenCalled()
+    expect(store.getState().workspaceError).toMatch(/accès refusé/)
+  })
+
+  it('removeRootFolder keeps the folder listed when the config write fails, and says so', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/a'] })
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const store = createWorkspaceStore()
+    await store.getState().init()
+    vi.mocked(saveWorkspaceConfig).mockRejectedValue(new Error('lecture seule'))
+
+    await store.getState().removeRootFolder('/a')
+
+    expect(store.getState().rootFolders.map(f => f.path)).toEqual(['/a'])
+    expect(store.getState().workspaceError).toMatch(/lecture seule/)
+  })
+
+  it('refreshFolder reports a scan failure and leaves the existing tree in place', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours'] })
+    vi.mocked(scanFolder).mockResolvedValueOnce([{ type: 'mindmap', name: 'a.json', path: '/cours/a.json' }])
+    const store = createWorkspaceStore()
+    await store.getState().init()
+
+    vi.mocked(scanFolder).mockRejectedValueOnce(new Error('dossier introuvable'))
+    await store.getState().refreshFolder('/cours')
+
+    expect(store.getState().rootFolders[0].tree).toHaveLength(1)
+    expect(store.getState().workspaceError).toMatch(/dossier introuvable/)
+  })
+
+  it('refreshAll re-scans every root folder', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/a', '/b'] })
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const store = createWorkspaceStore()
+    await store.getState().init()
+
+    vi.mocked(scanFolder).mockImplementation(async (path: string) => [
+      { type: 'mindmap', name: 'neuf.json', path: `${path}/neuf.json` },
+    ])
+    await store.getState().refreshAll()
+
+    expect(store.getState().rootFolders).toEqual([
+      { path: '/a', tree: [{ type: 'mindmap', name: 'neuf.json', path: '/a/neuf.json' }] },
+      { path: '/b', tree: [{ type: 'mindmap', name: 'neuf.json', path: '/b/neuf.json' }] },
+    ])
+    expect(store.getState().workspaceError).toBeNull()
+  })
+
+  it('refreshAll keeps the existing tree of a folder that fails, refreshes the others, and reports it', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/a', '/b'] })
+    vi.mocked(scanFolder).mockImplementation(async (path: string) => [
+      { type: 'mindmap', name: 'vieux.json', path: `${path}/vieux.json` },
+    ])
+    const store = createWorkspaceStore()
+    await store.getState().init()
+
+    vi.mocked(scanFolder).mockImplementation(async (path: string) => {
+      if (path === '/a') throw new Error('disparu')
+      return [{ type: 'mindmap', name: 'neuf.json', path: `${path}/neuf.json` }]
+    })
+    await store.getState().refreshAll()
+
+    expect(store.getState().rootFolders).toEqual([
+      { path: '/a', tree: [{ type: 'mindmap', name: 'vieux.json', path: '/a/vieux.json' }] },
+      { path: '/b', tree: [{ type: 'mindmap', name: 'neuf.json', path: '/b/neuf.json' }] },
+    ])
+    expect(store.getState().workspaceError).toMatch(/« a »/)
+  })
+
+  it('setWorkspaceError sets and clears the message', () => {
+    const store = createWorkspaceStore()
+    store.getState().setWorkspaceError('Impossible de créer le dossier.')
+    expect(store.getState().workspaceError).toBe('Impossible de créer le dossier.')
+
+    store.getState().setWorkspaceError(null)
+    expect(store.getState().workspaceError).toBeNull()
+  })
+
   it('toggleExpanded adds then removes a path from the expanded set', () => {
     const store = createWorkspaceStore()
     store.getState().toggleExpanded('/cours/chimie')
