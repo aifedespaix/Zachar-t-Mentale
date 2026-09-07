@@ -9,6 +9,7 @@ import { useQuizStore, createQuizStore } from './state/useQuizStore'
 vi.mock('./persistence/fileStore', () => ({
   loadMindMap: vi.fn(),
   saveMindMap: vi.fn(),
+  mindMapExists: vi.fn(),
 }))
 vi.mock('./persistence/workspaceConfig', () => ({
   loadWorkspaceConfig: vi.fn(),
@@ -20,7 +21,8 @@ vi.mock('./persistence/fileTree', async importOriginal => {
 })
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 
-import { loadMindMap, saveMindMap } from './persistence/fileStore'
+import { loadMindMap, saveMindMap, mindMapExists } from './persistence/fileStore'
+import { CORRUPTED_MAP_MESSAGE } from './components/CorruptedMapDialog'
 import { loadWorkspaceConfig } from './persistence/workspaceConfig'
 import { scanFolder } from './persistence/fileTree'
 
@@ -188,5 +190,201 @@ describe('App quiz wiring', () => {
     await settle()
 
     expect(screen.queryByRole('button', { name: /verrouiller|déverrouiller/i })).not.toBeInTheDocument()
+  })
+})
+
+const PATH_C = '/cours/chapitre-c.json'
+const REPAIRED_PATH_C = '/cours/chapitre-c (Réparée).json'
+/** A ghost card: its parent no longer exists, so the map cannot be laid out. */
+const corruptCards: Card[] = [
+  { id: 'c-root', level: 1, title: 'Chapitre C', parentId: null, order: 0 },
+  { id: 'c-ghost', level: 2, title: 'Fantôme', parentId: 'disparu', order: 0 },
+]
+
+describe('App corrupted-map guard', () => {
+  beforeEach(() => {
+    resetStores()
+    vi.useFakeTimers()
+    vi.mocked(loadMindMap).mockReset()
+    vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
+    vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
+    vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
+    vi.mocked(scanFolder).mockReset().mockResolvedValue([])
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('blocks the render and asks before touching a structurally corrupt map', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(corruptCards)
+    render(<App />)
+
+    await openFile(PATH_C)
+
+    expect(screen.getByRole('dialog')).toHaveTextContent(CORRUPTED_MAP_MESSAGE)
+    // Never handed to the canvas, and never written back to disk.
+    expect(useCardsStore.getState().history.present).not.toEqual(corruptCards)
+    expect(saveMindMap).not.toHaveBeenCalled()
+  })
+
+  it('names the corrupt file and lists what is wrong with it', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(corruptCards)
+    render(<App />)
+
+    await openFile(PATH_C)
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('chapitre-c.json')
+    expect(dialog).toHaveTextContent('chapitre-c (Réparée).json')
+    expect(dialog).toHaveTextContent('carte fantôme (parent introuvable)')
+  })
+
+  it('returns to the empty state on « Annuler »', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(corruptCards)
+    render(<App />)
+    await openFile(PATH_C)
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Annuler' }).click()
+    })
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(useWorkspaceStore.getState().currentFilePath).toBeNull()
+    expect(screen.getByText('Aucun fichier ouvert')).toBeInTheDocument()
+  })
+
+  it('keeps the previously open map on screen when a corrupt one is clicked', async () => {
+    vi.mocked(loadMindMap).mockImplementation(async path => (path === PATH_A ? cardsA : corruptCards))
+    render(<App />)
+    await openFile(PATH_A)
+
+    await openFile(PATH_C)
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(useWorkspaceStore.getState().currentFilePath).toBe(PATH_A)
+    expect(useCardsStore.getState().history.present).toEqual(cardsA)
+  })
+
+  it('writes a repaired COPY, leaves the original alone, and opens the copy', async () => {
+    const repairedCards: Card[] = [
+      { id: 'c-root', level: 1, title: 'Chapitre C', parentId: null, order: 0 },
+      { id: 'c-ghost', level: 2, title: 'Fantôme', parentId: null, order: 0, detached: true },
+    ]
+    vi.mocked(loadMindMap).mockImplementation(async path =>
+      path === REPAIRED_PATH_C ? repairedCards : corruptCards
+    )
+    render(<App />)
+    await openFile(PATH_C)
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Créer une copie réparée' }).click()
+    })
+    await settle()
+
+    // The copy is written under « [Nom original] (Réparée) »...
+    expect(saveMindMap).toHaveBeenCalledWith(REPAIRED_PATH_C, repairedCards)
+    // ...and the corrupt original is never written to.
+    expect(saveMindMap).not.toHaveBeenCalledWith(PATH_C, expect.anything())
+    // ...then opened: it is the file on screen, and autosave is armed for it.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(useWorkspaceStore.getState().currentFilePath).toBe(REPAIRED_PATH_C)
+    expect(useCardsStore.getState().history.present).toEqual(repairedCards)
+  })
+
+  it('turns the broken cards into floating draft cards in the copy', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(corruptCards)
+    render(<App />)
+    await openFile(PATH_C)
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Créer une copie réparée' }).click()
+    })
+    await settle()
+
+    const [, written] = vi.mocked(saveMindMap).mock.calls[0]
+    expect(written).toContainEqual({ id: 'c-root', level: 1, title: 'Chapitre C', parentId: null, order: 0 })
+    expect(written).toContainEqual(
+      expect.objectContaining({ id: 'c-ghost', parentId: null, detached: true, title: 'Fantôme' })
+    )
+  })
+
+  it('numbers the copy instead of overwriting an existing repair', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(corruptCards)
+    vi.mocked(mindMapExists).mockImplementation(async path => path === REPAIRED_PATH_C)
+    render(<App />)
+    await openFile(PATH_C)
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Créer une copie réparée' }).click()
+    })
+    await settle()
+
+    expect(saveMindMap).toHaveBeenCalledWith('/cours/chapitre-c (Réparée 2).json', expect.anything())
+  })
+
+  it('keeps the dialog open and explains itself when the copy cannot be written', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(corruptCards)
+    vi.mocked(saveMindMap).mockRejectedValue(new Error('disque plein'))
+    render(<App />)
+    await openFile(PATH_C)
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Créer une copie réparée' }).click()
+    })
+
+    expect(screen.getByRole('dialog')).toHaveTextContent(/La réparation a échoué : disque plein/)
+    expect(useWorkspaceStore.getState().currentFilePath).toBeNull()
+  })
+})
+
+describe('App canvas mounting', () => {
+  beforeEach(() => {
+    resetStores()
+    vi.useFakeTimers()
+    vi.mocked(loadMindMap).mockReset()
+    vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
+    vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
+    vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
+    vi.mocked(scanFolder).mockReset().mockResolvedValue([])
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('does not mount the canvas before the file’s cards are in the store', async () => {
+    let resolveLoad: (cards: Card[]) => void = () => {}
+    vi.mocked(loadMindMap).mockImplementation(() => new Promise(resolve => (resolveLoad = resolve)))
+    const { container } = render(<App />)
+
+    await act(async () => {
+      useWorkspaceStore.getState().setCurrentFile(PATH_A)
+    })
+
+    // Mounting here would let React Flow frame the store's transient default
+    // card and keep that viewport once the real cards land.
+    expect(container.querySelector('.react-flow')).toBeNull()
+    expect(screen.getByText(/Ouverture de chapitre-a\.json/)).toBeInTheDocument()
+
+    await act(async () => resolveLoad(cardsA))
+    await settle()
+    expect(container.querySelector('.react-flow')).not.toBeNull()
+  })
+
+  it('remounts the canvas on a file switch instead of reusing the previous one', async () => {
+    vi.mocked(loadMindMap).mockImplementation(async path => (path === PATH_A ? cardsA : cardsB))
+    const { container } = render(<App />)
+    await openFile(PATH_A)
+    const canvasForA = container.querySelector('.react-flow')
+
+    await openFile(PATH_B)
+
+    const canvasForB = container.querySelector('.react-flow')
+    expect(canvasForB).not.toBeNull()
+    // A different DOM node: the whole React Flow instance (viewport, node
+    // measurements, `fitView`) is rebuilt for the new map rather than inheriting
+    // the previous file's framing.
+    expect(canvasForB).not.toBe(canvasForA)
   })
 })
