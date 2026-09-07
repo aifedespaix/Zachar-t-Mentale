@@ -14,7 +14,9 @@ export interface FlipCardProps {
  */
 export function FlipCard({ flipped, front, back }: FlipCardProps) {
   return (
-    <div style={{ position: 'relative', width: '100%' }}>
+    // `preserve-3d` alone still projects flat: without a perspective on an
+    // ancestor the rotation reads as an instant swap, not a card turning over.
+    <div style={{ position: 'relative', width: '100%', perspective: '600px' }}>
       <div
         data-testid="flip-card-inner"
         style={{

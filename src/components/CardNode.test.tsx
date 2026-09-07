@@ -463,6 +463,41 @@ describe('CardNode footer', () => {
     expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveValue('Titre initial')
   })
 
+  it('masks the title on the card itself while a qcm-title question is unanswered (answering happens via the dialog, not by reading the card)', () => {
+    renderCardNode(testCard, false, false, {
+      type: 'qcm-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+    })
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveValue(testCard.title)
+  })
+
+  it('keeps the title hidden even when a masked qcm-title field is focused', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, {
+      type: 'qcm-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+    })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+
+    expect(input).not.toHaveValue(testCard.title)
+    expect(useCardsStore.getState().history.present[0].title).toBe(testCard.title)
+  })
+
+  it('shows no length guide for a qcm-title question (it would narrow the four options)', () => {
+    renderCardNode(testCard, false, false, {
+      type: 'qcm-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+    })
+
+    expect(screen.queryByText('_____ _______')).not.toBeInTheDocument()
+  })
+
   it('does not mask the title when no quiz question applies to this card', () => {
     renderCardNode(testCard)
 
@@ -489,6 +524,22 @@ describe('CardNode footer', () => {
 
     expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
     expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue(testCard.title)
+  })
+
+  // startQuiz auto-locks the mind map and App hides the lock toggle for the
+  // duration, so `locked` is ALWAYS true while a recall question is live. A
+  // blanket `readOnly={locked}` therefore made recall unanswerable in the real
+  // app even though every other recall test (which renders unlocked) passed.
+  it('lets the user type an answer even while the mind map is locked (as it always is during an active quiz)', async () => {
+    const user = userEvent.setup()
+    useCardsStore.setState({ locked: true })
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.type(input, `${testCard.title}{Enter}`)
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
   })
 
   it('grades a wrong typed answer as incorrect', async () => {
@@ -527,6 +578,19 @@ describe('CardNode footer', () => {
 
     expect(useQuizStore.getState().results[testCard.id]).toBe('unanswered')
     expect(input).not.toHaveValue(testCard.title)
+  })
+
+  it('does not grade the question if the user focuses and blurs without typing anything', async () => {
+    const user = userEvent.setup()
+    useQuizStore.setState({ results: { [testCard.id]: 'unanswered' } })
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    const input = screen.getByRole('textbox', { name: /titre/i })
+    await user.click(input)
+    await user.tab() // blur without typing
+
+    expect(useQuizStore.getState().results[testCard.id]).toBe('unanswered')
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument()
   })
 
   it('limits how many characters can be typed to the length of the real title', () => {

@@ -30,6 +30,27 @@ describe('useQuizSettingsStore', () => {
     expect(store.getState().lengthGuideEnabled).toBe(false)
   })
 
+  it('falls back to defaults if loading settings throws', async () => {
+    vi.mocked(loadQuizSettings).mockRejectedValue(new Error('disk error'))
+    const store = createQuizSettingsStore()
+
+    await store.getState().init()
+
+    expect(store.getState().similarityThreshold).toBe(100)
+    expect(store.getState().lengthGuideEnabled).toBe(true)
+  })
+
+  it('keeps the in-memory value even if persisting it fails', async () => {
+    vi.mocked(saveQuizSettings).mockRejectedValue(new Error('disk error'))
+    const store = createQuizSettingsStore()
+
+    await store.getState().setSimilarityThreshold(80)
+    await store.getState().setLengthGuideEnabled(false)
+
+    expect(store.getState().similarityThreshold).toBe(80)
+    expect(store.getState().lengthGuideEnabled).toBe(false)
+  })
+
   it('setSimilarityThreshold updates the store and persists both fields', async () => {
     const store = createQuizSettingsStore()
 

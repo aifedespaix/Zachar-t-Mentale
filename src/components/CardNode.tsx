@@ -100,16 +100,27 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
 
 export function CardNode({ data }: CardNodeProps) {
   const { card, autoEdit = false, isReparentTarget = false, quiz } = data
+  // Narrow, `recall`-only: gates everything about TYPING an answer (the
+  // editable field, grading on blur, the maxLength cap, the length guide).
   const isRecallPending = quiz?.type === 'recall' && quiz.result === 'unanswered'
+  // Broad: "is the real title supposed to be hidden right now". `qcm-title`
+  // asks the user to pick the title out of four options in the dialog, so
+  // showing it on the card would hand them the answer.
+  const isTitleHidden =
+    quiz !== undefined && (quiz.type === 'recall' || quiz.type === 'qcm-title') && quiz.result === 'unanswered'
   const similarityThreshold = useQuizSettingsStore(s => s.similarityThreshold)
   const lengthGuideEnabled = useQuizSettingsStore(s => s.lengthGuideEnabled)
   const [recallFeedback, setRecallFeedback] = useState<{ typed: string; similarity: number } | null>(null)
   // Grading is authoritative the instant `commitRecallAnswer` runs, but the
   // parent only learns the new result (and re-supplies an updated `quiz`
   // prop) on ITS next render pass. Gating the mask on the local
-  // `recallFeedback` too (not `isRecallPending` alone) means the title
+  // `recallFeedback` too (not `isTitleHidden` alone) means the title
   // reveals immediately, without waiting on that round trip.
-  const displayMasked = isRecallPending && !recallFeedback
+  const displayMasked = isTitleHidden && !recallFeedback
+  // The length guide says how many characters to TYPE — meaningless for a
+  // multiple-choice question, and it would narrow the four options down, so it
+  // stays tied to the recall flow only (never to the broader mask).
+  const showLengthGuide = isRecallPending && !recallFeedback && lengthGuideEnabled
   const answerRecall = useQuizStore(s => s.answerRecall)
   const answerQcmDefinition = useQuizStore(s => s.answerQcmDefinition)
   const answerQcmTitle = useQuizStore(s => s.answerQcmTitle)
@@ -188,7 +199,13 @@ export function CardNode({ data }: CardNodeProps) {
   }
 
   function handleTitleFocus() {
-    if (isRecallPending) {
+    // Seeding the draft with the REAL title would flash the answer the moment
+    // the field is focused/tabbed into — for `qcm-title` just as much as for
+    // `recall`, so this guard is the broad one. `qcm-title` has no typed
+    // commit path: the field stays `readOnly` (see the input below), and its
+    // blur runs `commitTitle`, whose `draftTitle.trim() || card.title`
+    // fallback turns the untouched empty draft back into a no-op.
+    if (isTitleHidden) {
       setDraftTitle('')
       setTitleFocused(true)
       return
@@ -233,14 +250,18 @@ export function CardNode({ data }: CardNodeProps) {
 
   function cancelTitle() {
     cancellingTitleRef.current = true
-    setDraftTitle(isRecallPending ? '' : card.title)
+    setDraftTitle(isTitleHidden ? '' : card.title)
     titleInputRef.current?.blur()
   }
 
   function commitRecallAnswer() {
     if (cancellingTitleRef.current) {
       cancellingTitleRef.current = false
-    } else {
+    } else if (draftTitle.trim()) {
+      // An empty draft means the user never actually attempted this question
+      // (a stray focus, then a click elsewhere). Grading it would burn the
+      // question on a 0% answer they never gave, so it stays unanswered and
+      // the field simply goes back to masked.
       const similarity = computeTitleSimilarity(draftTitle, card.title)
       setRecallFeedback({ typed: draftTitle, similarity })
       answerRecall(card.id, similarity >= similarityThreshold)
@@ -397,7 +418,7 @@ export function CardNode({ data }: CardNodeProps) {
         the editable affordance, at a border-width that matches both states
         so revealing it never shifts the layout either.
       */}
-      {displayMasked && lengthGuideEnabled && (
+      {showLengthGuide && (
         <div style={{ fontFamily: 'monospace', fontSize: '0.75rem', letterSpacing: '0.1em', opacity: 0.6 }}>
           {buildLengthGuide(card.title)}
         </div>
@@ -408,7 +429,12 @@ export function CardNode({ data }: CardNodeProps) {
           <input
             ref={titleInputRef}
             aria-label="Titre"
-            readOnly={locked}
+            // A quiz auto-locks the mind map (and hides the lock toggle), so
+            // `locked` is always true while a recall question is live — a
+            // blanket `readOnly={locked}` made recall literally unanswerable.
+            // Typing here is still never written to the card: a recall-pending
+            // blur runs `commitRecallAnswer`, not `updateTitle`.
+            readOnly={locked && !isRecallPending}
             value={titleFocused ? draftTitle : displayMasked ? '???' : card.title}
             onFocus={handleTitleFocus}
             onChange={e => setDraftTitle(e.target.value)}
