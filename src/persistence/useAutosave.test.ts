@@ -31,6 +31,22 @@ describe('useAutosave', () => {
     expect(saveMindMap).toHaveBeenCalledWith('/fake/path.json', cardsV2)
   })
 
+  // The file sidebar swaps `path` while `enabled` stays true. If the debounce
+  // kept the path captured at schedule time, the next save would write the
+  // newly-opened file's cards into the previously-opened file's path.
+  it('saves to the NEW path when the path changes while enabled stays true', () => {
+    const { rerender } = renderHook(({ path, cards }) => useAutosave(path, cards, 500, true), {
+      initialProps: { path: '/fake/a.json', cards: cardsV1 },
+    })
+    rerender({ path: '/fake/b.json', cards: cardsV2 })
+
+    vi.advanceTimersByTime(500)
+
+    expect(saveMindMap).toHaveBeenCalledTimes(1)
+    expect(saveMindMap).toHaveBeenCalledWith('/fake/b.json', cardsV2)
+    expect(saveMindMap).not.toHaveBeenCalledWith('/fake/a.json', expect.anything())
+  })
+
   it('does not save if unmounted before the debounce delay elapses', () => {
     const { unmount } = renderHook(() => useAutosave('/fake/path.json', cardsV1, 500))
     unmount()

@@ -25,6 +25,7 @@ function resetWorkspaceStore() {
     rootFolders: pristine.rootFolders,
     expandedPaths: pristine.expandedPaths,
     currentFilePath: pristine.currentFilePath,
+    workspaceError: pristine.workspaceError,
   })
 }
 
@@ -164,6 +165,89 @@ describe('FileTreeRow', () => {
     await user.type(input, 'chapitre1-v2.json{Enter}')
 
     await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre1-v2.json'))
+  })
+
+  // A folder rename moves every file underneath it. Handling only the exact
+  // match left currentFilePath pointing into a directory that no longer
+  // exists: autosave kept writing to nowhere and the highlight disappeared.
+  it('rewrites the current file path when renaming a FOLDER that contains the open file', async () => {
+    const user = userEvent.setup()
+    vi.mocked(renamePath).mockResolvedValue(undefined)
+    vi.mocked(scanFolder).mockResolvedValue([])
+    useWorkspaceStore.setState({ currentFilePath: '/cours/chimie/atomes.json' })
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: 'Renommer' }))
+    const input = screen.getByRole('textbox', { name: /renommer chimie/i })
+    await user.clear(input)
+    await user.type(input, 'chimie-2026{Enter}')
+
+    expect(renamePath).toHaveBeenCalledWith('/cours/chimie', '/cours/chimie-2026')
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chimie-2026/atomes.json')
+    )
+  })
+
+  it('leaves the current file alone when renaming a folder that merely shares a name prefix', async () => {
+    const user = userEvent.setup()
+    vi.mocked(renamePath).mockResolvedValue(undefined)
+    vi.mocked(scanFolder).mockResolvedValue([])
+    useWorkspaceStore.setState({ currentFilePath: '/cours/chimie-avancee/atomes.json' })
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: 'Renommer' }))
+    const input = screen.getByRole('textbox', { name: /renommer chimie/i })
+    await user.clear(input)
+    await user.type(input, 'chimie-2026{Enter}')
+
+    await waitFor(() => expect(renamePath).toHaveBeenCalled())
+    expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chimie-avancee/atomes.json')
+  })
+
+  it('reports a failed creation instead of silently doing nothing', async () => {
+    const user = userEvent.setup()
+    vi.mocked(createMindMapFile).mockRejectedValue(new Error('lecture seule'))
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: 'Nouvelle carte mentale' }))
+    await user.type(screen.getByRole('textbox', { name: /nom de la nouvelle carte mentale/i }), 'nouveau{Enter}')
+
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/lecture seule/))
+  })
+
+  it('reports a failed rename instead of silently doing nothing', async () => {
+    const user = userEvent.setup()
+    vi.mocked(renamePath).mockRejectedValue(new Error('fichier verrouillé'))
+    useWorkspaceStore.setState({ currentFilePath: '/cours/chapitre1.json' })
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: 'Renommer' }))
+    const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
+    await user.clear(input)
+    await user.type(input, 'chapitre1-v2.json{Enter}')
+
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/fichier verrouillé/))
+    // The rename did not happen on disk, so the open file must not move either.
+    expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre1.json')
+  })
+
+  it('reports a failed deletion instead of silently doing nothing', async () => {
+    const user = userEvent.setup()
+    vi.mocked(deletePath).mockRejectedValue(new Error('fichier verrouillé'))
+    useWorkspaceStore.setState({ currentFilePath: '/cours/chapitre1.json' })
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmer' }))
+
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/fichier verrouillé/))
+    // Nothing was deleted, so the file stays open.
+    expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre1.json')
   })
 
   it('deletes a mind map file after confirmation', async () => {

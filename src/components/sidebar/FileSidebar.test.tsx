@@ -21,6 +21,7 @@ function resetWorkspaceStore() {
     rootFolders: pristine.rootFolders,
     expandedPaths: pristine.expandedPaths,
     currentFilePath: pristine.currentFilePath,
+    workspaceError: pristine.workspaceError,
   })
 }
 
@@ -90,6 +91,56 @@ describe('FileSidebar', () => {
 
     await waitFor(() => expect(screen.queryByText('cours-svt')).not.toBeInTheDocument())
     expect(saveWorkspaceConfig).toHaveBeenCalledWith({ rootFolders: [] })
+  })
+
+  it('shows an unreadable root folder in the list AND explains why it looks empty', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours-svt'] })
+    vi.mocked(scanFolder).mockRejectedValue(new Error('accès refusé'))
+    render(<FileSidebar onOpenFile={() => {}} />)
+
+    expect(await screen.findByText('cours-svt')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Impossible de lire le dossier « cours-svt »/)
+  })
+
+  it('dismisses the workspace error banner on demand', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours-svt'] })
+    vi.mocked(scanFolder).mockRejectedValue(new Error('accès refusé'))
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByRole('alert')
+
+    await user.click(screen.getByRole('button', { name: 'Masquer le message d’erreur' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('surfaces a failure of the native folder picker instead of doing nothing', async () => {
+    const user = userEvent.setup()
+    vi.mocked(open).mockRejectedValue(new Error('sélecteur indisponible'))
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Aucun dossier configuré.')
+
+    await user.click(screen.getByRole('button', { name: 'Ajouter un dossier' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/sélecteur indisponible/)
+  })
+
+  it('re-scans every root folder from the "Rafraîchir" button', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours-svt'] })
+    vi.mocked(scanFolder).mockResolvedValue([])
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('cours-svt')
+    await user.click(screen.getByRole('button', { name: 'cours-svt' }))
+
+    // A file created outside the app: only a manual refresh can reveal it,
+    // there is no live file-watching in this lot.
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'ajouté-dehors.json', path: '/cours-svt/ajouté-dehors.json' },
+    ])
+    await user.click(screen.getByRole('button', { name: 'Rafraîchir' }))
+
+    expect(await screen.findByText('ajouté-dehors.json')).toBeInTheDocument()
   })
 
   it('collapses the panel, hiding its content, and expands it back', async () => {
