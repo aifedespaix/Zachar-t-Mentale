@@ -20,7 +20,7 @@ import type { QuizQuestion, QuizResult } from '../types/quiz'
 import { computeLayout, type Position } from '../layout/columns'
 import { canMoveCardTo, overflowingCardCount, subtreeDepths } from '../state/cardsReducer'
 import { CardNode } from './CardNode'
-import { levelColors } from '../colors/levelColors'
+import { levelColor } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
@@ -359,7 +359,7 @@ function MindMapCanvasInner() {
           // reparent target is active, so it doesn't compete with the dashed
           // ghost edge previewing the future link (added below).
           style: {
-            stroke: toCss(levelColors[card.level].border),
+            stroke: toCss(levelColor(card.level).border),
             opacity: reparentTargetId && card.id === draggingId ? 0.15 : 1,
           },
         })
@@ -372,7 +372,7 @@ function MindMapCanvasInner() {
           source: reparentTargetId,
           target: draggingId,
           className: 'reparent-ghost-edge',
-          style: { stroke: toCss(levelColors[draggedCard.level].border), opacity: 1 },
+          style: { stroke: toCss(levelColor(draggedCard.level).border), opacity: 1 },
         })
       }
     }

@@ -1,20 +1,46 @@
 // src/App.tsx
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { MindMapCanvas } from './components/MindMapCanvas'
+import { CanvasErrorBoundary } from './components/CanvasErrorBoundary'
+import { CorruptedMapDialog } from './components/CorruptedMapDialog'
 import { LockToggle } from './components/LockToggle'
 import { FileSidebar } from './components/sidebar/FileSidebar'
 import { QuizButton } from './components/quiz/QuizButton'
 import { QuizHud } from './components/quiz/QuizHud'
 import { QuizSummaryModal } from './components/quiz/QuizSummaryModal'
 import { useCardsStore } from './state/useCardsStore'
-import { useWorkspaceStore } from './state/useWorkspaceStore'
+import { useWorkspaceStore, describeError } from './state/useWorkspaceStore'
 import { useQuizStore } from './state/useQuizStore'
 import { useAutosave } from './persistence/useAutosave'
-import { loadMindMap } from './persistence/fileStore'
+import { loadMindMap, saveMindMap, mindMapExists } from './persistence/fileStore'
+import { fileNameOf, parentDirOf, repairedCopyPath } from './persistence/paths'
+import { repairCards, validateCards, type CardIssue } from './validation/cardsValidation'
 import { useUndoRedoShortcuts } from './hooks/useUndoRedoShortcuts'
+import type { Card } from './types/card'
 
-function fileNameOf(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path
+/** A map that failed validation, held until the user decides what to do with it. */
+interface PendingRepair {
+  path: string
+  fileName: string
+  /** The raw cards as read from disk — the repair works on a copy of these. */
+  cards: Card[]
+  issues: CardIssue[]
+}
+
+/** How many « (Réparée n) » names to try before giving up on finding a free one. */
+const MAX_REPAIR_ATTEMPTS = 100
+
+/**
+ * The first « [Nom] (Réparée).json » that does not exist yet. A repair must
+ * never overwrite anything — neither the corrupt original nor an earlier
+ * repaired copy the user may have already worked in.
+ */
+async function freeRepairedPath(path: string): Promise<string> {
+  for (let attempt = 1; attempt <= MAX_REPAIR_ATTEMPTS; attempt += 1) {
+    const candidate = repairedCopyPath(path, attempt)
+    if (!(await mindMapExists(candidate))) return candidate
+  }
+  throw new Error(`trop de copies réparées de ${fileNameOf(path)} existent déjà`)
 }
 
 function App() {
@@ -22,48 +48,49 @@ function App() {
   const loadCards = useCardsStore(s => s.loadCards)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
+  const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
   const quizActive = useQuizStore(s => s.active)
-  const [loaded, setLoaded] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [pendingRepair, setPendingRepair] = useState<PendingRepair | null>(null)
+  const [repairing, setRepairing] = useState(false)
+  const [repairError, setRepairError] = useState<string | null>(null)
   // The path whose cards are actually in the canvas right now. `currentFilePath`
-  // is only an INTENT until the load succeeds; this is the fact. It is what a
-  // failed switch reverts to, so the header name and the tree highlight keep
-  // agreeing with what is on screen.
-  const loadedPathRef = useRef<string | null>(null)
+  // is only an INTENT until the load succeeds AND the structure validates; this
+  // is the fact. It is what a failed switch reverts to, what the canvas is keyed
+  // and gated on, and what autosave writes to — so nothing can ever render, or
+  // be written, for a file the app has not fully loaded.
+  const [loadedPath, setLoadedPath] = useState<string | null>(null)
   useUndoRedoShortcuts()
-  useAutosave(currentFilePath ?? '', cards, 500, loaded && currentFilePath !== null, () => setSaveFailed(true))
+  useAutosave(loadedPath ?? '', cards, 500, loadedPath !== null && loadedPath === currentFilePath, () =>
+    setSaveFailed(true)
+  )
 
   // Re-runs on every file switch (open a different file, or a rename that
   // moves the current file to a new path): each switch starts a fresh
-  // load -> enable-autosave cycle, exactly like the original mount-only
-  // effect did for the one hardcoded demo file.
+  // load -> validate -> enable-autosave cycle.
   useEffect(() => {
     if (!currentFilePath) {
-      loadedPathRef.current = null
-      setLoaded(false)
+      setLoadedPath(null)
       return
     }
-    // Already the file on screen — this run is the revert below landing, not a
-    // new switch. Re-loading would be pointless and would wipe the error
-    // message that explains why the switch did not happen.
-    if (currentFilePath === loadedPathRef.current) {
-      setLoaded(true)
-      return
-    }
+    // Already the file on screen — this run is a revert below landing, or the
+    // state update that recorded the load. Re-loading would be pointless and
+    // would wipe the error message that explains why a switch did not happen.
+    if (currentFilePath === loadedPath) return
 
     let cancelled = false
-    const previousPath = loadedPathRef.current
+    const previousPath = loadedPath
     const attemptedName = fileNameOf(currentFilePath)
-    setLoaded(false)
     setSaveFailed(false)
     setLoadError(null)
 
     // A failed switch must never leave the app lying about what it is editing:
     // the canvas still holds the previous file, so `currentFilePath` goes back
     // to it too (or to null if nothing was open), and autosave stays disarmed
-    // for the path that failed.
-    function failSwitch(message: string) {
+    // for the path that failed. `message` is null when the reason is already
+    // being shown elsewhere — the repair dialog says its own piece.
+    function failSwitch(message: string | null) {
       setLoadError(message)
       setCurrentFile(previousPath)
     }
@@ -81,9 +108,20 @@ function App() {
           failSwitch(`Impossible d’ouvrir ${attemptedName} : ce fichier n’existe plus.`)
           return
         }
+        // The guard rail: a structurally broken map is never handed to the
+        // canvas. Rendering one throws mid-render (no position for a card
+        // caught in a parent cycle, no palette for a level past 4), React tears
+        // the tree down, and the map the user just clicked disappears a frame
+        // after appearing. Blocked here, it becomes a question instead.
+        const report = validateCards(result)
+        if (!report.valid) {
+          setRepairError(null)
+          setPendingRepair({ path: currentFilePath, fileName: attemptedName, cards: result, issues: report.issues })
+          failSwitch(null)
+          return
+        }
         loadCards(result)
-        loadedPathRef.current = currentFilePath
-        setLoaded(true)
+        setLoadedPath(currentFilePath)
       })
       .catch(err => {
         if (cancelled) return
@@ -96,7 +134,36 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [currentFilePath, loadCards, setCurrentFile])
+  }, [currentFilePath, loadedPath, loadCards, setCurrentFile])
+
+  /**
+   * "Créer une copie réparée": repair a DUPLICATE of the raw data, save it
+   * beside the original under a free « (Réparée) » name, and open it — through
+   * the normal load path, so the copy is validated like any other file before
+   * it reaches the canvas. The broken original is never written to.
+   */
+  const handleRepair = useCallback(async () => {
+    if (!pendingRepair) return
+    setRepairing(true)
+    setRepairError(null)
+    try {
+      const repaired = repairCards(structuredClone(pendingRepair.cards))
+      const targetPath = await freeRepairedPath(pendingRepair.path)
+      await saveMindMap(targetPath, repaired)
+      // So the copy shows up in the tree next to the file it came from. A bare
+      // filename has no folder to re-scan (nothing the sidebar could be showing
+      // it in), and asking to scan '' would only raise a workspace error.
+      const folder = parentDirOf(pendingRepair.path)
+      if (folder) await refreshFolder(folder)
+      setPendingRepair(null)
+      setCurrentFile(targetPath)
+    } catch (error) {
+      // Kept open on failure: closing would drop the only offer of a fix.
+      setRepairError(`La réparation a échoué : ${describeError(error)}`)
+    } finally {
+      setRepairing(false)
+    }
+  }, [pendingRepair, refreshFolder, setCurrentFile])
 
   const currentFileName = currentFilePath ? fileNameOf(currentFilePath) : null
 
@@ -144,8 +211,20 @@ function App() {
           </div>
         )}
         <main style={{ flex: 1 }}>
-          {currentFilePath ? (
-            <MindMapCanvas />
+          {loadedPath ? (
+            // Keyed by the loaded file: switching maps REMOUNTS the canvas
+            // instead of feeding a new card set to the previous one. React Flow
+            // seeds its node array and runs `fitView` once, on mount — reusing
+            // the instance left the viewport framing the file that was open
+            // before (often nowhere near the new cards), which is what made a
+            // map look like it opened and then vanished.
+            <CanvasErrorBoundary key={loadedPath} onClose={() => setCurrentFile(null)}>
+              <MindMapCanvas />
+            </CanvasErrorBoundary>
+          ) : currentFilePath ? (
+            <div style={{ padding: 24, color: 'var(--muted-foreground)' }}>
+              Ouverture de {currentFileName}…
+            </div>
           ) : (
             <div style={{ padding: 24, color: 'var(--muted-foreground)' }}>
               Aucun fichier ouvert. Sélectionnez ou créez une carte mentale dans la barre latérale.
@@ -155,6 +234,18 @@ function App() {
           <QuizSummaryModal />
         </main>
       </div>
+
+      {pendingRepair && (
+        <CorruptedMapDialog
+          fileName={pendingRepair.fileName}
+          repairedFileName={fileNameOf(repairedCopyPath(pendingRepair.path))}
+          issues={pendingRepair.issues}
+          repairing={repairing}
+          error={repairError}
+          onCancel={() => setPendingRepair(null)}
+          onRepair={handleRepair}
+        />
+      )}
     </div>
   )
 }
