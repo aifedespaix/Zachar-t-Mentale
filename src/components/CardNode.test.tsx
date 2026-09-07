@@ -440,19 +440,6 @@ describe('CardNode footer', () => {
     expect(screen.getByRole('button', { name: /ajouter une définition/i })).toBeInTheDocument()
   })
 
-  it('toggles an existing definition between hidden and shown', async () => {
-    const user = userEvent.setup()
-    const withDef: Card = { ...testCard, definition: 'Une définition' }
-    resetStore([withDef])
-    renderCardNode(withDef)
-
-    expect(screen.queryByText('Une définition')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
-    expect(screen.getByText('Une définition')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /masquer la définition/i }))
-    expect(screen.queryByText('Une définition')).not.toBeInTheDocument()
-  })
-
   it('flips the card visually when the flip icon is clicked, without altering any card data', async () => {
     const user = userEvent.setup()
     renderCardNode(testCard)
@@ -653,27 +640,20 @@ describe('CardNode footer', () => {
     expect(screen.getByTestId(`card-${testCard.id}`)).toHaveStyle({ borderColor: '#dc2626' })
   })
 
-  it('opens the definition for editing when the shown definition text is clicked', async () => {
+  it('wires the definition popover to updateDefinition when a new value is committed', async () => {
     const user = userEvent.setup()
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
 
     await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
     await user.click(screen.getByText('Définition existante'))
+    const field = screen.getByRole('textbox', { name: /définition/i })
+    await user.clear(field)
+    await user.type(field, 'Définition modifiée{Enter}')
 
-    expect(screen.getByRole('textbox', { name: /définition/i })).toHaveValue('Définition existante')
-  })
-
-  it('does not open the definition for editing when the mind map is locked', async () => {
-    const user = userEvent.setup()
-    resetStore([cardWithDefinition])
-    renderCardNode(cardWithDefinition)
-    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
-    useCardsStore.setState({ locked: true })
-
-    await user.click(screen.getByText('Définition existante'))
-
-    expect(screen.queryByRole('textbox', { name: /définition/i })).not.toBeInTheDocument()
+    expect(useCardsStore.getState().history.present.find(c => c.id === cardWithDefinition.id)?.definition).toBe(
+      'Définition modifiée'
+    )
   })
 
   it('opens the QCM dialog when a pending qcm-definition question\'s "Répondre" button is clicked', async () => {

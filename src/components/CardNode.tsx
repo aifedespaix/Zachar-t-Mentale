@@ -17,6 +17,7 @@ import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { QcmDialog } from './quiz/QcmDialog'
 import { FlipCard } from './FlipCard'
+import { DefinitionPopover } from './DefinitionPopover'
 
 interface QuizData {
   type: QuizQuestionType
@@ -140,7 +141,6 @@ export function CardNode({ data }: CardNodeProps) {
   const [draftTitle, setDraftTitle] = useState(card.title)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmDetachOpen, setConfirmDetachOpen] = useState(false)
-  const [definitionShown, setDefinitionShown] = useState(false)
   const [flipped, setFlipped] = useState(false)
   const [editingDefinition, setEditingDefinition] = useState(false)
   const [draftDefinition, setDraftDefinition] = useState(card.definition ?? '')
@@ -543,21 +543,11 @@ export function CardNode({ data }: CardNodeProps) {
             definition text below it is shown. */}
         <div className="card-footer" style={{ display: 'flex', gap: '0.25rem', marginTop: 'auto' }}>
           {card.definition ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={definitionShown ? 'Masquer la définition' : 'Afficher la définition'}
-                  onClick={() => setDefinitionShown(v => !v)}
-                >
-                  <AlignLeft />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {definitionShown ? 'Masquer la définition' : 'Afficher la définition'}
-              </TooltipContent>
-            </Tooltip>
+            <DefinitionPopover
+              definition={card.definition}
+              locked={locked}
+              onCommit={next => updateDefinition(card.id, next)}
+            />
           ) : (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -664,15 +654,6 @@ export function CardNode({ data }: CardNodeProps) {
             if (e.key === 'Escape') cancelDefinition()
           }}
         />
-      )}
-
-      {definitionShown && card.definition && (
-        <p
-          onClick={startEditingDefinition}
-          style={{ cursor: locked ? 'default' : 'text', margin: 0 }}
-        >
-          {card.definition}
-        </p>
       )}
 
       {isQcmPending && (
