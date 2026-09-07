@@ -15,7 +15,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
-import { useWorkspaceStore } from '../../state/useWorkspaceStore'
+import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { createMindMapFile, createSubfolder, renamePath, deletePath } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
 import { Button } from '../ui/button'
@@ -83,6 +83,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
   const toggleExpanded = useWorkspaceStore(s => s.toggleExpanded)
   const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
   const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
+  const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
 
   const [creatingKind, setCreatingKind] = useState<'mindmap' | 'folder' | null>(null)
   const [draftCreateName, setDraftCreateName] = useState('')
@@ -94,15 +95,24 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
 
   async function submitCreate() {
     const name = draftCreateName.trim()
+    const kind = creatingKind
     setCreatingKind(null)
     if (!name) return
-    if (creatingKind === 'mindmap') {
-      const path = await createMindMapFile(node.path, name)
-      await refreshFolder(node.path)
-      onOpenFile(path)
-    } else if (creatingKind === 'folder') {
-      await createSubfolder(node.path, name)
-      await refreshFolder(node.path)
+    try {
+      if (kind === 'mindmap') {
+        const path = await createMindMapFile(node.path, name)
+        await refreshFolder(node.path)
+        onOpenFile(path)
+      } else if (kind === 'folder') {
+        await createSubfolder(node.path, name)
+        await refreshFolder(node.path)
+      }
+    } catch (error) {
+      // A read-only folder, an illegal filename, a name already taken: the
+      // tree would otherwise just not change, with nothing to explain why.
+      const what = kind === 'mindmap' ? 'la carte mentale' : 'le dossier'
+      setWorkspaceError(`Impossible de créer ${what} « ${name} » : ${describeError(error)}`)
+      return
     }
     setDraftCreateName('')
   }
@@ -114,8 +124,21 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     const parentPath = parentFolderPath(node)
     const separator = node.path.includes('\\') ? '\\' : '/'
     const newPath = `${parentPath}${separator}${name}`
-    await renamePath(node.path, newPath)
+    try {
+      await renamePath(node.path, newPath)
+    } catch (error) {
+      setWorkspaceError(`Impossible de renommer « ${node.name} » en « ${name} » : ${describeError(error)}`)
+      return
+    }
+    // Same containment check `confirmDelete` uses: renaming a FOLDER moves
+    // every file under it too, so the open file's path has to follow. Handling
+    // only the exact match left `currentFilePath` pointing into a directory
+    // that no longer exists — autosave stayed armed and wrote to nowhere, and
+    // the active-file highlight vanished from the tree with no explanation.
     if (node.path === currentFilePath) setCurrentFile(newPath)
+    else if (currentFilePath?.startsWith(node.path + separator)) {
+      setCurrentFile(newPath + currentFilePath.slice(node.path.length))
+    }
     await refreshFolder(parentPath)
   }
 
@@ -123,7 +146,12 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     setConfirmDeleteOpen(false)
     const parentPath = parentFolderPath(node)
     const separator = node.path.includes('\\') ? '\\' : '/'
-    await deletePath(node.path, node.type === 'folder')
+    try {
+      await deletePath(node.path, node.type === 'folder')
+    } catch (error) {
+      setWorkspaceError(`Impossible de supprimer « ${node.name} » : ${describeError(error)}`)
+      return
+    }
     if (currentFilePath === node.path || currentFilePath?.startsWith(node.path + separator)) setCurrentFile(null)
     await refreshFolder(parentPath)
   }
