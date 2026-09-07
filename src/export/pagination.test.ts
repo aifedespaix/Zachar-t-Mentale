@@ -60,4 +60,22 @@ describe('paginateForExport', () => {
   it('returns no pages for a file with no root', () => {
     expect(paginateForExport([], { includeDetached: false })).toEqual([])
   })
+
+  it('packs multiple small sibling branches onto shared pages instead of one page per leaf', () => {
+    const cards: Card[] = [
+      { id: 'root', level: 1, title: 'R', parentId: null, order: 0 },
+      { id: 'fat', level: 2, title: 'Fat', parentId: 'root', order: 0 },
+      ...Array.from({ length: 4 }, (_, i) => ({
+        id: `fatleaf${i}`, level: 3 as const, title: `FL${i}`, parentId: 'fat', order: i,
+      })),
+      ...Array.from({ length: 3 }, (_, i) => ({
+        id: `theme${i}`, level: 2 as const, title: `Theme${i}`, parentId: 'root', order: i + 1,
+      })),
+    ]
+    // budget 2: 'fat' alone has 4 leaves (> budget) so it splits into its own pages;
+    // the 3 single-leaf themes (1 each) should pack two-per-page, not one-per-page.
+    const pages = paginateForExport(cards, { includeDetached: false }, 2)
+    const themePages = pages.filter(p => p.cards.some(c => c.title.startsWith('Theme')))
+    expect(themePages.length).toBeLessThan(3) // NOT one page per theme
+  })
 })

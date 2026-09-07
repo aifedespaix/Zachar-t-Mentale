@@ -1,5 +1,5 @@
 import { computeLayout, COLUMN_WIDTH, ROW_HEIGHT } from '../layout/columns'
-import { StaticCardView, EXPORT_CARD_WIDTH } from './StaticCardView'
+import { StaticCardView, EXPORT_CARD_WIDTH, EXPORT_CARD_HEIGHT } from './StaticCardView'
 import type { ExportPage } from './pagination'
 
 export interface PageBounds {
@@ -34,6 +34,21 @@ export function ExportPageRenderer({ page, showDefinitions }: ExportPageRenderer
   const bounds = computePageBounds(page)
   return (
     <div style={{ position: 'relative', width: bounds.width, height: bounds.height }}>
+      <svg
+        style={{ position: 'absolute', left: 0, top: 0, width: bounds.width, height: bounds.height, pointerEvents: 'none' }}
+      >
+        {page.cards.map(card => {
+          if (card.parentId === null) return null
+          const parentPos = positions[card.parentId]
+          const childPos = positions[card.id]
+          if (!parentPos || !childPos) return null
+          const x1 = parentPos.x + EXPORT_CARD_WIDTH
+          const y1 = parentPos.y + EXPORT_CARD_HEIGHT / 2
+          const x2 = childPos.x
+          const y2 = childPos.y + EXPORT_CARD_HEIGHT / 2
+          return <line key={card.id} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#94a3b8" strokeWidth={1.5} />
+        })}
+      </svg>
       {page.cards.map(card => {
         const pos = positions[card.id]
         return (

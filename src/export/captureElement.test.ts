@@ -10,6 +10,6 @@ describe('captureElementAsPng', () => {
     const el = document.createElement('div')
     const result = await captureElementAsPng(el)
     expect(result).toBe('data:image/png;base64,AAA')
-    expect(toPng).toHaveBeenCalledWith(el, { pixelRatio: 2 })
+    expect(toPng).toHaveBeenCalledWith(el, { pixelRatio: 2, style: { position: 'static', left: '0px', top: '0px' } })
   })
 })

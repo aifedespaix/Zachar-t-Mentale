@@ -413,4 +413,23 @@ describe('FileTreeRow', () => {
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/corrompu\.xmind.*archive corrompue/))
   })
+
+  it('reports how many sheets were written before a mid-import failure, and still refreshes the folder', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pickXmindFile).mockResolvedValue('/downloads/cours.xmind')
+    vi.mocked(readBinaryFile).mockResolvedValue(new Uint8Array([1]))
+    vi.mocked(readXmindFile).mockResolvedValue([
+      { sheetTitle: 'Chapitre 1', cards: [{ id: 'r1', level: 1, title: 'R1', parentId: null, order: 0 }] },
+      { sheetTitle: 'Chapitre 2', cards: [{ id: 'r2', level: 1, title: 'R2', parentId: null, order: 0 }] },
+    ])
+    vi.mocked(saveMindMap).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('disque plein'))
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const node: FileTreeNode = { type: 'folder', name: 'cours', path: '/cours', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
+
+    await user.click(screen.getByRole('button', { name: 'Importer XMind' }))
+
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/1 carte.*mentale.*déjà importée/))
+    expect(scanFolder).toHaveBeenCalledWith('/cours')
+  })
 })

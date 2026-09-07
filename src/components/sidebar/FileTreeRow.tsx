@@ -161,18 +161,26 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
   }
 
   async function handleImportXmind() {
-    const path = await pickXmindFile()
-    if (!path) return
+    let path: string | null = null
+    let sheetsWritten = 0
     try {
+      path = await pickXmindFile()
+      if (!path) return
       const bytes = await readBinaryFile(path)
       const sheets = await readXmindFile(bytes)
       for (const sheet of sheets) {
         const target = await freeMindMapPath(node.path, sheet.sheetTitle)
         await saveMindMap(target, sheet.cards)
+        sheetsWritten += 1
       }
       await refreshFolder(node.path)
     } catch (error) {
-      setWorkspaceError(`Impossible d’importer « ${fileNameOf(path)} » : ${describeError(error)}`)
+      // Refresh BEFORE reporting the error: a successful refreshFolder resets
+      // workspaceError to null as part of its own state update, which would
+      // otherwise immediately clobber the message we're about to set below.
+      if (sheetsWritten > 0) await refreshFolder(node.path)
+      const partial = sheetsWritten > 0 ? ` (${sheetsWritten} carte(s) mentale(s) déjà importée(s) avant l’échec)` : ''
+      setWorkspaceError(`Impossible d’importer « ${path ? fileNameOf(path) : 'le fichier XMind'} » : ${describeError(error)}${partial}`)
     }
   }
 

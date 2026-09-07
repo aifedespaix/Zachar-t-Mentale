@@ -24,6 +24,15 @@ describe('ExportPageRenderer', () => {
     expect(childWrapper.style.left).toBe(`${COLUMN_WIDTH}px`)
     expect(childWrapper.style.top).toBe('0px')
   })
+
+  // With this 2-card root+child fixture, exactly one line is expected: the
+  // root->child edge. That count of 1 (rather than 0 or 2) simultaneously
+  // proves the parent-child pair produces a line AND that the root card
+  // (parentId: null) never itself produces a spurious line as a "child".
+  it('draws one line per parent-child relationship, and none for the root card', () => {
+    const { container } = render(<ExportPageRenderer page={page} showDefinitions={false} />)
+    expect(container.querySelectorAll('line')).toHaveLength(1) // root -> child
+  })
 })
 
 describe('computePageBounds', () => {

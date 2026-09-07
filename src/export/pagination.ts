@@ -43,16 +43,32 @@ function splitSubtree(cards: Card[], nodeId: string, budget: number): string[][]
     return [[nodeId, ...subtreeIds(cards, nodeId).slice(1)]]
   }
 
-  const allChildrenAreLeaves = kids.every(kid => childrenOf(cards, kid.id).length === 0)
-  if (allChildrenAreLeaves) {
-    const batches: string[][] = []
-    for (let i = 0; i < kids.length; i += budget) {
-      batches.push([nodeId, ...kids.slice(i, i + budget).map(k => k.id)])
+  // Greedily pack whole child subtrees into shared pages; a child that alone
+  // exceeds the budget is recursively split into its own page group instead
+  // of pulling every other child down into single-item pages with it.
+  const pages: string[][] = []
+  let batchIds: string[] = []
+  let batchLeaves = 0
+  const flushBatch = () => {
+    if (batchIds.length > 0) {
+      pages.push([nodeId, ...batchIds])
+      batchIds = []
+      batchLeaves = 0
     }
-    return batches
   }
-
-  return kids.flatMap(kid => splitSubtree(cards, kid.id, budget).map(ids => [nodeId, ...ids]))
+  for (const kid of kids) {
+    const kidLeaves = leafCount(cards, kid.id)
+    if (kidLeaves > budget) {
+      flushBatch()
+      for (const group of splitSubtree(cards, kid.id, budget)) pages.push([nodeId, ...group])
+      continue
+    }
+    if (batchLeaves + kidLeaves > budget) flushBatch()
+    batchIds.push(...subtreeIds(cards, kid.id))
+    batchLeaves += kidLeaves
+  }
+  flushBatch()
+  return pages
 }
 
 /**
