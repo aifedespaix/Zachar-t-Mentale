@@ -97,7 +97,7 @@ export function CardNode({ data }: CardNodeProps) {
   const isRecallPending = quiz?.type === 'recall' && quiz.result === 'unanswered'
   const displayMasked = isRecallPending && !quizRevealed
   const answerRecall = useQuizStore(s => s.answerRecall)
-  const answerQcm = useQuizStore(s => s.answerQcm)
+  const answerQcmDefinition = useQuizStore(s => s.answerQcmDefinition)
   const [qcmOpen, setQcmOpen] = useState(false)
   const isQcmPending = quiz?.type === 'qcm' && quiz.result === 'unanswered'
   const resultBorderColor = quiz?.result === 'correct' ? '#16a34a' : quiz?.result === 'incorrect' ? '#dc2626' : undefined
@@ -673,7 +673,7 @@ export function CardNode({ data }: CardNodeProps) {
           correctDefinition={card.definition ?? ''}
           distractors={quiz.distractorDefinitions ?? []}
           onAnswer={chosen => {
-            answerQcm(card.id, chosen)
+            answerQcmDefinition(card.id, chosen)
             setQcmOpen(false)
           }}
           onCancel={() => setQcmOpen(false)}

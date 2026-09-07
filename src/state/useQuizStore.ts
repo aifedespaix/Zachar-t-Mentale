@@ -12,7 +12,8 @@ interface QuizState {
   wasLockedBeforeQuiz: boolean
   startQuiz: (config: QuizConfig) => void
   answerRecall: (cardId: string, correct: boolean) => void
-  answerQcm: (cardId: string, chosenDefinition: string) => void
+  answerQcmDefinition: (cardId: string, chosenDefinition: string) => void
+  answerQcmTitle: (cardId: string, chosenTitle: string) => void
   finishQuiz: () => void
   endQuiz: () => void
 }
@@ -42,9 +43,14 @@ export function createQuizStore(): QuizStore {
     },
     answerRecall: (cardId, correct) =>
       set(state => ({ results: { ...state.results, [cardId]: correct ? 'correct' : 'incorrect' } })),
-    answerQcm: (cardId, chosenDefinition) => {
+    answerQcmDefinition: (cardId, chosenDefinition) => {
       const card = useCardsStore.getState().history.present.find(c => c.id === cardId)
       const correct = card?.definition === chosenDefinition
+      set(state => ({ results: { ...state.results, [cardId]: correct ? 'correct' : 'incorrect' } }))
+    },
+    answerQcmTitle: (cardId, chosenTitle) => {
+      const card = useCardsStore.getState().history.present.find(c => c.id === cardId)
+      const correct = card?.title === chosenTitle
       set(state => ({ results: { ...state.results, [cardId]: correct ? 'correct' : 'incorrect' } }))
     },
     finishQuiz: () => set({ showSummary: true }),
