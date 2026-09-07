@@ -6,15 +6,24 @@ vi.mock('../persistence/workspaceConfig', () => ({
   saveWorkspaceConfig: vi.fn(),
 }))
 vi.mock('../persistence/fileTree', () => ({ scanFolder: vi.fn() }))
+vi.mock('../persistence/sessionState', () => ({
+  loadSessionState: vi.fn(),
+  saveSessionState: vi.fn(),
+}))
 
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../persistence/workspaceConfig'
 import { scanFolder } from '../persistence/fileTree'
+import { loadSessionState, saveSessionState } from '../persistence/sessionState'
 
 describe('useWorkspaceStore', () => {
   beforeEach(() => {
     vi.mocked(loadWorkspaceConfig).mockReset()
     vi.mocked(saveWorkspaceConfig).mockReset().mockResolvedValue(undefined)
     vi.mocked(scanFolder).mockReset()
+    vi.mocked(loadSessionState)
+      .mockReset()
+      .mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(saveSessionState).mockReset()
   })
 
   it('init loads configured root folders and scans each one', async () => {
@@ -254,5 +263,40 @@ describe('useWorkspaceStore', () => {
 
     store.getState().setCurrentFile(null)
     expect(store.getState().currentFilePath).toBeNull()
+  })
+
+  it('init restores the open file and expanded folders from the saved session', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours'] })
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(loadSessionState).mockReturnValue({
+      currentFilePath: '/cours/fractions.json',
+      expandedPaths: ['/cours'],
+    })
+    const store = createWorkspaceStore()
+
+    await store.getState().init()
+
+    expect(store.getState().currentFilePath).toBe('/cours/fractions.json')
+    expect(store.getState().expandedPaths.has('/cours')).toBe(true)
+  })
+
+  it('setCurrentFile persists the session', () => {
+    const store = createWorkspaceStore()
+    store.getState().setCurrentFile('/cours/chapitre1.json')
+
+    expect(saveSessionState).toHaveBeenLastCalledWith({
+      currentFilePath: '/cours/chapitre1.json',
+      expandedPaths: [],
+    })
+  })
+
+  it('toggleExpanded persists the session', () => {
+    const store = createWorkspaceStore()
+    store.getState().toggleExpanded('/cours/chimie')
+
+    expect(saveSessionState).toHaveBeenLastCalledWith({
+      currentFilePath: null,
+      expandedPaths: ['/cours/chimie'],
+    })
   })
 })

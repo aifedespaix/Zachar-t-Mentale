@@ -10,10 +10,15 @@ vi.mock('../../persistence/workspaceConfig', () => ({
 }))
 vi.mock('../../persistence/fileTree', () => ({ scanFolder: vi.fn() }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
+vi.mock('../../persistence/sessionState', () => ({
+  loadSessionState: vi.fn(),
+  saveSessionState: vi.fn(),
+}))
 
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../../persistence/workspaceConfig'
 import { scanFolder } from '../../persistence/fileTree'
 import { open } from '@tauri-apps/plugin-dialog'
+import { loadSessionState } from '../../persistence/sessionState'
 
 function resetWorkspaceStore() {
   const pristine = createWorkspaceStore().getState()
@@ -32,6 +37,7 @@ describe('FileSidebar', () => {
     vi.mocked(saveWorkspaceConfig).mockReset().mockResolvedValue(undefined)
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
     vi.mocked(open).mockReset()
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
   })
 
   it('loads the configured workspace on mount and shows an empty state with no root folders', async () => {

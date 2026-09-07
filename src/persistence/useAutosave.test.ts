@@ -96,4 +96,52 @@ describe('useAutosave', () => {
     await vi.waitFor(() => expect(saveMindMap).toHaveBeenCalledTimes(1))
     expect(onError).not.toHaveBeenCalled()
   })
+
+  describe('flush', () => {
+    it('writes a pending debounced save immediately instead of waiting out the delay', async () => {
+      const { result } = renderHook(() => useAutosave('/fake/path.json', cardsV1, 500))
+
+      await result.current.flush()
+
+      expect(saveMindMap).toHaveBeenCalledTimes(1)
+      expect(saveMindMap).toHaveBeenCalledWith('/fake/path.json', cardsV1)
+    })
+
+    it('is a no-op when there is nothing pending (already saved, nothing changed since)', async () => {
+      const { result } = renderHook(() => useAutosave('/fake/path.json', cardsV1, 500))
+      vi.advanceTimersByTime(500)
+      await vi.waitFor(() => expect(saveMindMap).toHaveBeenCalledTimes(1))
+
+      await result.current.flush()
+
+      expect(saveMindMap).toHaveBeenCalledTimes(1)
+    })
+
+    it('cancels the debounce timer so the value is never written twice', async () => {
+      const { result } = renderHook(() => useAutosave('/fake/path.json', cardsV1, 500))
+
+      await result.current.flush()
+      vi.advanceTimersByTime(500)
+
+      expect(saveMindMap).toHaveBeenCalledTimes(1)
+    })
+
+    it('rejects and reports through onError when the flushed save fails', async () => {
+      const onError = vi.fn()
+      const failure = new Error('disk full')
+      vi.mocked(saveMindMap).mockRejectedValue(failure)
+      const { result } = renderHook(() => useAutosave('/fake/path.json', cardsV1, 500, true, onError))
+
+      await expect(result.current.flush()).rejects.toThrow('disk full')
+      expect(onError).toHaveBeenCalledWith(failure)
+    })
+
+    it('does nothing while autosave is disabled', async () => {
+      const { result } = renderHook(() => useAutosave('/fake/path.json', cardsV1, 500, false))
+
+      await result.current.flush()
+
+      expect(saveMindMap).not.toHaveBeenCalled()
+    })
+  })
 })
