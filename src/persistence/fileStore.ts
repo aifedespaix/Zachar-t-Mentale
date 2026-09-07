@@ -18,6 +18,15 @@ export async function loadMindMap(path: string): Promise<Card[] | null> {
   return deserializeCards(json)
 }
 
+/**
+ * Whether a mind map file is already there. Used before writing a repaired
+ * copy: the repair flow's whole promise is that nothing existing is
+ * overwritten, the broken original least of all.
+ */
+export async function mindMapExists(path: string): Promise<boolean> {
+  return exists(path)
+}
+
 export async function saveMindMap(path: string, cards: Card[]): Promise<void> {
   await writeTextFile(path, serializeCards(cards))
 }

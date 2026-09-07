@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { oklchWcagContrast } from './contrast'
-import { detachedColors, levelColors } from './levelColors'
+import { detachedColors, levelColor, levelColors } from './levelColors'
 
 describe('levelColors', () => {
   it.each(Object.entries(levelColors))('level %s text meets WCAG AA (>=4.5) against its background', (_level, colors) => {
@@ -29,5 +29,19 @@ describe('levelColors', () => {
     expect(detachedColors.bg.c).toBe(0)
     expect(detachedColors.border.c).toBe(0)
     expect(oklchWcagContrast(detachedColors.bg, detachedColors.text)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  // `levelColors[5]` is `undefined`, and the `.bg` read that follows throws
+  // during render — which unmounts the app instead of showing one odd card.
+  it('falls back to a real palette for a level a corrupt file made up', () => {
+    expect(levelColor(5)).toEqual(levelColors[4])
+    expect(levelColor(0)).toEqual(levelColors[1])
+    expect(levelColor(Number.NaN)).toEqual(levelColors[1])
+  })
+
+  it('returns the exact palette for every real level', () => {
+    for (const level of [1, 2, 3, 4] as const) {
+      expect(levelColor(level)).toBe(levelColors[level])
+    }
   })
 })

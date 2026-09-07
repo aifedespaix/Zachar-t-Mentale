@@ -113,4 +113,28 @@ describe('computeLayout — floating cards zone', () => {
     expect(withDetached.child).toEqual(withoutDetached.child)
     expect(withDetached.d.x).toBe(0)
   })
+
+  // The canvas turns every card into a React Flow node whose `position` is read
+  // straight out of this map. A card with no entry becomes `position: undefined`,
+  // which throws mid-render and takes the whole app down — the "the map opens
+  // then disappears" failure. So the layout has to stay TOTAL, even on data no
+  // healthy app state can produce.
+  it('places every card of a corrupt file, including one in a parent loop', () => {
+    const x: Card = { id: 'x', level: 2, title: 'x', parentId: 'y', order: 0 }
+    const y: Card = { id: 'y', level: 2, title: 'y', parentId: 'x', order: 0 }
+    const positions = computeLayout([root, child, x, y])
+    for (const id of ['root', 'child', 'x', 'y']) {
+      expect(positions[id]).toBeDefined()
+    }
+  })
+
+  it('terminates on a card that is its own parent', () => {
+    const self: Card = { id: 'self', level: 2, title: 'self', parentId: 'self', order: 0 }
+    expect(computeLayout([root, self]).self).toBeDefined()
+  })
+
+  it('places a card whose level is out of range in the first column rather than off-canvas', () => {
+    const broken = { id: 'broken', level: 0, title: 'broken', parentId: null, order: 1 } as unknown as Card
+    expect(computeLayout([broken]).broken.x).toBe(0)
+  })
 })

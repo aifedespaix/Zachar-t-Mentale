@@ -49,8 +49,15 @@ export function computeLayout(cards: Card[]): Record<string, Position> {
 
   let nextRow = 0
 
+  // Guards against a corrupt file whose parent links form a loop: without it,
+  // `layoutSubtree` would recurse until the stack blows. A card already being
+  // laid out higher up the recursion is treated as a leaf, which terminates the
+  // walk and still gives every card a position.
+  const inProgress = new Set<string>()
+
   function layoutSubtree(card: Card): number {
-    const children = childrenByParent.get(card.id) ?? []
+    const children = inProgress.has(card.id) ? [] : childrenByParent.get(card.id) ?? []
+    inProgress.add(card.id)
     let y: number
     if (children.length === 0) {
       y = nextRow * ROW_HEIGHT
@@ -59,7 +66,7 @@ export function computeLayout(cards: Card[]): Record<string, Position> {
       const childYs = children.map(layoutSubtree)
       y = (Math.min(...childYs) + Math.max(...childYs)) / 2
     }
-    positions[card.id] = { x: (card.level - 1) * COLUMN_WIDTH, y }
+    positions[card.id] = { x: (Math.max(1, card.level) - 1) * COLUMN_WIDTH, y }
     return y
   }
 
@@ -74,6 +81,18 @@ export function computeLayout(cards: Card[]): Record<string, Position> {
     if (card.id in positions) continue
     const isSubtreeRoot = card.parentId === null || !knownIds.has(card.parentId)
     if (isSubtreeRoot) layoutSubtree(card)
+  }
+
+  // Last resort, and the reason this function is TOTAL: cards caught in a
+  // parent cycle are neither reachable from the root nor subtree roots, so the
+  // two passes above skip them entirely. A card with no position becomes a
+  // React Flow node with `position: undefined`, which throws mid-render and
+  // takes the whole app down with it — the map "opens then disappears". Placing
+  // them somewhere visible is always better than that. (`validateCards` blocks
+  // such a file long before it reaches the canvas; this is the net under it.)
+  for (const card of attached) {
+    if (card.id in positions) continue
+    layoutSubtree(card)
   }
 
   Object.assign(positions, computeDetachedZoneLayout(detached, detachedZoneTop(positions)))

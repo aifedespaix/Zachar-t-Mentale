@@ -18,6 +18,7 @@ import type { FileTreeNode } from '../../types/workspace'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { createMindMapFile, createSubfolder, renamePath, deletePath } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
+import { parentDirOf, separatorOf } from '../../persistence/paths'
 import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
@@ -71,12 +72,6 @@ function ConfirmDeleteDialog({
   )
 }
 
-/** `node.path` is always `<parent>/<node.name>` (built that way by `scanFolder`/`fileOps`), so the parent directory can be recovered without threading an extra prop through every level of recursion. */
-function parentFolderPath(node: FileTreeNode): string {
-  const withoutName = node.path.slice(0, node.path.length - node.name.length)
-  return withoutName.replace(/[\\/]+$/, '')
-}
-
 export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveRoot }: FileTreeRowProps) {
   const expandedPaths = useWorkspaceStore(s => s.expandedPaths)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
@@ -121,8 +116,8 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     const name = draftRenameName.trim()
     setRenaming(false)
     if (!name || name === node.name) return
-    const parentPath = parentFolderPath(node)
-    const separator = node.path.includes('\\') ? '\\' : '/'
+    const parentPath = parentDirOf(node.path)
+    const separator = separatorOf(node.path)
     const newPath = `${parentPath}${separator}${name}`
     try {
       await renamePath(node.path, newPath)
@@ -144,8 +139,8 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
 
   async function confirmDelete() {
     setConfirmDeleteOpen(false)
-    const parentPath = parentFolderPath(node)
-    const separator = node.path.includes('\\') ? '\\' : '/'
+    const parentPath = parentDirOf(node.path)
+    const separator = separatorOf(node.path)
     try {
       await deletePath(node.path, node.type === 'folder')
     } catch (error) {

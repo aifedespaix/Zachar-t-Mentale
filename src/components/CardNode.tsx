@@ -7,7 +7,7 @@ import { isRootCard } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
-import { detachedColors, levelColors } from '../colors/levelColors'
+import { detachedColors, levelColor } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
@@ -141,8 +141,8 @@ export function CardNode({ data }: CardNodeProps) {
   // A floating card is painted grey whatever level it last had: its level is
   // vestigial once it leaves the hierarchy (see the `detached` field), so
   // colouring it by that stale value would read as "still a level-3 card".
-  const colors = isDetached ? detachedColors : levelColors[card.level]
-  const childColors = !isDetached && card.level < 4 ? levelColors[(card.level + 1) as 1 | 2 | 3 | 4] : null
+  const colors = isDetached ? detachedColors : levelColor(card.level)
+  const childColors = !isDetached && card.level < 4 ? levelColor(card.level + 1) : null
 
   const isRoot = isRootCard(card)
   // Add-actions that cannot apply here are removed outright, not greyed: a

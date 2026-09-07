@@ -38,6 +38,20 @@ export const levelColors: Record<CardLevel, LevelColor> = {
 }
 
 /**
+ * Palette for a card level, safe against a level a hand-edited file made up.
+ *
+ * `levelColors[card.level]` is `undefined` for anything outside 1..4, and the
+ * `.bg` / `.border` read that follows throws mid-render — which unmounts the
+ * whole app rather than showing one odd card. `validateCards` stops such a file
+ * before it ever reaches the canvas; this keeps the rendering path itself
+ * total, so a bad level can only ever look wrong, never break.
+ */
+export function levelColor(level: number): LevelColor {
+  const clamped = Math.min(Math.max(Math.round(level) || 1, 1), 4) as CardLevel
+  return levelColors[clamped]
+}
+
+/**
  * Floating ("volante") cards: deliberately achromatic, so a detached card reads
  * as OUT of the four-level hierarchy at a glance rather than as a fifth level.
  * Kept above the WCAG AA text/background ratio like every level palette.
