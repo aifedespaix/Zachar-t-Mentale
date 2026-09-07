@@ -145,16 +145,14 @@ function App() {
         )}
         <main style={{ flex: 1 }}>
           {currentFilePath ? (
-            <>
-              <MindMapCanvas />
-              <QuizHud />
-              <QuizSummaryModal />
-            </>
+            <MindMapCanvas />
           ) : (
             <div style={{ padding: 24, color: 'var(--muted-foreground)' }}>
               Aucun fichier ouvert. Sélectionnez ou créez une carte mentale dans la barre latérale.
             </div>
           )}
+          <QuizHud />
+          <QuizSummaryModal />
         </main>
       </div>
     </div>
