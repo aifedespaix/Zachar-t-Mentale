@@ -19,6 +19,8 @@
     "fs:allow-mkdir",
     "fs:allow-remove",
     "fs:allow-rename",
+    "updater:default",
+    "process:allow-restart",
     {
       "identifier": "fs:scope",
       "allow": ["$HOME/**"]
