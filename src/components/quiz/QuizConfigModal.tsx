@@ -4,18 +4,13 @@ import { Sprout, Zap, Flame, type LucideIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { useQuizStore } from '../../state/useQuizStore'
-import { levelColor } from '../../colors/levelColors'
+import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
+import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 import { toCss, pickReadableTextColor } from '../../colors/contrast'
 import type { CardLevel } from '../../types/card'
 import type { QuizDifficulty } from '../../types/quiz'
 
 const ALL_LEVELS: CardLevel[] = [1, 2, 3, 4]
-const LEVEL_LABELS: Record<CardLevel, string> = {
-  1: 'Titre',
-  2: 'Sous-titre',
-  3: 'Sous-partie',
-  4: 'Info',
-}
 
 interface DifficultyOption {
   value: QuizDifficulty
@@ -38,6 +33,8 @@ interface QuizConfigModalProps {
 
 export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
   const startQuiz = useQuizStore(s => s.startQuiz)
+  const theme = useResolvedTheme()
+  const levelAppearance = useAppearanceSettingsStore(s => s.levels)
   const [levels, setLevels] = useState<CardLevel[]>(ALL_LEVELS)
   const [difficulty, setDifficulty] = useState<QuizDifficulty>('moyen')
   const [qcmMode, setQcmMode] = useState(false)
@@ -65,8 +62,8 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
           <div style={{ display: 'flex', gap: 8 }}>
             {ALL_LEVELS.map(level => {
               const checked = levels.includes(level)
-              const bg = toCss(levelColor(level, 'light').border)
-              const text = toCss(pickReadableTextColor(levelColor(level, 'light').border))
+              const bg = toCss(levelAppearance[level].color[theme].border)
+              const text = toCss(pickReadableTextColor(levelAppearance[level].color[theme].border))
               return (
                 <label
                   key={level}
@@ -89,10 +86,10 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
                     type="checkbox"
                     checked={checked}
                     onChange={() => toggleLevel(level)}
-                    aria-label={LEVEL_LABELS[level]}
+                    aria-label={levelAppearance[level].label}
                     style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
                   />
-                  {LEVEL_LABELS[level]}
+                  {levelAppearance[level].label}
                 </label>
               )
             })}
@@ -142,8 +139,8 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
             gap: 12,
             padding: 14,
             borderRadius: 12,
-            border: `2px solid ${toCss(levelColor(3, 'light').border)}`,
-            background: qcmMode ? toCss(levelColor(3, 'light').bg) : 'var(--background)',
+            border: `2px solid ${toCss(levelAppearance[3].color[theme].border)}`,
+            background: qcmMode ? toCss(levelAppearance[3].color[theme].bg) : 'var(--background)',
             cursor: 'pointer',
             textAlign: 'left',
           }}
@@ -162,7 +159,7 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
               borderRadius: 11,
               flexShrink: 0,
               position: 'relative',
-              background: qcmMode ? toCss(levelColor(3, 'light').border) : '#ccc',
+              background: qcmMode ? toCss(levelAppearance[3].color[theme].border) : '#ccc',
               transition: 'background 0.15s ease',
             }}
           >
