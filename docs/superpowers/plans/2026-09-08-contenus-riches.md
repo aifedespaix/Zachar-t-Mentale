@@ -454,7 +454,7 @@ Also normalize the `catch` in `ExportDialog`: `toPng` rejects with an `Event`, n
 - Modify: `src/state/quizReducer.ts` (+ test)
 - Modify: `src/components/quiz/QcmDialog.tsx` (+ test)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 it('truncates a « moyen » hint on the projection, never mid-LaTeX', () => {
@@ -466,11 +466,27 @@ it('deduplicates distractors on the projection, so two cards with the same formu
 it('renders a rich definition as a QCM option instead of its source', () => { /* … */ })
 ```
 
-- [ ] **Step 2: Implement** — hints and distractor pools read `card.definition` (already the projection, by Task 3's invariant), and `QcmDialog` renders options through `BlockView` when the card carries `content`. `computeTitleSimilarity` is untouched: titles stay plain strings by design (spec: hors périmètre).
-- [ ] **Step 3: Verify** — `npx vitest run src/state/quizReducer.test.ts src/components/quiz/`
-- [ ] **Step 4: Commit** — `fix(quiz): read definitions through the plain-text projection, render rich QCM options`
+- [x] **Step 2: Implement** — hints and distractor pools read `card.definition` (already the projection, by Task 3's invariant), and `QcmDialog` renders options through `BlockView` when the card carries `content`. `computeTitleSimilarity` is untouched: titles stay plain strings by design (spec: hors périmètre).
+- [x] **Step 3: Verify** — `npx vitest run src/state/quizReducer.test.ts src/components/quiz/`
+- [x] **Step 4: Commit** — `fix(quiz): read definitions through the plain-text projection, render rich QCM options`
 
 ---
+
+
+> **Deux des trois problèmes annoncés n'existaient pas.** Le plan supposait que
+> la troncature d'indice couperait au milieu du LaTeX et que la déduplication
+> des distracteurs porterait sur la source : les deux lisent `card.definition`,
+> qui EST déjà la projection texte depuis la tâche 3. L'invariant les protège
+> par construction — vérifié plutôt que supposé.
+>
+> Le manque réel était l'affichage : un QCM de maths proposait « 20/100 × 425 »
+> pendant que la carte montrait une fraction empilée. `QcmDialog` reçoit
+> désormais un `renderOption` optionnel. La chaîne reste l'IDENTITÉ (c'est elle
+> que la correction compare et que la déduplication du pool utilise), seul
+> l'affichage est résolu vers les blocs source — donc deux cartes dont les
+> formules se projettent pareil se percutent toujours en une seule option, ce
+> qui est le comportement correct. Les titres n'ont pas de résolveur : ils sont
+> la clé de comparaison du quiz et restent du texte par conception.
 
 ## Task 14: Teach the skill to emit `content`
 
