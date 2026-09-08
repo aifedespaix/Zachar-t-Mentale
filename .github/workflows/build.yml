@@ -32,6 +32,10 @@ jobs:
       - name: run tests
         run: bun run test
 
+      - name: run Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
       # Pas de `createUpdaterArtifacts` ici : signer demanderait
       # TAURI_SIGNING_PRIVATE_KEY, indisponible sur une PR venue d'un fork. Ce
       # qu'on veut valider — que makensis produit bien l'installeur — n'en

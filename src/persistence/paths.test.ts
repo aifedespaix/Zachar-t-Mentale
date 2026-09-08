@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { fileNameOf, mindMapBaseName, parentDirOf, repairedCopyPath, sanitizeFileName, separatorOf } from './paths'
+import {
+  fileNameOf,
+  isMindMapPath,
+  mindMapBaseName,
+  parentDirOf,
+  repairedCopyPath,
+  sanitizeFileName,
+  separatorOf,
+  withMindMapExtension,
+} from './paths'
 
 describe('path helpers', () => {
   it('reads the file name off both separators', () => {
@@ -19,26 +28,64 @@ describe('path helpers', () => {
     expect(separatorOf('/cours/chap.json')).toBe('/')
   })
 
-  it('strips the .json extension whatever its case', () => {
+  it('strips a mind-map extension whatever its case', () => {
+    expect(mindMapBaseName('/cours/Chapitre 1.ZMAP')).toBe('Chapitre 1')
     expect(mindMapBaseName('/cours/Chapitre 1.JSON')).toBe('Chapitre 1')
     expect(mindMapBaseName('/cours/sans-extension')).toBe('sans-extension')
   })
 })
 
+describe('isMindMapPath', () => {
+  it('recognises the extension the app writes', () => {
+    expect(isMindMapPath('/cours/fractions.zmap')).toBe(true)
+    expect(isMindMapPath('C:\\cours\\Fractions.ZMAP')).toBe(true)
+  })
+
+  it('still recognises a map written before .zmap existed', () => {
+    expect(isMindMapPath('/cours/fractions.json')).toBe(true)
+  })
+
+  it('rejects anything else', () => {
+    expect(isMindMapPath('/cours/notes.pdf')).toBe(false)
+    expect(isMindMapPath('/cours/sans-extension')).toBe(false)
+    // Not a suffix match on the bare word: only a real extension counts.
+    expect(isMindMapPath('/cours/zmap')).toBe(false)
+  })
+})
+
+describe('withMindMapExtension', () => {
+  it('gives a bare name the extension the installer associates with the app', () => {
+    expect(withMindMapExtension('Chapitre 3')).toBe('Chapitre 3.zmap')
+  })
+
+  it('leaves a name that already has one alone', () => {
+    expect(withMindMapExtension('Chapitre 3.zmap')).toBe('Chapitre 3.zmap')
+    // A legacy map keeps its own extension: re-saving one must not produce
+    // « chapitre.json.zmap » beside the file the user has been editing.
+    expect(withMindMapExtension('Chapitre 3.json')).toBe('Chapitre 3.json')
+  })
+})
+
 describe('repairedCopyPath', () => {
-  it('names the copy « [Nom original] (Réparée).json », next to the original', () => {
-    expect(repairedCopyPath('/cours/math/fractions.json')).toBe('/cours/math/fractions (Réparée).json')
-    expect(repairedCopyPath('C:\\cours\\fractions.json')).toBe('C:\\cours\\fractions (Réparée).json')
+  it('names the copy « [Nom original] (Réparée).zmap », next to the original', () => {
+    expect(repairedCopyPath('/cours/math/fractions.zmap')).toBe('/cours/math/fractions (Réparée).zmap')
+    expect(repairedCopyPath('C:\\cours\\fractions.zmap')).toBe('C:\\cours\\fractions (Réparée).zmap')
   })
 
   it('numbers further attempts so an existing repair is never overwritten', () => {
-    expect(repairedCopyPath('/cours/fractions.json', 2)).toBe('/cours/fractions (Réparée 2).json')
-    expect(repairedCopyPath('/cours/fractions.json', 3)).toBe('/cours/fractions (Réparée 3).json')
+    expect(repairedCopyPath('/cours/fractions.zmap', 2)).toBe('/cours/fractions (Réparée 2).zmap')
+    expect(repairedCopyPath('/cours/fractions.zmap', 3)).toBe('/cours/fractions (Réparée 3).zmap')
   })
 
-  it('always produces a .json file, even from a path that had no extension', () => {
-    expect(repairedCopyPath('/cours/fractions')).toBe('/cours/fractions (Réparée).json')
-    expect(repairedCopyPath('fractions.json')).toBe('fractions (Réparée).json')
+  it('always produces a .zmap file, even from a path that had no extension', () => {
+    expect(repairedCopyPath('/cours/fractions')).toBe('/cours/fractions (Réparée).zmap')
+    expect(repairedCopyPath('fractions.zmap')).toBe('fractions (Réparée).zmap')
+  })
+
+  it('repairs a legacy .json map into a .zmap copy', () => {
+    // The copy is a brand-new file, so it gets the current format — which is
+    // also how a user migrates a map: open it, repair it, keep the copy.
+    expect(repairedCopyPath('/cours/fractions.json')).toBe('/cours/fractions (Réparée).zmap')
   })
 })
 

@@ -366,7 +366,7 @@ describe('FileTreeRow', () => {
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/structure du fichier est invalide/))
   })
 
-  it('imports every sheet of a picked XMind file as its own .json in the folder, then refreshes it', async () => {
+  it('imports every sheet of a picked XMind file as its own .zmap in the folder, then refreshes it', async () => {
     const user = userEvent.setup()
     vi.mocked(pickXmindFile).mockResolvedValue('/downloads/vieux-cours.xmind')
     vi.mocked(readBinaryFile).mockResolvedValue(new Uint8Array([1]))
@@ -381,10 +381,10 @@ describe('FileTreeRow', () => {
     await user.click(screen.getByRole('button', { name: 'Importer XMind' }))
 
     await waitFor(() => expect(saveMindMap).toHaveBeenCalledTimes(2))
-    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 1.json', [
+    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 1.zmap', [
       { id: 'r1', level: 1, title: 'R1', parentId: null, order: 0 },
     ])
-    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 2.json', [
+    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 2.zmap', [
       { id: 'r2', level: 1, title: 'R2', parentId: null, order: 0 },
     ])
     expect(scanFolder).toHaveBeenCalledWith('/cours')

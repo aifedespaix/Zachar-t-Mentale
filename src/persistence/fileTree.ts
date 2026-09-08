@@ -1,5 +1,6 @@
 import { readDir } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
+import { isMindMapPath } from './paths'
 import type { FileTreeNode } from '../types/workspace'
 
 export async function scanFolder(folderPath: string): Promise<FileTreeNode[]> {
@@ -10,7 +11,7 @@ export async function scanFolder(folderPath: string): Promise<FileTreeNode[]> {
       if (entry.isDirectory) {
         return { type: 'folder', name: entry.name, path, children: await scanFolder(path) }
       }
-      if (entry.name.toLowerCase().endsWith('.json')) {
+      if (isMindMapPath(entry.name)) {
         return { type: 'mindmap', name: entry.name, path }
       }
       return { type: 'other', name: entry.name, path }

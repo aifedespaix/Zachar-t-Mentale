@@ -31,7 +31,15 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "fileAssociations": [
+      {
+        "ext": ["zmap"],
+        "name": "ZachartMentale.MindMap",
+        "description": "Carte mentale Zachar’t Mentale",
+        "role": "Editor"
+      }
+    ]
   },
   "plugins": {
     "updater": {

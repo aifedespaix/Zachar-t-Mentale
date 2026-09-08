@@ -13,13 +13,19 @@ function entry(name: string, isDirectory = false) {
 }
 
 describe('scanFolder', () => {
-  it('classifies .json files as mindmap nodes and other files as other nodes', async () => {
-    vi.mocked(readDir).mockResolvedValueOnce([entry('chapitre.json'), entry('notes.pdf')])
+  it('classifies mind maps as mindmap nodes and other files as other nodes', async () => {
+    vi.mocked(readDir).mockResolvedValueOnce([entry('chapitre.zmap'), entry('notes.pdf')])
     const tree = await scanFolder('/cours')
     expect(tree).toEqual([
-      { type: 'mindmap', name: 'chapitre.json', path: '/cours/chapitre.json' },
+      { type: 'mindmap', name: 'chapitre.zmap', path: '/cours/chapitre.zmap' },
       { type: 'other', name: 'notes.pdf', path: '/cours/notes.pdf' },
     ])
+  })
+
+  it('still lists maps written before .zmap existed, so no course disappears from the tree', async () => {
+    vi.mocked(readDir).mockResolvedValueOnce([entry('chapitre.json')])
+    const tree = await scanFolder('/cours')
+    expect(tree[0].type).toBe('mindmap')
   })
 
   it('recurses into subfolders', async () => {
@@ -46,7 +52,7 @@ describe('scanFolder', () => {
   })
 
   it('treats file extensions case-insensitively', async () => {
-    vi.mocked(readDir).mockResolvedValueOnce([entry('Chapitre.JSON')])
+    vi.mocked(readDir).mockResolvedValueOnce([entry('Chapitre.ZMAP')])
     const tree = await scanFolder('/cours')
     expect(tree[0].type).toBe('mindmap')
   })
