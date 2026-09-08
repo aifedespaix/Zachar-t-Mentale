@@ -223,10 +223,10 @@ it('pushes exactly one undo entry per content change', () => { /* … */ })
 **Interfaces:**
 - Produces: `renderMathToHtml(latex: string, display: boolean): string` — `katex.renderToString` with `throwOnError: false` and the mhchem extension loaded, so `\ce{2H2 + O2 -> 2H2O}` works.
 
-- [ ] **Step 1: Write the failing tests** — a formula produces markup containing `katex`; an invalid formula returns markup rather than throwing; `\ce{H2O}` renders (mhchem is wired).
-- [ ] **Step 2: Implement** — `import 'katex/contrib/mhchem'` after the katex import; the CSS import goes in `src/index.css`, **never** a CDN `<link>` (Global Constraints).
-- [ ] **Step 3: Verify** — `npx vitest run src/content/renderMath.test.ts`
-- [ ] **Step 4: Commit** — `feat(content): render math with KaTeX and mhchem`
+- [x] **Step 1: Write the failing tests** — a formula produces markup containing `katex`; an invalid formula returns markup rather than throwing; `\ce{H2O}` renders (mhchem is wired).
+- [x] **Step 2: Implement** — `import 'katex/contrib/mhchem'` after the katex import; the CSS import goes in `src/index.css`, **never** a CDN `<link>` (Global Constraints).
+- [x] **Step 3: Verify** — `npx vitest run src/content/renderMath.test.ts`
+- [x] **Step 4: Commit** — `feat(content): render math with KaTeX and mhchem`
 
 ---
 
@@ -241,7 +241,7 @@ it('pushes exactly one undo entry per content change', () => { /* … */ })
 - Produces: `BlockView({ blocks, resolveAsset }: { blocks: CardBlock[]; resolveAsset: (asset: string) => string })`.
 - Consumed by: Task 6 (popover), Task 12 (`StaticCardView`). **This component is the seam that keeps the screen and the PDF identical** — neither caller may render blocks itself.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 it('reserves an image box from the stored dimensions, before any load event', () => {
@@ -258,9 +258,9 @@ it('shows a named placeholder when an asset cannot be resolved, never an empty b
 })
 ```
 
-- [ ] **Step 2: Implement** — math via `dangerouslySetInnerHTML` on the KaTeX markup (the input is the user's own LaTeX, and KaTeX escapes its output); image with `aspectRatio` and `max-width: 100%`; table as a plain `<table>`.
-- [ ] **Step 3: Verify** — `npx vitest run src/content/BlockView.test.tsx`
-- [ ] **Step 4: Commit** — `feat(content): add the shared read-only block renderer`
+- [x] **Step 2: Implement** — math via `dangerouslySetInnerHTML` on the KaTeX markup (the input is the user's own LaTeX, and KaTeX escapes its output); image with `aspectRatio` and `max-width: 100%`; table as a plain `<table>`.
+- [x] **Step 3: Verify** — `npx vitest run src/content/BlockView.test.tsx`
+- [x] **Step 4: Commit** — `feat(content): add the shared read-only block renderer`
 
 ---
 
