@@ -80,6 +80,11 @@ describe('CardNode', () => {
     expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
   })
 
+  it('renders the title as a multi-line field so a long title wraps onto two lines like the export, instead of scrolling horizontally', () => {
+    renderCardNode(testCard)
+    expect(screen.getByRole('textbox', { name: /titre/i }).tagName).toBe('TEXTAREA')
+  })
+
   it('selects the whole title when the field is focused for the first time', async () => {
     const user = userEvent.setup()
     renderCardNode(testCard)

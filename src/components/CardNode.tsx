@@ -159,7 +159,7 @@ export function CardNode({ data }: CardNodeProps) {
   const descendantCount = useCardsStore(s => s.descendantCount)
   const hasChildren = useCardsStore(s => s.hasChildren)
   const locked = useCardsStore(s => s.locked)
-  const titleInputRef = useRef<HTMLInputElement>(null)
+  const titleInputRef = useRef<HTMLTextAreaElement>(null)
   const [titleFocused, setTitleFocused] = useState(false)
   const [draftTitle, setDraftTitle] = useState(card.title)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -444,9 +444,10 @@ export function CardNode({ data }: CardNodeProps) {
       <FlipCard
         flipped={flipped}
         front={
-          <input
+          <textarea
             ref={titleInputRef}
             aria-label="Titre"
+            rows={2}
             // A quiz auto-locks the mind map (and hides the lock toggle), so
             // `locked` is always true while a recall question is live — a
             // blanket `readOnly={locked}` made recall literally unanswerable.
@@ -459,6 +460,9 @@ export function CardNode({ data }: CardNodeProps) {
             onBlur={isRecallPending ? commitRecallAnswer : commitTitle}
             maxLength={isRecallPending ? card.title.length : undefined}
             onKeyDown={e => {
+              // The title has no manual line breaks — it wraps by width alone,
+              // same as the export's plain block text — so Enter still commits
+              // instead of inserting a newline.
               if (e.key === 'Enter') {
                 e.preventDefault()
                 titleInputRef.current?.blur()
@@ -468,7 +472,9 @@ export function CardNode({ data }: CardNodeProps) {
             style={{
               display: 'block',
               width: '100%',
+              resize: 'none',
               font: 'inherit',
+              lineHeight: 1.2,
               color: 'inherit',
               background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
               border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
