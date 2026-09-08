@@ -13,6 +13,11 @@ type ExportFormat = 'pdf' | 'image' | 'xmind'
 
 export interface ExportDialogProps {
   fileName: string
+  /**
+   * Full path of the map, used to find its asset sidecar. Distinct from
+   * `fileName`, which only names the export file the user is offered.
+   */
+  filePath?: string | null
   cards: Card[]
   open: boolean
   onClose: () => void
@@ -27,7 +32,7 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
   return bytes
 }
 
-export function ExportDialog({ fileName, cards, open, onClose, onError }: ExportDialogProps) {
+export function ExportDialog({ fileName, filePath, cards, open, onClose, onError }: ExportDialogProps) {
   const [format, setFormat] = useState<ExportFormat>('pdf')
   const [showDefinitions, setShowDefinitions] = useState(true)
   const [includeDetached, setIncludeDetached] = useState(false)
@@ -37,7 +42,7 @@ export function ExportDialog({ fileName, cards, open, onClose, onError }: Export
   async function handleExport() {
     setExporting(true)
     try {
-      const options = { showDefinitions, includeDetached }
+      const options = { showDefinitions, includeDetached, mindMapPath: filePath ?? null }
       let saved = false
       if (format === 'pdf') {
         const bytes = await exportToPdfBytes(cards, options)

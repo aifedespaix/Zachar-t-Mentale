@@ -4,7 +4,7 @@ import { Popover as PopoverPrimitive } from 'radix-ui'
 import { AlignLeft } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
 import { BlockView } from '../content/BlockView'
-import { BlockEditor } from '../content/BlockEditor'
+import { BlockEditor, type BlockEditorProps } from '../content/BlockEditor'
 import { Button } from './ui/button'
 
 interface DefinitionPopoverProps {
@@ -12,6 +12,10 @@ interface DefinitionPopoverProps {
   locked: boolean
   onCommit: (blocks: CardBlock[]) => void
   resolveAsset?: (asset: string) => string
+  /** Image capabilities, forwarded verbatim; absent when no file is open. */
+  onInsertImage?: BlockEditorProps['onInsertImage']
+  onPickImage?: BlockEditorProps['onPickImage']
+  onError?: (message: string) => void
 }
 
 /**
@@ -25,7 +29,15 @@ interface DefinitionPopoverProps {
  * so nothing about the card's own footprint depends on what its definition
  * holds (règles anti-décalage 1 et 2).
  */
-export function DefinitionPopover({ blocks, locked, onCommit, resolveAsset = () => '' }: DefinitionPopoverProps) {
+export function DefinitionPopover({
+  blocks,
+  locked,
+  onCommit,
+  resolveAsset = () => '',
+  onInsertImage,
+  onPickImage,
+  onError,
+}: DefinitionPopoverProps) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<CardBlock[]>(blocks)
@@ -123,7 +135,14 @@ export function DefinitionPopover({ blocks, locked, onCommit, resolveAsset = () 
             )}
           </div>
           {editing ? (
-            <BlockEditor blocks={draft} onChange={setDraft} resolveAsset={resolveAsset} />
+            <BlockEditor
+              blocks={draft}
+              onChange={setDraft}
+              resolveAsset={resolveAsset}
+              onInsertImage={onInsertImage}
+              onPickImage={onPickImage}
+              onError={onError}
+            />
           ) : (
             <div
               onClick={startEditing}

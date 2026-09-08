@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Type, Sigma, Table2, Plus, Trash2 } from 'lucide-react'
+import { Type, Sigma, Table2, Plus, Trash2, ImagePlus } from 'lucide-react'
 import type { CardBlock, CardBlockKind } from '../types/cardBlock'
 import { renderMathToHtml } from './renderMath'
 
@@ -58,9 +58,26 @@ export interface BlockEditorProps {
   blocks: CardBlock[]
   onChange: (blocks: CardBlock[]) => void
   resolveAsset: (asset: string) => string
+  /**
+   * Stores an image and yields the block referencing it, or `undefined` when
+   * there is nowhere to store one (no file open). Absent entirely when the
+   * host cannot handle images at all — the affordances then stay hidden rather
+   * than failing on click.
+   */
+  onInsertImage?: (source: { bytes: Uint8Array; mime: string; name?: string }) => Promise<CardBlock | undefined>
+  /** Opens the native picker; absent when the host offers no picker. */
+  onPickImage?: () => Promise<CardBlock | undefined>
+  onError?: (message: string) => void
 }
 
-export function BlockEditor({ blocks, onChange, resolveAsset }: BlockEditorProps) {
+export function BlockEditor({
+  blocks,
+  onChange,
+  resolveAsset,
+  onInsertImage,
+  onPickImage,
+  onError,
+}: BlockEditorProps) {
   // Which block the header's mode selector acts on. Kept here rather than
   // derived from DOM focus so the selector still shows the right mode while
   // the user is clicking the selector itself (which takes focus away).
@@ -71,13 +88,50 @@ export function BlockEditor({ blocks, onChange, resolveAsset }: BlockEditorProps
     onChange(blocks.map((existing, i) => (i === index ? block : existing)))
   }
 
+  function append(block: CardBlock) {
+    onChange([...blocks, block])
+    setActiveIndex(blocks.length)
+  }
+
+  /** Shared by paste, drop and the picker: one place decides what a failure looks like. */
+  async function insert(produce: () => Promise<CardBlock | undefined>) {
+    try {
+      const block = await produce()
+      if (block !== undefined) append(block)
+    } catch (error) {
+      // Never silent: the user watched a picture not appear and is owed a
+      // reason (usually "too large").
+      onError?.(error instanceof Error ? error.message : 'Impossible d’insérer cette image.')
+    }
+  }
+
+  /**
+   * `Ctrl+V` of an image, anywhere in the editor.
+   *
+   * Only intercepted when the clipboard actually carries a file — a normal
+   * text paste must keep working inside the textareas, so the handler bails
+   * out (without preventing the default) when it finds no image item.
+   */
+  async function handlePaste(event: React.ClipboardEvent) {
+    if (onInsertImage === undefined) return
+    const item = [...(event.clipboardData?.items ?? [])].find(entry => entry.type.startsWith('image/'))
+    if (item === undefined) return
+    const file = item.getAsFile()
+    if (file === null) return
+
+    event.preventDefault()
+    await insert(async () =>
+      onInsertImage({ bytes: new Uint8Array(await file.arrayBuffer()), mime: file.type, name: file.name })
+    )
+  }
+
   function removeAt(index: number) {
     onChange(blocks.filter((_, i) => i !== index))
     setActiveIndex(current => Math.max(0, current - (index <= current ? 1 : 0)))
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }} onPaste={handlePaste}>
       {/* The selector sits in a row of its own, always present and always the
           same height, so revealing or changing it never moves the content
           below (règle anti-décalage 8). */}
@@ -112,6 +166,28 @@ export function BlockEditor({ blocks, onChange, resolveAsset }: BlockEditorProps
             </button>
           )
         })}
+        {onPickImage !== undefined && (
+          <button
+            type="button"
+            aria-label="Insérer une image"
+            onClick={() => insert(onPickImage)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 3,
+              padding: '2px 6px',
+              fontSize: 11,
+              borderRadius: 4,
+              cursor: 'pointer',
+              border: '1px solid var(--border)',
+              background: 'transparent',
+              color: 'inherit',
+            }}
+          >
+            <ImagePlus size={12} />
+            Image
+          </button>
+        )}
       </div>
 
       {blocks.map((block, index) => (

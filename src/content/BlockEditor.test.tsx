@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { BlockEditor, convertBlock } from './BlockEditor'
@@ -172,5 +172,127 @@ describe('the math field', () => {
   it('does not tear down on a formula KaTeX cannot handle', () => {
     const deep = '\\sqrt{'.repeat(2000) + 'a' + '}'.repeat(2000)
     expect(() => renderEditor([{ kind: 'math', latex: deep }])).not.toThrow()
+  })
+})
+
+describe('inserting an image', () => {
+  function renderWithImages(overrides: {
+    onInsertImage?: (s: { bytes: Uint8Array; mime: string; name?: string }) => Promise<CardBlock | undefined>
+    onPickImage?: () => Promise<CardBlock | undefined>
+    onError?: (m: string) => void
+  }) {
+    const onState = vi.fn()
+    function Host() {
+      const [blocks, setBlocks] = useState<CardBlock[]>([{ kind: 'text', text: 'Une règle' }])
+      return (
+        <BlockEditor
+          blocks={blocks}
+          onChange={next => {
+            setBlocks(next)
+            onState(next)
+          }}
+          resolveAsset={a => `/a/${a}`}
+          {...overrides}
+        />
+      )
+    }
+    render(<Host />)
+    const latest = () => {
+      const calls = onState.mock.calls
+      return calls.length === 0 ? undefined : (calls[calls.length - 1][0] as CardBlock[])
+    }
+    return { latest }
+  }
+
+  const block: CardBlock = { kind: 'image', asset: 'a1.png', alt: 'Schéma', width: 200, height: 100 }
+
+  it('appends the block the picker produced, keeping what was already there', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderWithImages({ onPickImage: async () => block })
+
+    await user.click(screen.getByRole('button', { name: /insérer une image/i }))
+
+    expect(latest()).toEqual([{ kind: 'text', text: 'Une règle' }, block])
+  })
+
+  it('inserts nothing when the picker is cancelled', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderWithImages({ onPickImage: async () => undefined })
+
+    await user.click(screen.getByRole('button', { name: /insérer une image/i }))
+
+    expect(latest()).toBeUndefined()
+  })
+
+  it('reports a storage failure instead of failing silently', async () => {
+    const user = userEvent.setup()
+    const onError = vi.fn()
+    renderWithImages({
+      onPickImage: async () => {
+        throw new Error('Image trop volumineuse')
+      },
+      onError,
+    })
+
+    await user.click(screen.getByRole('button', { name: /insérer une image/i }))
+
+    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/volumineuse/))
+  })
+
+  it('hides the affordance entirely when the host cannot store images', () => {
+    renderWithImages({})
+    expect(screen.queryByRole('button', { name: /insérer une image/i })).not.toBeInTheDocument()
+  })
+
+  it('inserts an image pasted into the editor', async () => {
+    const onInsertImage = vi.fn(async () => block)
+    const { latest } = renderWithImages({ onInsertImage })
+
+    const file = new File([new Uint8Array([1, 2, 3])], 'capture.png', { type: 'image/png' })
+    fireEvent.paste(screen.getByRole('textbox', { name: /texte du bloc 1/i }), {
+      clipboardData: {
+        items: [{ type: 'image/png', getAsFile: () => file }],
+      },
+    })
+
+    await waitFor(() => expect(latest()).toEqual([{ kind: 'text', text: 'Une règle' }, block]))
+  })
+
+  it('leaves an ordinary text paste alone', async () => {
+    const onInsertImage = vi.fn()
+    const { latest } = renderWithImages({ onInsertImage })
+
+    fireEvent.paste(screen.getByRole('textbox', { name: /texte du bloc 1/i }), {
+      clipboardData: { items: [{ type: 'text/plain', getAsFile: () => null }] },
+    })
+
+    expect(onInsertImage).not.toHaveBeenCalled()
+    expect(latest()).toBeUndefined()
+  })
+
+  it('lets the description of an image block be edited', async () => {
+    const user = userEvent.setup()
+    const onState = vi.fn()
+    function Host() {
+      const [blocks, setBlocks] = useState<CardBlock[]>([block])
+      return (
+        <BlockEditor
+          blocks={blocks}
+          onChange={next => {
+            setBlocks(next)
+            onState(next)
+          }}
+          resolveAsset={a => `/a/${a}`}
+        />
+      )
+    }
+    render(<Host />)
+
+    const field = screen.getByRole('textbox', { name: /description de l’image/i })
+    await user.clear(field)
+    await user.type(field, 'Cycle de l’eau')
+
+    const calls = onState.mock.calls
+    expect((calls[calls.length - 1][0] as CardBlock[])[0]).toMatchObject({ alt: 'Cycle de l’eau' })
   })
 })

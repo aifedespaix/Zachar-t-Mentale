@@ -22,6 +22,10 @@ import { FlipCard } from './FlipCard'
 import { DefinitionPopover } from './DefinitionPopover'
 import { contentOf } from '../content/blocks'
 import { BlockView } from '../content/BlockView'
+import { imageBlockFrom } from '../content/imageBlock'
+import { pickImageFile } from '../content/pickImage'
+import { assetSrc } from '../persistence/assets'
+import { useWorkspaceStore } from '../state/useWorkspaceStore'
 
 interface QuizData {
   type: QuizQuestionType
@@ -144,6 +148,8 @@ export function CardNode({ data }: CardNodeProps) {
   const updateDefinition = useCardsStore(s => s.updateDefinition)
   const updateContent = useCardsStore(s => s.updateContent)
   const allCards = useCardsStore(s => s.history.present)
+  const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
+  const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const addChild = useCardsStore(s => s.addChild)
   const addSibling = useCardsStore(s => s.addSibling)
   const deleteCard = useCardsStore(s => s.deleteCard)
@@ -588,6 +594,22 @@ export function CardNode({ data }: CardNodeProps) {
               blocks={contentOf(card)}
               locked={locked}
               onCommit={blocks => updateContent(card.id, blocks)}
+              // Assets live in a sidecar named after the open file, so every
+              // image capability is gated on there being one. With no file
+              // open the affordances stay hidden rather than failing on click.
+              resolveAsset={currentFilePath ? asset => assetSrc(currentFilePath, asset) : undefined}
+              onInsertImage={
+                currentFilePath ? source => imageBlockFrom(currentFilePath, source) : undefined
+              }
+              onPickImage={
+                currentFilePath
+                  ? async () => {
+                      const source = await pickImageFile()
+                      return source === null ? undefined : imageBlockFrom(currentFilePath, source)
+                    }
+                  : undefined
+              }
+              onError={setWorkspaceError}
             />
           ) : (
             <Tooltip>

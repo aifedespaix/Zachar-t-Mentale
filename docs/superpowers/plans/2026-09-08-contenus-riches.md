@@ -341,10 +341,10 @@ it('does not resize the card when a definition gains a formula', () => { /* règ
   - `readAssetBytes(mindMapPath: string, asset: string): Promise<Uint8Array>`
   - `assetSrc(mindMapPath: string, asset: string): string` — `convertFileSrc` for live display
 
-- [ ] **Step 1: Write the failing tests** — `sidecarDirOf` on both separators; the same bytes twice yield the same name and one write; a name is never an absolute path.
-- [ ] **Step 2: Implement** — `crypto.subtle.digest('SHA-256', bytes)`; downscale beyond ~1600 px and refuse beyond ~10 Mo, with a message (spec: garde-fous).
-- [ ] **Step 3: Verify** — `npx vitest run src/persistence/assets.test.ts`
-- [ ] **Step 4: Commit** — `feat(persistence): store card images in a sidecar folder, content-addressed`
+- [x] **Step 1: Write the failing tests** — `sidecarDirOf` on both separators; the same bytes twice yield the same name and one write; a name is never an absolute path.
+- [x] **Step 2: Implement** — `crypto.subtle.digest('SHA-256', bytes)`; downscale beyond ~1600 px and refuse beyond ~10 Mo, with a message (spec: garde-fous).
+- [x] **Step 3: Verify** — `npx vitest run src/persistence/assets.test.ts`
+- [x] **Step 4: Commit** — `feat(persistence): store card images in a sidecar folder, content-addressed`
 
 ---
 
@@ -359,10 +359,10 @@ it('does not resize the card when a definition gains a formula', () => { /* règ
 **Interfaces:**
 - Produces: `useImageInsertion({ onInsert })` covering paste, drop and picker.
 
-- [ ] **Step 1: Write the failing tests** — `Ctrl+V` with an image item inserts a block carrying the decoded `width`/`height`; a dropped `.png` inserts, a dropped `.json` still opens the map; the picker filters to image extensions.
-- [ ] **Step 2: Implement** — **the DOM `drop` event never fires under Tauri** (`useFileDropZone.ts` header comment): reuse its window-level event and its physical→logical pixel conversion. When a popover is open it wins the drop over the canvas (spec, drag & drop, conséquence 2). Paste reads `clipboardData.items`; the `@tauri-apps/plugin-clipboard-manager` fallback is **deferred to spike 3** — do not add the dependency until that spike says the webview path is insufficient.
-- [ ] **Step 3: Verify** — `npx vitest run src/hooks/`
-- [ ] **Step 4: Commit** — `feat(content): insert images by paste, drop, or file picker`
+- [x] **Step 1: Write the failing tests** — `Ctrl+V` with an image item inserts a block carrying the decoded `width`/`height`; a dropped `.png` inserts, a dropped `.json` still opens the map; the picker filters to image extensions.
+- [x] **Step 2: Implement** — **the DOM `drop` event never fires under Tauri** (`useFileDropZone.ts` header comment): reuse its window-level event and its physical→logical pixel conversion. When a popover is open it wins the drop over the canvas (spec, drag & drop, conséquence 2). Paste reads `clipboardData.items`; the `@tauri-apps/plugin-clipboard-manager` fallback is **deferred to spike 3** — do not add the dependency until that spike says the webview path is insufficient.
+- [x] **Step 3: Verify** — `npx vitest run src/hooks/`
+- [x] **Step 4: Commit** — `feat(content): insert images by paste, drop, or file picker`
 
 ---
 
@@ -375,10 +375,10 @@ it('does not resize the card when a definition gains a formula', () => { /* règ
 **Interfaces:**
 - `renamePath` and `deletePath` carry the sidecar folder with the `.json`.
 
-- [ ] **Step 1: Write the failing tests** — renaming `chapitre.json` renames `chapitre.assets`; deleting removes both; a map with no sidecar is unaffected; a rename whose sidecar is missing still succeeds.
-- [ ] **Step 2: Implement** — best-effort on the sidecar: a failure to move it must not lose the `.json` rename that already succeeded; surface it through the existing `setWorkspaceError` channel.
-- [ ] **Step 3: Verify** — `npx vitest run src/persistence/fileOps.test.ts`
-- [ ] **Step 4: Commit** — `fix(persistence): carry the asset sidecar through rename and delete`
+- [x] **Step 1: Write the failing tests** — renaming `chapitre.json` renames `chapitre.assets`; deleting removes both; a map with no sidecar is unaffected; a rename whose sidecar is missing still succeeds.
+- [x] **Step 2: Implement** — best-effort on the sidecar: a failure to move it must not lose the `.json` rename that already succeeded; surface it through the existing `setWorkspaceError` channel.
+- [x] **Step 3: Verify** — `npx vitest run src/persistence/fileOps.test.ts`
+- [x] **Step 4: Commit** — `fix(persistence): carry the asset sidecar through rename and delete`
 
 ---
 
@@ -426,7 +426,7 @@ it('reports a readable message when toPng rejects with an Event rather than an E
 })
 ```
 
-- [x] **Step 2: Implement** — volets 1 et 2 faits ; le volet 3 (inlining des assets) attend la tâche 8, qui crée les assets
+- [x] **Step 2: Implement** — les trois volets sont faits
 
 Three things, in this order:
 1. `StaticCardView` renders `contentOf(card)` through `BlockView`, resolving assets from the inlined map.
@@ -441,13 +441,14 @@ Also normalize the `catch` in `ExportDialog`: `toPng` rejects with an `Event`, n
 ---
 
 
-> **État : partiel.** Les blocs sont rendus par `BlockView` (donc écran et PDF
+> **État : complet.** Les blocs sont rendus par `BlockView` (donc écran et PDF
 > ne peuvent plus diverger) et la hauteur est plafonnée à
 > `EXPORT_CARD_MAX_HEIGHT = ROW_HEIGHT - 16`, ce qui rend le chevauchement
 > impossible et garde le budget de pagination en feuilles valide —
 > `computeLayout` et `paginateForExport` restent intouchés, comme prévu.
-> `resolveAsset` traverse déjà `ExportPageRenderer` : le volet 3 n'aura plus
-> qu'à lui fournir une table de data URI.
+> `inlineAssets` fournit la table de data URI avant toute capture, et un asset
+> illisible est simplement absent de la table : `BlockView` affiche alors son
+> placeholder nommé, ce qui vaut infiniment mieux qu'un export qui lève.
 >
 > **Limite connue** : un contenu plus haut que le plafond est rogné sans
 > indicateur visuel. C'est le compromis assumé d'un export « vue d'ensemble » ;
