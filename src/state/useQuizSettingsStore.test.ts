@@ -21,7 +21,7 @@ describe('useQuizSettingsStore', () => {
   })
 
   it('init loads persisted settings into the store', async () => {
-    vi.mocked(loadQuizSettings).mockResolvedValue({ similarityThreshold: 90, lengthGuideEnabled: false })
+    vi.mocked(loadQuizSettings).mockResolvedValue({ similarityThreshold: 90, lengthGuideEnabled: false, liveLetterFeedback: false })
     const store = createQuizSettingsStore()
 
     await store.getState().init()
@@ -57,7 +57,7 @@ describe('useQuizSettingsStore', () => {
     await store.getState().setSimilarityThreshold(80)
 
     expect(store.getState().similarityThreshold).toBe(80)
-    expect(saveQuizSettings).toHaveBeenCalledWith({ similarityThreshold: 80, lengthGuideEnabled: true })
+    expect(saveQuizSettings).toHaveBeenCalledWith({ similarityThreshold: 80, lengthGuideEnabled: true, liveLetterFeedback: false })
   })
 
   it('setLengthGuideEnabled updates the store and persists both fields', async () => {
@@ -66,6 +66,6 @@ describe('useQuizSettingsStore', () => {
     await store.getState().setLengthGuideEnabled(false)
 
     expect(store.getState().lengthGuideEnabled).toBe(false)
-    expect(saveQuizSettings).toHaveBeenCalledWith({ similarityThreshold: 100, lengthGuideEnabled: false })
+    expect(saveQuizSettings).toHaveBeenCalledWith({ similarityThreshold: 100, lengthGuideEnabled: false, liveLetterFeedback: false })
   })
 })

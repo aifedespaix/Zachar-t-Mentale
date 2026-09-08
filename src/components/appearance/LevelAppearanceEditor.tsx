@@ -1,8 +1,7 @@
 import { oklchWcagContrast, toCss } from '../../colors/contrast'
 import type { Oklch } from '../../colors/contrast'
-import type { LevelColor } from '../../colors/levelColors'
 import type { CardLevel } from '../../types/card'
-import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
+import type { LevelAppearance } from '../../types/appearanceSettings'
 import { OklchSliderGroup } from './OklchSliderGroup'
 
 const THEME_LABELS = { light: 'Clair', dark: 'Sombre' } as const
@@ -10,13 +9,21 @@ const PART_LABELS = { bg: 'Fond', border: 'Bordure', text: 'Texte' } as const
 
 interface LevelAppearanceEditorProps {
   level: CardLevel
+  appearance: LevelAppearance
+  onChange: (next: LevelAppearance) => void
 }
 
-export function LevelAppearanceEditor({ level }: LevelAppearanceEditorProps) {
-  const appearance = useAppearanceSettingsStore(s => s.levels[level])
-  const setLevelLabel = useAppearanceSettingsStore(s => s.setLevelLabel)
-  const setLevelColor = useAppearanceSettingsStore(s => s.setLevelColor)
-
+/**
+ * Controlled: the level's appearance and the callback come from the settings
+ * dialog, which holds the whole draft, rather than being read and written
+ * straight through to the store.
+ *
+ * That is what makes "Annuler" possible. An editor that wrote to the store on
+ * every slider tick would have persisted each intermediate colour to disk, and
+ * there would be nothing left to revert TO — the dialog snapshots the settings
+ * once, on open, and every edit here is a preview until "Enregistrer".
+ */
+export function LevelAppearanceEditor({ level, appearance, onChange }: LevelAppearanceEditorProps) {
   return (
     <fieldset style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
       <legend style={{ fontSize: 12, fontWeight: 700, padding: '0 4px' }}>Niveau {level}</legend>
@@ -26,7 +33,7 @@ export function LevelAppearanceEditor({ level }: LevelAppearanceEditorProps) {
         <input
           type="text"
           value={appearance.label}
-          onChange={e => setLevelLabel(level, e.target.value)}
+          onChange={e => onChange({ ...appearance, label: e.target.value })}
           style={{ width: '100%', padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)' }}
         />
       </label>
@@ -55,10 +62,12 @@ export function LevelAppearanceEditor({ level }: LevelAppearanceEditorProps) {
                 key={part}
                 label={`${THEME_LABELS[theme]} — ${PART_LABELS[part]}`}
                 value={color[part]}
-                onChange={(next: Oklch) => {
-                  const patch: Partial<LevelColor> = { [part]: next }
-                  setLevelColor(level, theme, patch)
-                }}
+                onChange={(next: Oklch) =>
+                  onChange({
+                    ...appearance,
+                    color: { ...appearance.color, [theme]: { ...color, [part]: next } },
+                  })
+                }
               />
             ))}
 

@@ -7,6 +7,9 @@ import { useCardsStore, createCardsStore } from '../state/useCardsStore'
 import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
+import { EMPTY_RECALL_PROGRESS } from '../types/quiz'
+import { useQuizSettingsStore } from '../state/useQuizSettingsStore'
+import { DEFAULT_QUIZ_SETTINGS } from '../types/quizSettings'
 
 type QuizData = {
   type: QuizQuestionType
@@ -72,8 +75,26 @@ function resetStore(cards: Card[]) {
   useCardsStore.getState().loadCards(cards)
 }
 
+/** Same idea for the quiz singleton, which CardNode now reads directly. */
+function resetQuizStore() {
+  const pristine = createQuizStore().getState()
+  useQuizStore.setState({
+    active: pristine.active,
+    showSummary: pristine.showSummary,
+    config: pristine.config,
+    questions: pristine.questions,
+    results: pristine.results,
+    recallProgress: pristine.recallProgress,
+    wasLockedBeforeQuiz: pristine.wasLockedBeforeQuiz,
+  })
+}
+
 describe('CardNode', () => {
-  beforeEach(() => resetStore([testCard]))
+  beforeEach(() => {
+    resetStore([testCard])
+    resetQuizStore()
+    useQuizSettingsStore.setState(DEFAULT_QUIZ_SETTINGS)
+  })
 
   it('displays the card title in an always-present field (no click needed to reveal it)', () => {
     renderCardNode(testCard)
@@ -426,18 +447,101 @@ describe('CardNode drag handle', () => {
   })
 })
 
+describe('CardNode mnemonic icon', () => {
+  const cardWithIcon: Card = { ...testCard, icon: 'Brain' }
+
+  beforeEach(() => {
+    resetStore([testCard])
+    resetQuizStore()
+  })
+
+  it('offers an empty icon slot on a card that has none', () => {
+    renderCardNode(testCard)
+    expect(screen.getByRole('button', { name: 'Ajouter une icône' })).toBeInTheDocument()
+    expect(screen.getByTestId('card-icon-badge')).not.toHaveAttribute('data-icon')
+  })
+
+  it('shows the card’s icon, and offers to change it', () => {
+    renderCardNode(cardWithIcon)
+    expect(screen.getByTestId('card-icon-badge')).toHaveAttribute('data-icon', 'Brain')
+    expect(screen.getByRole('button', { name: 'Changer l’icône' })).toBeInTheDocument()
+  })
+
+  it('renders nothing at all for an icon name it does not know', () => {
+    // A card written by a later version of the app, or hand-edited: the name
+    // is unusable, the card still renders.
+    renderCardNode({ ...testCard, icon: 'PasUneIcone' })
+    expect(screen.getByTestId('card-icon-badge')).not.toHaveAttribute('data-icon')
+  })
+
+  it('picks an icon from the dialog and stores it on the card', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard)
+
+    await user.click(screen.getByRole('button', { name: 'Ajouter une icône' }))
+    await user.type(screen.getByRole('searchbox', { name: 'Rechercher une icône' }), 'cerveau')
+    await user.click(await screen.findByRole('option', { name: 'brain' }))
+
+    expect(useCardsStore.getState().history.present[0].icon).toBe('Brain')
+    // The choice closes the dialog: there is nothing else to do in it.
+    expect(screen.queryByText('Choisir une icône')).not.toBeInTheDocument()
+  })
+
+  it('removes the icon from the dialog, leaving no key behind', async () => {
+    const user = userEvent.setup()
+    resetStore([cardWithIcon])
+    renderCardNode(cardWithIcon)
+
+    await user.click(screen.getByRole('button', { name: 'Changer l’icône' }))
+    await user.click(screen.getByRole('button', { name: 'Retirer l’icône' }))
+
+    expect('icon' in useCardsStore.getState().history.present[0]).toBe(false)
+  })
+
+  it('offers nothing to remove on a card that has no icon', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard)
+
+    await user.click(screen.getByRole('button', { name: 'Ajouter une icône' }))
+
+    expect(screen.queryByRole('button', { name: 'Retirer l’icône' })).not.toBeInTheDocument()
+  })
+
+  it('keeps showing the icon on a locked map, but not as a button', () => {
+    resetStore([cardWithIcon])
+    useCardsStore.getState().toggleLock()
+    renderCardNode(cardWithIcon)
+
+    // The picture is the memory hook the card exists for — it stays. Changing
+    // it is an edit, and the map is locked.
+    expect(screen.getByTestId('card-icon-badge')).toHaveAttribute('data-icon', 'Brain')
+    expect(screen.queryByRole('button', { name: 'Changer l’icône' })).not.toBeInTheDocument()
+  })
+
+  it('drops the empty slot entirely on a locked map', () => {
+    useCardsStore.getState().toggleLock()
+    renderCardNode(testCard)
+    expect(screen.queryByTestId('card-icon-badge')).not.toBeInTheDocument()
+  })
+
+  it('keeps the icon during a quiz, without the button', () => {
+    resetStore([cardWithIcon])
+    useQuizStore.setState({ active: true })
+    renderCardNode(cardWithIcon)
+
+    expect(screen.getByTestId('card-icon-badge')).toHaveAttribute('data-icon', 'Brain')
+    expect(screen.queryByRole('button', { name: 'Changer l’icône' })).not.toBeInTheDocument()
+  })
+})
+
 describe('CardNode footer', () => {
   beforeEach(() => {
     resetStore([testCard])
-    const pristineQuiz = createQuizStore().getState()
-    useQuizStore.setState({
-      active: pristineQuiz.active,
-      showSummary: pristineQuiz.showSummary,
-      config: pristineQuiz.config,
-      questions: pristineQuiz.questions,
-      results: pristineQuiz.results,
-      wasLockedBeforeQuiz: pristineQuiz.wasLockedBeforeQuiz,
-    })
+    resetQuizStore()
+    useQuizSettingsStore.setState(DEFAULT_QUIZ_SETTINGS)
+    // Pinned to the hardest level so the masks below are exact: it concedes
+    // the first letter and nothing else.
+    useQuizStore.setState({ config: { levels: [1, 2, 3, 4], difficulty: 'difficile', qcmMode: false } })
   })
 
   it('shows an "add definition" affordance when there is none yet', () => {
@@ -462,45 +566,57 @@ describe('CardNode footer', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Retourner')
   })
 
-  it('masks the title while a quiz recall question on this card is unanswered', () => {
+  it('replaces the title field with the shape of the answer while a recall question is pending', () => {
     renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
 
-    expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveValue('Titre initial')
+    // No editable field at all: the answer belongs in the answer dialog, and a
+    // text box on the card only invited typing that would never be graded.
+    expect(screen.queryByRole('textbox', { name: /titre/i })).not.toBeInTheDocument()
+    // "Titre initial", with the first letter conceded by the default difficulty.
+    expect(screen.getByTestId('quiz-title')).toHaveTextContent('T____ _______')
   })
 
-  it('masks the title on the card itself while a qcm-title question is unanswered (answering happens via the dialog, not by reading the card)', () => {
+  it('gives no length hint for a qcm-title question — it would narrow the four options', () => {
     renderCardNode(testCard, false, false, {
       type: 'qcm-title',
       result: 'unanswered',
       distractorTitles: ['Autre titre'],
     })
 
-    expect(screen.getByRole('textbox', { name: /titre/i })).not.toHaveValue(testCard.title)
+    expect(screen.getByTestId('quiz-title')).toHaveTextContent('? ? ?')
+    expect(screen.getByTestId('quiz-title')).not.toHaveTextContent('_')
   })
 
-  it('keeps the title hidden even when a masked qcm-title field is focused', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard, false, false, {
-      type: 'qcm-title',
+  it('shows the real title for a qcm-definition question, since the title IS the question', () => {
+    renderCardNode(cardWithDefinition, false, false, {
+      type: 'qcm-definition',
       result: 'unanswered',
-      distractorTitles: ['Autre titre'],
+      distractorDefinitions: ['Une autre définition'],
     })
 
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-
-    expect(input).not.toHaveValue(testCard.title)
-    expect(useCardsStore.getState().history.present[0].title).toBe(testCard.title)
+    expect(screen.getByTestId('quiz-title')).toHaveTextContent('Titre initial')
   })
 
-  it('shows no length guide for a qcm-title question (it would narrow the four options)', () => {
-    renderCardNode(testCard, false, false, {
-      type: 'qcm-title',
-      result: 'unanswered',
-      distractorTitles: ['Autre titre'],
-    })
+  it('reveals the title once the question has been answered', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'correct' })
+    expect(screen.getByTestId('quiz-title')).toHaveTextContent('Titre initial')
+  })
 
-    expect(screen.queryByText('_____ _______')).not.toBeInTheDocument()
+  it('hides the blank when the length guide is switched off', () => {
+    useQuizSettingsStore.setState({ lengthGuideEnabled: false })
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    expect(screen.getByTestId('quiz-title')).toHaveTextContent('? ? ?')
+  })
+
+  it('widens the blank as failed attempts buy more letters', () => {
+    useQuizStore.setState({
+      recallProgress: { [testCard.id]: { ...EMPTY_RECALL_PROGRESS, attempts: 2, extraReveals: 2 } },
+    })
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    // Two more letters have been conceded since the first attempt.
+    expect(screen.getByTestId('quiz-title')?.textContent?.replace(/[^_]/g, '').length).toBe(9)
   })
 
   it('does not mask the title when no quiz question applies to this card', () => {
@@ -509,128 +625,111 @@ describe('CardNode footer', () => {
     expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue('Titre initial')
   })
 
-  it('opens the title for typing when a masked (pending recall) title is clicked, with an empty draft', async () => {
-    const user = userEvent.setup()
+  it('puts a Répondre button on a card that is waiting for an answer', () => {
     renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-
-    expect(input).toHaveValue('')
+    expect(screen.getByTestId('answer-button')).toHaveTextContent('Répondre')
   })
 
-  it('grades an exact typed answer as correct and reveals the real title', async () => {
+  it('drops the Répondre button once the card has been answered', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'correct' })
+    expect(screen.queryByTestId('answer-button')).not.toBeInTheDocument()
+  })
+
+  it('marks an answered card with its verdict, not only with a border colour', () => {
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'incorrect' })
+    expect(screen.getByLabelText('Mauvaise réponse')).toBeInTheDocument()
+  })
+
+  it('hides the whole editing toolbar while a quiz is running, on every card', () => {
+    useQuizStore.setState({ active: true })
+    renderCardNode(testCard)
+
+    expect(screen.queryByRole('button', { name: /supprimer/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /retourner/i })).not.toBeInTheDocument()
+  })
+
+  it('opens the answer dialog from the Répondre button', async () => {
     const user = userEvent.setup()
     renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
 
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-    await user.type(input, `${testCard.title}{Enter}`)
+    await user.click(screen.getByTestId('answer-button'))
+
+    expect(screen.getByRole('heading', { name: /retrouve le titre/i })).toBeInTheDocument()
+  })
+
+  it('opens the answer dialog by clicking the card itself', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    await user.click(screen.getByTestId('quiz-title'))
+
+    expect(screen.getByRole('heading', { name: /retrouve le titre/i })).toBeInTheDocument()
+  })
+
+  it('opens the multiple-choice dialog for a qcm-title question instead', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, {
+      type: 'qcm-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+    })
+
+    await user.click(screen.getByTestId('answer-button'))
+
+    expect(screen.getByRole('heading', { name: /quel est le titre/i })).toBeInTheDocument()
+  })
+
+  it('grades an answer typed in the recall dialog', async () => {
+    const user = userEvent.setup()
+    useQuizStore.setState({ results: { [testCard.id]: 'unanswered' }, recallProgress: {} })
+    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
+
+    await user.click(screen.getByTestId('answer-button'))
+    await user.type(screen.getByLabelText('Réponse'), 'itreinitial')
+    await user.click(screen.getByRole('button', { name: 'Valider' }))
 
     expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
-    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveValue(testCard.title)
   })
 
-  // startQuiz auto-locks the mind map and App hides the lock toggle for the
-  // duration, so `locked` is ALWAYS true while a recall question is live. A
-  // blanket `readOnly={locked}` therefore made recall unanswerable in the real
-  // app even though every other recall test (which renders unlocked) passed.
-  it('lets the user type an answer even while the mind map is locked (as it always is during an active quiz)', async () => {
+  it('keeps a missed card open, with one more letter, instead of grading it wrong', async () => {
     const user = userEvent.setup()
-    useCardsStore.setState({ locked: true })
+    useQuizStore.setState({
+      results: { [testCard.id]: 'unanswered' },
+      recallProgress: { [testCard.id]: { ...EMPTY_RECALL_PROGRESS } },
+    })
     renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
 
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-    await user.type(input, `${testCard.title}{Enter}`)
+    await user.click(screen.getByTestId('answer-button'))
+    await user.type(screen.getByLabelText('Réponse'), 'otalementfaux')
+    await user.click(screen.getByRole('button', { name: 'Valider' }))
 
-    expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
+    expect(useQuizStore.getState().results[testCard.id]).toBe('unanswered')
+    expect(useQuizStore.getState().recallProgress[testCard.id].extraReveals).toBe(1)
   })
 
-  it('grades a wrong typed answer as incorrect', async () => {
+  it('never writes a typed guess back into the card title', async () => {
     const user = userEvent.setup()
+    useQuizStore.setState({ results: { [testCard.id]: 'unanswered' }, recallProgress: {} })
     renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
 
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-    await user.type(input, 'Complètement faux{Enter}')
-
-    expect(useQuizStore.getState().results[testCard.id]).toBe('incorrect')
-  })
-
-  it('never writes the typed guess back into the card title, whatever the grading outcome', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-    await user.type(input, 'Une tentative{Enter}')
+    await user.click(screen.getByTestId('answer-button'))
+    await user.type(screen.getByLabelText('Réponse'), 'unetentative')
+    await user.click(screen.getByRole('button', { name: 'Valider' }))
 
     expect(useCardsStore.getState().history.present[0].title).toBe('Titre initial')
   })
 
-  it('cancels on Escape without grading anything', async () => {
+  it('answers from the dialog even though a quiz always locks the mind map', async () => {
     const user = userEvent.setup()
-    // The real app's `startQuiz` always seeds `results[cardId]` to
-    // 'unanswered' before a recall question is ever drawn; seed it here too
-    // so this test doesn't depend on CardNode itself patching the store.
-    useQuizStore.setState({ results: { [testCard.id]: 'unanswered' } })
+    useCardsStore.setState({ locked: true })
+    useQuizStore.setState({ active: true, results: { [testCard.id]: 'unanswered' }, recallProgress: {} })
     renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
 
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-    await user.type(input, 'Brouillon{Escape}')
+    await user.click(screen.getByTestId('answer-button'))
+    await user.type(screen.getByLabelText('Réponse'), 'itreinitial')
+    await user.click(screen.getByRole('button', { name: 'Valider' }))
 
-    expect(useQuizStore.getState().results[testCard.id]).toBe('unanswered')
-    expect(input).not.toHaveValue(testCard.title)
-  })
-
-  it('does not grade the question if the user focuses and blurs without typing anything', async () => {
-    const user = userEvent.setup()
-    useQuizStore.setState({ results: { [testCard.id]: 'unanswered' } })
-    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-    await user.tab() // blur without typing
-
-    expect(useQuizStore.getState().results[testCard.id]).toBe('unanswered')
-    expect(screen.queryByText(/%/)).not.toBeInTheDocument()
-  })
-
-  it('limits how many characters can be typed to the length of the real title', () => {
-    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-    expect(screen.getByRole('textbox', { name: /titre/i })).toHaveAttribute('maxLength', String(testCard.title.length))
-  })
-
-  it('shows a length-guide row of blanks above the masked title by default', () => {
-    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-    // "Titre initial" -> letters blanked, the space between the two words kept.
-    expect(screen.getByText('_____ _______')).toBeInTheDocument()
-  })
-
-  it('shows a similarity badge when the typed answer is close but not exact', async () => {
-    const user = userEvent.setup()
-    const card: Card = { ...testCard, title: 'Chat' }
-    resetStore([card])
-    renderCardNode(card, false, false, { type: 'recall', result: 'unanswered' })
-
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-    await user.type(input, 'Chah{Enter}')
-
-    expect(screen.getByText(/75%/)).toBeInTheDocument()
-  })
-
-  it('shows no similarity badge for an exact match', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
-
-    const input = screen.getByRole('textbox', { name: /titre/i })
-    await user.click(input)
-    await user.type(input, `${testCard.title}{Enter}`)
-
-    expect(screen.queryByText(/%/)).not.toBeInTheDocument()
+    expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
   })
 
   it('opens an editable field when "add definition" is clicked and commits the typed text on Enter', async () => {

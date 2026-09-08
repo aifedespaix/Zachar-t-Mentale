@@ -41,29 +41,6 @@ describe('useAppearanceSettingsStore', () => {
     expect(store.getState().themeMode).toBe('system')
   })
 
-  it('setLevelLabel updates only the targeted level and persists the full settings', async () => {
-    const store = createAppearanceSettingsStore()
-
-    await store.getState().setLevelLabel(2, 'Chapitre')
-
-    expect(store.getState().levels[2].label).toBe('Chapitre')
-    expect(store.getState().levels[1].label).toBe(DEFAULT_APPEARANCE_SETTINGS.levels[1].label)
-    expect(saveAppearanceSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ levels: expect.objectContaining({ 2: expect.objectContaining({ label: 'Chapitre' }) }) })
-    )
-  })
-
-  it('setLevelColor patches only the targeted theme and field, leaving the rest of the level alone', async () => {
-    const store = createAppearanceSettingsStore()
-
-    await store.getState().setLevelColor(1, 'dark', { border: { l: 0.5, c: 0.1, h: 40 } })
-
-    expect(store.getState().levels[1].color.dark.border).toEqual({ l: 0.5, c: 0.1, h: 40 })
-    expect(store.getState().levels[1].color.dark.bg).toEqual(DEFAULT_APPEARANCE_SETTINGS.levels[1].color.dark.bg)
-    expect(store.getState().levels[1].color.dark.text).toEqual(DEFAULT_APPEARANCE_SETTINGS.levels[1].color.dark.text)
-    expect(store.getState().levels[1].color.light).toEqual(DEFAULT_APPEARANCE_SETTINGS.levels[1].color.light)
-  })
-
   it('setFontFamily updates the store and persists it', async () => {
     const store = createAppearanceSettingsStore()
 

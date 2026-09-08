@@ -226,10 +226,44 @@ describe('computeScore', () => {
     expect(computeScore({ a: 'correct', b: 'incorrect', c: 'correct', d: 'unanswered' })).toEqual({
       correct: 2,
       total: 4,
+      perfect: 2,
+      assisted: 0,
+      incorrect: 1,
+      unanswered: 1,
+      percentage: 50,
     })
   })
 
-  it('returns zero/zero for no results', () => {
-    expect(computeScore({})).toEqual({ correct: 0, total: 0 })
+  it('returns an all-zero score for no results', () => {
+    expect(computeScore({})).toEqual({
+      correct: 0,
+      total: 0,
+      perfect: 0,
+      assisted: 0,
+      incorrect: 0,
+      unanswered: 0,
+      percentage: 0,
+    })
+  })
+
+  it('counts a correct answer with no recorded progress as unaided', () => {
+    // QCM questions have one shot, so they never get a progress entry — and
+    // must not be under-reported as "assisted" because of that absence.
+    const score = computeScore({ a: 'correct' })
+    expect(score.perfect).toBe(1)
+    expect(score.assisted).toBe(0)
+  })
+
+  it('separates answers found unaided from answers found after retries', () => {
+    const score = computeScore(
+      { a: 'correct', b: 'correct', c: 'incorrect' },
+      {
+        a: { attempts: 0, extraReveals: 0, lastTyped: null, lastSimilarity: null, gaveUp: false },
+        b: { attempts: 2, extraReveals: 2, lastTyped: 'presque', lastSimilarity: 80, gaveUp: false },
+        c: { attempts: 0, extraReveals: 0, lastTyped: null, lastSimilarity: null, gaveUp: true },
+      }
+    )
+
+    expect(score).toMatchObject({ correct: 2, perfect: 1, assisted: 1, incorrect: 1, percentage: 67 })
   })
 })

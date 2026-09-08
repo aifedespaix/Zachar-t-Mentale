@@ -1,7 +1,13 @@
 import { render, screen, act, within } from '@testing-library/react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { MindMapCanvas, findNewlyCreatedCardId, overflowWarningMessage, resolveDropTarget } from './MindMapCanvas'
+import {
+  MindMapCanvas,
+  carryMeasured,
+  findNewlyCreatedCardId,
+  overflowWarningMessage,
+  resolveDropTarget,
+} from './MindMapCanvas'
 import { useCardsStore } from '../state/useCardsStore'
 import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
@@ -36,6 +42,60 @@ describe('MindMapCanvas', () => {
   it('renders one edge for the parent-child link', () => {
     const { container } = render(<MindMapCanvas />)
     expect(container.querySelectorAll('.react-flow__edge')).toHaveLength(1)
+  })
+
+  it('still draws the parent-child link after the map is locked', () => {
+    // Locking rebuilds every node (it flips `draggable`), which is where the
+    // links used to jump: a rebuilt node loses its `measured` box and React
+    // Flow re-routes its edges against the 200x92 fallback until the next
+    // measurement lands. jsdom measures every card at exactly that fallback
+    // size, so the routing itself is pinned by `carryMeasured`'s own tests
+    // below; what this covers is the end state — a locked map still has its
+    // links.
+    const { container } = render(<MindMapCanvas />)
+    act(() => useCardsStore.getState().toggleLock())
+    expect(container.querySelectorAll('.react-flow__edge')).toHaveLength(1)
+    act(() => useCardsStore.getState().toggleLock())
+    expect(container.querySelectorAll('.react-flow__edge')).toHaveLength(1)
+  })
+})
+
+describe('carryMeasured', () => {
+  const measured = { width: 240, height: 120 }
+
+  it('carries the measured box of a node that is already on screen', () => {
+    const next = carryMeasured(
+      [{ id: 'a', position: { x: 0, y: 0 }, data: {} }],
+      [{ id: 'a', position: { x: 0, y: 0 }, data: {}, measured, width: 240, height: 120 }]
+    )
+    expect(next[0].measured).toEqual(measured)
+    expect(next[0].width).toBe(240)
+  })
+
+  it('leaves a node React Flow has not measured yet alone', () => {
+    const next = carryMeasured(
+      [{ id: 'a', position: { x: 0, y: 0 }, data: {} }],
+      [{ id: 'a', position: { x: 0, y: 0 }, data: {} }]
+    )
+    expect(next[0].measured).toBeUndefined()
+  })
+
+  it('leaves a brand new node unmeasured, so it gets measured for real', () => {
+    const next = carryMeasured(
+      [{ id: 'nouveau', position: { x: 0, y: 0 }, data: {} }],
+      [{ id: 'a', position: { x: 0, y: 0 }, data: {}, measured }]
+    )
+    expect(next[0].measured).toBeUndefined()
+  })
+
+  it('keeps everything else the rebuild produced', () => {
+    const next = carryMeasured(
+      [{ id: 'a', position: { x: 10, y: 20 }, data: { card: 'nouveau' }, draggable: false }],
+      [{ id: 'a', position: { x: 0, y: 0 }, data: { card: 'ancien' }, draggable: true, measured }]
+    )
+    expect(next[0].position).toEqual({ x: 10, y: 20 })
+    expect(next[0].data).toEqual({ card: 'nouveau' })
+    expect(next[0].draggable).toBe(false)
   })
 })
 
@@ -245,6 +305,7 @@ describe('MindMapCanvas quiz mode', () => {
       config: pristine.config,
       questions: [{ cardId: 'child', type: 'recall' }],
       results: { child: 'unanswered' },
+      recallProgress: pristine.recallProgress,
       wasLockedBeforeQuiz: pristine.wasLockedBeforeQuiz,
     })
   })
@@ -252,10 +313,21 @@ describe('MindMapCanvas quiz mode', () => {
   it('masks only the card that has an active quiz question', () => {
     render(<MindMapCanvas />)
 
+    // The undrawn card keeps its ordinary title field; the drawn one swaps it
+    // for the blank the user has to fill.
     const rootInput = within(screen.getByTestId('card-root')).getByRole('textbox', { name: /titre/i })
-    const childInput = within(screen.getByTestId('card-child')).getByRole('textbox', { name: /titre/i })
     expect(rootInput).toHaveValue('Racine')
-    expect(childInput).not.toHaveValue('Enfant')
+
+    const childTitle = within(screen.getByTestId('card-child')).getByTestId('quiz-title')
+    expect(childTitle).not.toHaveTextContent('Enfant')
+    expect(within(screen.getByTestId('card-child')).queryByRole('textbox', { name: /titre/i })).toBeNull()
+  })
+
+  it('offers a way to answer only on the card that was drawn', () => {
+    render(<MindMapCanvas />)
+
+    expect(within(screen.getByTestId('card-child')).getByTestId('answer-button')).toBeInTheDocument()
+    expect(within(screen.getByTestId('card-root')).queryByTestId('answer-button')).toBeNull()
   })
 })
 

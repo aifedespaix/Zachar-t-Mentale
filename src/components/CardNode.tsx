@@ -1,23 +1,40 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Plus, ArrowRight, GripVertical, AlignLeft, FlipHorizontal2, Unlink, Trash2, type LucideIcon } from 'lucide-react'
+import {
+  Plus,
+  ArrowRight,
+  GripVertical,
+  AlignLeft,
+  FlipHorizontal2,
+  Unlink,
+  Trash2,
+  Check,
+  X,
+  PenLine,
+  ListChecks,
+  Sparkles,
+  type LucideIcon,
+} from 'lucide-react'
 import type { Card, CardLevel } from '../types/card'
 import { isRootCard } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
+import { EMPTY_RECALL_PROGRESS } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
 import { useQuizSettingsStore } from '../state/useQuizSettingsStore'
-import { computeTitleSimilarity, similarityColor } from '../utils/textSimilarity'
-import { buildLengthGuide } from '../utils/lengthGuide'
+import { revealedSet, slotsOf } from '../quiz/blanks'
 import { clampCardLevel, detachedColors } from '../colors/levelColors'
 import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../hooks/useResolvedTheme'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
+import { CardIconBadge } from './CardIconBadge'
+import { IconPickerDialog } from './IconPickerDialog'
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { QcmDialog } from './quiz/QcmDialog'
+import { RecallDialog } from './quiz/RecallDialog'
 import { FlipCard } from './FlipCard'
 import { DefinitionPopover } from './DefinitionPopover'
 import { contentOf } from '../content/blocks'
@@ -108,45 +125,58 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
 
 export function CardNode({ data }: CardNodeProps) {
   const { card, autoEdit = false, isReparentTarget = false, quiz } = data
-  // Narrow, `recall`-only: gates everything about TYPING an answer (the
-  // editable field, grading on blur, the maxLength cap, the length guide).
-  const isRecallPending = quiz?.type === 'recall' && quiz.result === 'unanswered'
-  // Broad: "is the real title supposed to be hidden right now". `qcm-title`
-  // asks the user to pick the title out of four options in the dialog, so
-  // showing it on the card would hand them the answer.
-  const isTitleHidden =
-    quiz !== undefined && (quiz.type === 'recall' || quiz.type === 'qcm-title') && quiz.result === 'unanswered'
   const similarityThreshold = useQuizSettingsStore(s => s.similarityThreshold)
   const lengthGuideEnabled = useQuizSettingsStore(s => s.lengthGuideEnabled)
-  const [recallFeedback, setRecallFeedback] = useState<{ typed: string; similarity: number } | null>(null)
-  // Grading is authoritative the instant `commitRecallAnswer` runs, but the
-  // parent only learns the new result (and re-supplies an updated `quiz`
-  // prop) on ITS next render pass. Gating the mask on the local
-  // `recallFeedback` too (not `isTitleHidden` alone) means the title
-  // reveals immediately, without waiting on that round trip.
-  const displayMasked = isTitleHidden && !recallFeedback
-  // The length guide says how many characters to TYPE — meaningless for a
-  // multiple-choice question, and it would narrow the four options down, so it
-  // stays tied to the recall flow only (never to the broader mask).
-  const showLengthGuide = isRecallPending && !recallFeedback && lengthGuideEnabled
-  const answerRecall = useQuizStore(s => s.answerRecall)
+  const liveLetterFeedback = useQuizSettingsStore(s => s.liveLetterFeedback)
+  // A quiz is on somewhere in the app — true even for cards that were not
+  // drawn. It is what silences the editing chrome map-wide: half the buttons
+  // on an untouched card are noise while the user is meant to be revising.
+  const quizActive = useQuizStore(s => s.active)
+  const quizDifficulty = useQuizStore(s => s.config?.difficulty ?? 'moyen')
+  const recallProgress = useQuizStore(s => s.recallProgress[card.id])
+  const submitRecall = useQuizStore(s => s.submitRecall)
+  const revealRecallAnswer = useQuizStore(s => s.revealRecallAnswer)
   const answerQcmDefinition = useQuizStore(s => s.answerQcmDefinition)
   const answerQcmTitle = useQuizStore(s => s.answerQcmTitle)
-  const [qcmOpen, setQcmOpen] = useState(false)
-  const isQcmPending = (quiz?.type === 'qcm-definition' || quiz?.type === 'qcm-title') && quiz.result === 'unanswered'
+  const [answerOpen, setAnswerOpen] = useState(false)
+
+  // This card was drawn and is still waiting for an answer. Everything about
+  // the card's quiz appearance — the neutral "blank" surface, the call to
+  // action, the masked title — hangs off this one flag.
+  const isPending = quiz !== undefined && quiz.result === 'unanswered'
+  const isRecallPending = quiz?.type === 'recall' && isPending
+  const isQcmPending = (quiz?.type === 'qcm-definition' || quiz?.type === 'qcm-title') && isPending
+  // `qcm-title` asks the user to pick the title out of four options, so showing
+  // it on the card would hand them the answer; `qcm-definition` shows its title
+  // (that IS the question) and hides nothing.
+  const displayMasked = isPending && (quiz?.type === 'recall' || quiz?.type === 'qcm-title')
   const resultBorderColor = quiz?.result === 'correct' ? '#16a34a' : quiz?.result === 'incorrect' ? '#dc2626' : undefined
 
-  // React Flow keeps CardNode mounted for the life of the app (nodes are
-  // keyed by card id, not remounted between quizzes), so feedback from a
-  // PREVIOUS quiz's recall question must not leak into a later one drawing
-  // the same card again.
+  // The shape of the answer, drawn on the card itself: same letters as the
+  // answer dialog will show, so the card is a genuine preview of the question
+  // rather than a separate riddle. Only for typed answers — on a multiple
+  // choice it would narrow the four options down for free.
+  const blankPreview =
+    isRecallPending && lengthGuideEnabled
+      ? (() => {
+          const revealed = revealedSet(card.title, quizDifficulty, recallProgress?.extraReveals ?? 0)
+          return slotsOf(card.title)
+            .map(slot => (slot.fillable && !revealed.has(slot.index) ? '_' : slot.char))
+            .join('')
+        })()
+      : null
+
+  // React Flow keeps CardNode mounted for the life of the app (nodes are keyed
+  // by card id, not remounted between quizzes), so an answer dialog left open
+  // by a PREVIOUS quiz must not reappear over a later one.
   useEffect(() => {
-    if (!quiz) setRecallFeedback(null)
+    if (!quiz) setAnswerOpen(false)
   }, [quiz])
 
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
   const updateContent = useCardsStore(s => s.updateContent)
+  const updateIcon = useCardsStore(s => s.updateIcon)
   const allCards = useCardsStore(s => s.history.present)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
@@ -166,6 +196,7 @@ export function CardNode({ data }: CardNodeProps) {
   const [confirmDetachOpen, setConfirmDetachOpen] = useState(false)
   const [flipped, setFlipped] = useState(false)
   const [editingDefinition, setEditingDefinition] = useState(false)
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [draftDefinition, setDraftDefinition] = useState(card.definition ?? '')
   const isDetached = card.detached === true
   // A floating card is painted grey whatever level it last had: its level is
@@ -197,6 +228,9 @@ export function CardNode({ data }: CardNodeProps) {
   // action only makes sense while it still has descendants to empty out.
   const deleteDisabled = isRoot && !hasChildren(card.id)
   const canDetach = !isRoot && !isDetached
+  // The icon slot is only a control while the map can actually be edited; on a
+  // locked map or mid-quiz it degrades to a plain, unclickable badge.
+  const iconSlotInteractive = !locked && !quizActive
 
   // A freshly created card opens its title editor straight away, so the
   // "prise de notes en direct" flow is type -> Entrée -> next card. The field
@@ -217,17 +251,6 @@ export function CardNode({ data }: CardNodeProps) {
   }
 
   function handleTitleFocus() {
-    // Seeding the draft with the REAL title would flash the answer the moment
-    // the field is focused/tabbed into — for `qcm-title` just as much as for
-    // `recall`, so this guard is the broad one. `qcm-title` has no typed
-    // commit path: the field stays `readOnly` (see the input below), and its
-    // blur runs `commitTitle`, whose `draftTitle.trim() || card.title`
-    // fallback turns the untouched empty draft back into a no-op.
-    if (isTitleHidden) {
-      setDraftTitle('')
-      setTitleFocused(true)
-      return
-    }
     // Re-seed the draft from the card as it is NOW: a stale draft (from a
     // previous focus session) committed on blur would silently re-write the
     // card with an old value. The actual `select()` happens in the effect
@@ -268,23 +291,8 @@ export function CardNode({ data }: CardNodeProps) {
 
   function cancelTitle() {
     cancellingTitleRef.current = true
-    setDraftTitle(isTitleHidden ? '' : card.title)
+    setDraftTitle(card.title)
     titleInputRef.current?.blur()
-  }
-
-  function commitRecallAnswer() {
-    if (cancellingTitleRef.current) {
-      cancellingTitleRef.current = false
-    } else if (draftTitle.trim()) {
-      // An empty draft means the user never actually attempted this question
-      // (a stray focus, then a click elsewhere). Grading it would burn the
-      // question on a 0% answer they never gave, so it stays unanswered and
-      // the field simply goes back to masked.
-      const similarity = computeTitleSimilarity(draftTitle, card.title)
-      setRecallFeedback({ typed: draftTitle, similarity })
-      answerRecall(card.id, similarity >= similarityThreshold)
-    }
-    setTitleFocused(false)
   }
 
   function commitDefinition() {
@@ -330,16 +338,25 @@ export function CardNode({ data }: CardNodeProps) {
         'card-node',
         isDetached ? 'card-node--detached' : null,
         isReparentTarget ? 'card-node--reparent-target' : null,
+        isPending ? 'card-node--quiz-pending' : null,
       ]
         .filter(Boolean)
         .join(' ')}
+      // The whole card is the target while it is waiting for an answer: people
+      // click the thing they are being asked about, not the button under it.
+      onClick={isPending ? () => setAnswerOpen(true) : undefined}
       style={{
-        background: toCss(colors.bg),
-        color: toCss(colors.text),
+        // A card still waiting for an answer drops its level colour for a
+        // neutral, deliberately EMPTY surface. That is the state it is in —
+        // blank, yours to fill — and it makes "which card wants me?" readable
+        // across a whole map at a glance, which a coloured card with a slightly
+        // different border never was.
+        background: isPending ? 'var(--quiz-pending-bg)' : toCss(colors.bg),
+        color: isPending ? 'var(--quiz-pending-fg)' : toCss(colors.text),
         // Dashed: a second, colour-independent cue that this card hangs
         // outside the hierarchy (grey alone is easy to miss when zoomed out).
         border: isDetached ? '2px dashed' : '2px solid',
-        borderColor: resultBorderColor ?? toCss(colors.border),
+        borderColor: resultBorderColor ?? (isPending ? 'var(--quiz-pending-border)' : toCss(colors.border)),
         borderRadius: 8,
         // Room for the pinned edge buttons: the drag handle and the delete `x`
         // sit in the top corners, the `->` on the right edge.
@@ -356,7 +373,8 @@ export function CardNode({ data }: CardNodeProps) {
         // `.card-drag-handle`, it does not restyle the rest of the node) —
         // an explicit cursor here overrides that for every part of the card
         // that is not itself interactive (buttons/handle/input set their own).
-        cursor: 'default',
+        // A card awaiting an answer is itself the click target, so it says so.
+        cursor: isPending ? 'pointer' : 'default',
       }}
     >
       {/*
@@ -387,6 +405,68 @@ export function CardNode({ data }: CardNodeProps) {
       >
         <GripVertical size={14} />
       </span>
+
+      {/*
+        The mnemonic icon, pinned to the card's top-right corner.
+
+        Three states in one slot: a card that HAS an icon always shows it —
+        including while locked and during a quiz, where the picture is exactly
+        the memory hook the card is meant to trigger — and only becomes
+        clickable (to change or remove it) when the map is editable. A card
+        with no icon shows a faint placeholder instead, and only while editing:
+        an empty affordance is clutter on a locked map and noise during a quiz.
+      */}
+      {iconSlotInteractive ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                data-testid="card-icon-button"
+                aria-label={card.icon ? 'Changer l’icône' : 'Ajouter une icône'}
+                onClick={event => {
+                  event.stopPropagation()
+                  setIconPickerOpen(true)
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 4,
+                  right: 4,
+                  display: 'flex',
+                  padding: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  // A card with no icon yet only hints at the slot; picking one
+                  // is an option, not something the card is asking for.
+                  opacity: card.icon ? 1 : 0.4,
+                  lineHeight: 0,
+                }}
+              >
+                <CardIconBadge name={card.icon} fallback={Sparkles} border={colors.border} theme={theme} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{card.icon ? 'Changer l’icône' : 'Ajouter une icône'}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        card.icon !== undefined && (
+          <span style={{ position: 'absolute', top: 4, right: 4, lineHeight: 0 }}>
+            <CardIconBadge name={card.icon} border={colors.border} theme={theme} />
+          </span>
+        )
+      )}
+
+      {iconPickerOpen && (
+        <IconPickerDialog
+          open
+          onOpenChange={setIconPickerOpen}
+          current={card.icon}
+          border={colors.border}
+          theme={theme}
+          onSelect={icon => updateIcon(card.id, icon)}
+        />
+      )}
 
       {canAddSibling && (
         <span style={{ visibility: locked ? 'hidden' : 'visible' }}>
@@ -436,73 +516,123 @@ export function CardNode({ data }: CardNodeProps) {
         the editable affordance, at a border-width that matches both states
         so revealing it never shifts the layout either.
       */}
-      {showLengthGuide && (
-        <div style={{ fontFamily: 'monospace', fontSize: '0.75rem', letterSpacing: '0.1em', opacity: 0.6 }}>
-          {buildLengthGuide(card.title)}
+      {/*
+        Two different things live in this slot, and they must not be the same
+        widget. In the editor the title is an input you type into. During a
+        quiz it is a QUESTION: the map is locked, the answer belongs in the
+        answer dialog, and an editable-looking field there only invited people
+        to type into a card that would never grade what they wrote.
+      */}
+      {quiz ? (
+        <div
+          data-testid="quiz-title"
+          style={{
+            fontFamily: displayMasked ? 'ui-monospace, monospace' : 'inherit',
+            letterSpacing: displayMasked ? '0.12em' : undefined,
+            fontWeight: displayMasked ? 700 : 'inherit',
+            // Not muted: the blank is the thing to look at on this card, and a
+            // greyed-out placeholder read as "disabled" rather than "your turn".
+            color: 'inherit',
+            wordBreak: 'break-word',
+          }}
+        >
+          {displayMasked ? (blankPreview ?? '? ? ?') : card.title}
         </div>
+      ) : (
+        <FlipCard
+          flipped={flipped}
+          front={
+            <textarea
+              ref={titleInputRef}
+              aria-label="Titre"
+              rows={2}
+              readOnly={locked}
+              value={titleFocused ? draftTitle : card.title}
+              onFocus={handleTitleFocus}
+              onChange={e => setDraftTitle(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={e => {
+                // The title has no manual line breaks — it wraps by width alone,
+                // same as the export's plain block text — so Enter still commits
+                // instead of inserting a newline.
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  titleInputRef.current?.blur()
+                }
+                if (e.key === 'Escape') cancelTitle()
+              }}
+              style={{
+                display: 'block',
+                width: '100%',
+                resize: 'none',
+                font: 'inherit',
+                lineHeight: 1.2,
+                color: 'inherit',
+                background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+                border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
+                borderRadius: 4,
+                padding: '0.1rem 0.3rem',
+                margin: '-0.1rem -0.3rem',
+                outline: 'none',
+                cursor: 'text',
+                transition: 'background 0.15s ease, border-color 0.15s ease',
+              }}
+            />
+          }
+          back={
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                minHeight: '1.4rem',
+                borderRadius: 4,
+                background: toCss(colors.border),
+              }}
+            />
+          }
+        />
       )}
-      <FlipCard
-        flipped={flipped}
-        front={
-          <textarea
-            ref={titleInputRef}
-            aria-label="Titre"
-            rows={2}
-            // A quiz auto-locks the mind map (and hides the lock toggle), so
-            // `locked` is always true while a recall question is live — a
-            // blanket `readOnly={locked}` made recall literally unanswerable.
-            // Typing here is still never written to the card: a recall-pending
-            // blur runs `commitRecallAnswer`, not `updateTitle`.
-            readOnly={locked && !isRecallPending}
-            value={titleFocused ? draftTitle : displayMasked ? '???' : card.title}
-            onFocus={handleTitleFocus}
-            onChange={e => setDraftTitle(e.target.value)}
-            onBlur={isRecallPending ? commitRecallAnswer : commitTitle}
-            maxLength={isRecallPending ? card.title.length : undefined}
-            onKeyDown={e => {
-              // The title has no manual line breaks — it wraps by width alone,
-              // same as the export's plain block text — so Enter still commits
-              // instead of inserting a newline.
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                titleInputRef.current?.blur()
-              }
-              if (e.key === 'Escape') cancelTitle()
-            }}
-            style={{
-              display: 'block',
-              width: '100%',
-              resize: 'none',
-              font: 'inherit',
-              lineHeight: 1.2,
-              color: 'inherit',
-              background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
-              border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
-              borderRadius: 4,
-              padding: '0.1rem 0.3rem',
-              margin: '-0.1rem -0.3rem',
-              outline: 'none',
-              cursor: 'text',
-              transition: 'background 0.15s ease, border-color 0.15s ease',
-            }}
-          />
-        }
-        back={
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              minHeight: '1.4rem',
-              borderRadius: 4,
-              background: toCss(colors.border),
-            }}
-          />
-        }
-      />
-      {quiz?.type === 'recall' && recallFeedback && recallFeedback.similarity < 100 && (
-        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: similarityColor(recallFeedback.similarity) }}>
-          {recallFeedback.similarity}% — ta réponse : « {recallFeedback.typed} »
-        </div>
+
+      {/* The card's own answer button, rather than one more icon in the footer
+          row: on a card that is waiting for you, "répondre" is the only thing
+          there is to do, and it should look like it. */}
+      {isPending && (
+        <Button
+          size="sm"
+          data-testid="answer-button"
+          onClick={event => {
+            event.stopPropagation()
+            setAnswerOpen(true)
+          }}
+          style={{ width: '100%', marginTop: 2 }}
+        >
+          {quiz?.type === 'recall' ? <PenLine /> : <ListChecks />}
+          Répondre
+        </Button>
+      )}
+
+      {/* A quiz card that has been answered keeps its verdict visible: the
+          border alone is easy to miss at a glance across a whole map. */}
+      {quiz && quiz.result !== 'unanswered' && (
+        <span
+          aria-label={quiz.result === 'correct' ? 'Bonne réponse' : 'Mauvaise réponse'}
+          style={{
+            position: 'absolute',
+            top: -10,
+            right: -10,
+            width: 22,
+            height: 22,
+            borderRadius: '9999px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: quiz.result === 'correct' ? '#16a34a' : '#dc2626',
+            color: '#fff',
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.25)',
+          }}
+        >
+          {quiz.result === 'correct' ? <Check size={14} strokeWidth={3} /> : <X size={14} strokeWidth={3} />}
+        </span>
       )}
 
       {/*
@@ -587,6 +717,14 @@ export function CardNode({ data }: CardNodeProps) {
         </Dialog>
       )}
 
+      {/*
+        The editing toolbar is hidden outright during a quiz, on every card —
+        not just the drawn ones. Add, detach, delete and flip are all edits,
+        the map is locked anyway, and a row of dead-looking icons under a
+        question is exactly the clutter that made it unclear what the card
+        wanted. What remains is the question and the way to answer it.
+      */}
+      {!quizActive && (
       <TooltipProvider>
         {/* `margin-top: auto` in the card's flex column keeps this pinned to
             the bottom of the card regardless of title length or whether the
@@ -664,27 +802,14 @@ export function CardNode({ data }: CardNodeProps) {
             </Tooltip>
           )}
 
-          {quiz && quiz.result === 'unanswered' ? (
-            quiz.type !== 'recall' && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" aria-label="Répondre" onClick={() => setQcmOpen(true)}>
-                    <FlipHorizontal2 />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Répondre</TooltipContent>
-              </Tooltip>
-            )
-          ) : !quiz ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label="Retourner" onClick={() => setFlipped(v => !v)}>
-                  <FlipHorizontal2 />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Retourner</TooltipContent>
-            </Tooltip>
-          ) : null}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Retourner" onClick={() => setFlipped(v => !v)}>
+                <FlipHorizontal2 />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Retourner</TooltipContent>
+          </Tooltip>
 
           {/* Destructive action last in the row, and greyed rather than removed
               on the root: the root is an existing card that cannot be deleted,
@@ -707,6 +832,7 @@ export function CardNode({ data }: CardNodeProps) {
           </Tooltip>
         </div>
       </TooltipProvider>
+      )}
 
       {editingDefinition && (
         <textarea
@@ -727,7 +853,7 @@ export function CardNode({ data }: CardNodeProps) {
 
       {isQcmPending && (
         <QcmDialog
-          open={qcmOpen}
+          open={answerOpen}
           heading={quiz.type === 'qcm-definition' ? card.title : 'Quel est le titre de cette carte ?'}
           hint={quiz.type === 'qcm-title' ? quiz.hint : undefined}
           noHintNote={
@@ -756,9 +882,26 @@ export function CardNode({ data }: CardNodeProps) {
           onAnswer={chosen => {
             if (quiz.type === 'qcm-definition') answerQcmDefinition(card.id, chosen)
             else answerQcmTitle(card.id, chosen)
-            setQcmOpen(false)
+            setAnswerOpen(false)
           }}
-          onCancel={() => setQcmOpen(false)}
+          onCancel={() => setAnswerOpen(false)}
+        />
+      )}
+
+      {/* Mounted only while open, so each visit starts from a clean field
+          rather than resuming the letters left from the last time this card
+          was opened and closed without answering. */}
+      {isRecallPending && answerOpen && (
+        <RecallDialog
+          open
+          title={card.title}
+          parentTitle={allCards.find(c => c.id === card.parentId)?.title}
+          difficulty={quizDifficulty}
+          progress={recallProgress ?? EMPTY_RECALL_PROGRESS}
+          liveFeedback={liveLetterFeedback}
+          onSubmit={answer => submitRecall(card.id, answer, similarityThreshold)}
+          onGiveUp={() => revealRecallAnswer(card.id)}
+          onClose={() => setAnswerOpen(false)}
         />
       )}
 

@@ -79,6 +79,7 @@ function isUsableCardRecord(value: unknown): value is Card {
   if (value.parentId !== null && typeof value.parentId !== 'string') return false
   if (value.detached !== undefined && typeof value.detached !== 'boolean') return false
   if (value.definition !== undefined && typeof value.definition !== 'string') return false
+  if (value.icon !== undefined && typeof value.icon !== 'string') return false
   // Only the shape of the container is checked here. Per-block problems are
   // NOT fatal: `contentOf` degrades an unknown kind to text and drops a
   // malformed payload at render time, so a card carrying one block written by

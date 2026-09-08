@@ -33,6 +33,14 @@ export interface Card {
    * one recomputes it from its new parent.
    */
   detached?: boolean
+  /**
+   * A picture hook for the card, as a Lucide icon name in PascalCase
+   * (`'Atom'`, `'BookOpen'`, ...). Purely mnemonic — nothing in the layout,
+   * the quiz or the export depends on it — so an unknown name (a card written
+   * by a later version of the app, or a hand-edited file) renders as no icon
+   * at all rather than breaking the card. See `src/content/icons.ts`.
+   */
+  icon?: string
 }
 
 /**

@@ -1,5 +1,13 @@
 import type { Card } from '../types/card'
-import type { QuizConfig, QuizDifficulty, QuizQuestion, QuizQuestionType, QuizResult } from '../types/quiz'
+import type {
+  QuizConfig,
+  QuizDifficulty,
+  QuizQuestion,
+  QuizQuestionType,
+  QuizResult,
+  QuizScore,
+  RecallProgress,
+} from '../types/quiz'
 
 const DIFFICULTY_SETTINGS: Record<QuizDifficulty, { sampleRatio: number }> = {
   facile: { sampleRatio: 0.2 },
@@ -143,7 +151,32 @@ export function attachDistractors(
   })
 }
 
-export function computeScore(results: Record<string, QuizResult>): { correct: number; total: number } {
-  const values = Object.values(results)
-  return { correct: values.filter(r => r === 'correct').length, total: values.length }
+/**
+ * The end-of-quiz breakdown.
+ *
+ * `progress` is optional and defaults to empty, which grades every correct
+ * answer as `perfect` — right for QCM questions, which have a single shot, and
+ * the honest fallback for a caller (the in-quiz counter) that only needs the
+ * headline numbers. Recall cards pass their real progress so an answer found
+ * only after the app handed over extra letters is reported as `assisted`
+ * rather than being quietly counted as an unaided success.
+ */
+export function computeScore(
+  results: Record<string, QuizResult>,
+  progress: Record<string, RecallProgress> = {}
+): QuizScore {
+  const entries = Object.entries(results)
+  const correctIds = entries.filter(([, result]) => result === 'correct').map(([id]) => id)
+  const perfect = correctIds.filter(id => (progress[id]?.attempts ?? 0) === 0).length
+  const total = entries.length
+  const correct = correctIds.length
+  return {
+    correct,
+    total,
+    perfect,
+    assisted: correct - perfect,
+    incorrect: entries.filter(([, result]) => result === 'incorrect').length,
+    unanswered: entries.filter(([, result]) => result === 'unanswered').length,
+    percentage: total === 0 ? 0 : Math.round((correct / total) * 100),
+  }
 }
