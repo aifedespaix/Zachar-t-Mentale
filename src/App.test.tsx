@@ -32,6 +32,8 @@ vi.mock('./persistence/fileTree', async importOriginal => {
   return { ...actual, scanFolder: vi.fn() }
 })
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
+vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn().mockResolvedValue(null) }))
+vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }))
 vi.mock('./persistence/sessionState', () => ({
   loadSessionState: vi.fn(),
   saveSessionState: vi.fn(),
@@ -42,6 +44,7 @@ import { CORRUPTED_MAP_MESSAGE } from './components/CorruptedMapDialog'
 import { loadWorkspaceConfig } from './persistence/workspaceConfig'
 import { scanFolder } from './persistence/fileTree'
 import { loadSessionState } from './persistence/sessionState'
+import { check } from '@tauri-apps/plugin-updater'
 
 const PATH_A = '/cours/chapitre-a.json'
 const PATH_B = '/cours/chapitre-b.json'
@@ -476,5 +479,35 @@ describe('App unsaved changes guard', () => {
     await user.click(screen.getByRole('button', { name: 'Ouvrir quand même' }))
 
     expect(useWorkspaceStore.getState().currentFilePath).toBe(PATH_B)
+  })
+})
+
+describe('App update banner', () => {
+  beforeEach(() => {
+    resetStores()
+    vi.mocked(loadMindMap).mockReset()
+    vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
+    vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(scanFolder).mockReset().mockResolvedValue([])
+    vi.mocked(check).mockReset()
+  })
+
+  it('shows the update banner once the background download finishes', async () => {
+    const downloadAndInstall = vi.fn().mockResolvedValue(undefined)
+    vi.mocked(check).mockResolvedValue({ available: true, downloadAndInstall } as never)
+
+    render(<App />)
+
+    expect(await screen.findByText('Mise à jour prête')).toBeInTheDocument()
+  })
+
+  it('does not show the update banner when no update is available', async () => {
+    vi.mocked(check).mockResolvedValue(null)
+
+    render(<App />)
+    await act(async () => {})
+
+    expect(screen.queryByText('Mise à jour prête')).not.toBeInTheDocument()
   })
 })

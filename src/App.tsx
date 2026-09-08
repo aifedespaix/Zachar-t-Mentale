@@ -27,6 +27,8 @@ import { AppearanceSettingsButton } from './components/appearance/AppearanceSett
 import { useAppearanceSettingsStore } from './state/useAppearanceSettingsStore'
 import { useThemeDomSync } from './hooks/useResolvedTheme'
 import { useAppliedFontFamily } from './hooks/useAppliedFontFamily'
+import { useAppUpdater } from './hooks/useAppUpdater'
+import { UpdateReadyBanner } from './components/update/UpdateReadyBanner'
 import type { Card } from './types/card'
 
 /** A map that failed validation, held until the user decides what to do with it. */
@@ -77,6 +79,7 @@ function App() {
   useWindowTitle(currentFilePath)
   useThemeDomSync()
   useAppliedFontFamily()
+  const { updateReady, applyUpdate } = useAppUpdater()
   const { flush } = useAutosave(
     loadedPath ?? '',
     cards,
@@ -229,6 +232,9 @@ function App() {
           <div role="alert" className="status-banner">
             <span style={{ flex: 1 }}>⚠ {dropError}</span>
           </div>
+        )}
+        {!loadError && !dropError && updateReady && (
+          <UpdateReadyBanner onApply={applyUpdate} />
         )}
         <main ref={mainRef} style={{ flex: 1, position: 'relative' }}>
           {isDragActive && (
