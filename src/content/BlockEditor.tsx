@@ -279,17 +279,21 @@ function TableField({
     return Array.from({ length: count }, (_, i) => cells[i] ?? '')
   }
 
+  /** `rowIndex === -1` addresses the header row, which is displayed above the body. */
   function setCell(rowIndex: number, cellIndex: number, value: string) {
+    const edited = (cells: string[]) =>
+      withColumns(columnCount, cells).map((cell, i) => (i === cellIndex ? value : cell))
+
     if (rowIndex === -1) {
-      const header = withColumns(columnCount, block.header)
-      header[cellIndex] = value
-      onChange({ ...block, header })
+      onChange({ ...block, header: edited(block.header) })
       return
     }
-    const rows = block.rows.map((row, i) =>
-      i === rowIndex ? Object.assign(withColumns(columnCount, row), { [cellIndex]: value }) : withColumns(columnCount, row)
-    )
-    onChange({ ...block, rows })
+    // Every row is squared to the current width on the way through, so a
+    // ragged table arriving from a file cannot stay ragged once touched.
+    onChange({
+      ...block,
+      rows: block.rows.map((row, i) => (i === rowIndex ? edited(row) : withColumns(columnCount, row))),
+    })
   }
 
   return (
