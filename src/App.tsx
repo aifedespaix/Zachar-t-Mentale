@@ -21,6 +21,7 @@ import { useUndoRedoShortcuts } from './hooks/useUndoRedoShortcuts'
 import { useWindowTitle } from './hooks/useWindowTitle'
 import { useUnsavedChangesGuard } from './hooks/useUnsavedChangesGuard'
 import { useFileDropZone } from './hooks/useFileDropZone'
+import { useLaunchFile } from './hooks/useLaunchFile'
 import { imageBlockFrom } from './content/imageBlock'
 import { mimeForPath } from './content/pickImage'
 import { contentOf } from './content/blocks'
@@ -47,7 +48,7 @@ interface PendingRepair {
 const MAX_REPAIR_ATTEMPTS = 100
 
 /**
- * The first « [Nom] (Réparée).json » that does not exist yet. A repair must
+ * The first « [Nom] (Réparée).zmap » that does not exist yet. A repair must
  * never overwrite anything — neither the corrupt original nor an earlier
  * repaired copy the user may have already worked in.
  */
@@ -129,6 +130,9 @@ function App() {
   )
 
   const { isDragActive, dropError } = useFileDropZone(mainRef, requestOpenFile, handleDropImageOnCard)
+  // Same entry point as the sidebar and drag & drop, so a map opened from the
+  // Explorer goes through the unsaved-changes guard like any other switch.
+  useLaunchFile(requestOpenFile)
 
   useEffect(() => {
     useQuizSettingsStore.getState().init()

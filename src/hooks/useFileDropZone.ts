@@ -1,8 +1,9 @@
 import { useEffect, useState, type RefObject } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { isMindMapPath } from '../persistence/paths'
 
 const INVALID_FILE_MESSAGE =
-  'Seuls les fichiers .json de carte mentale et les images peuvent être déposés ici.'
+  'Seuls les cartes mentales (.zmap, .json) et les images peuvent être déposées ici.'
 
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.svg']
 
@@ -45,7 +46,7 @@ function isInZone(zoneRef: RefObject<HTMLElement | null>, position: { x: number;
 }
 
 /**
- * Opens a `.json` mind map dropped on `zoneRef`. Uses Tauri's window-level
+ * Opens a mind map dropped on `zoneRef`. Uses Tauri's window-level
  * drag & drop event (not the DOM `drop` event, which never fires: Tauri
  * intercepts OS file drops before they reach the webview by default) and
  * intersects its physical-pixel position with the zone's own bounding rect,
@@ -84,12 +85,12 @@ export function useFileDropZone(
             if (!isInZone(zoneRef, payload.position)) return
 
             // A mind map opens; an image joins the card it landed on. Routing
-            // by extension rather than refusing everything but `.json` is what
-            // lets one window-level event serve both gestures.
-            const jsonPath = payload.paths.find(path => path.toLowerCase().endsWith('.json'))
-            if (jsonPath) {
+            // by extension rather than refusing everything but a mind map is
+            // what lets one window-level event serve both gestures.
+            const mindMapPath = payload.paths.find(isMindMapPath)
+            if (mindMapPath !== undefined) {
               setDropError(null)
-              onOpenFile(jsonPath)
+              onOpenFile(mindMapPath)
               return
             }
 

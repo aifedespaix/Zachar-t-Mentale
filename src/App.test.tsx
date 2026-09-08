@@ -247,7 +247,7 @@ describe('App quiz wiring', () => {
 })
 
 const PATH_C = '/cours/chapitre-c.json'
-const REPAIRED_PATH_C = '/cours/chapitre-c (Réparée).json'
+const REPAIRED_PATH_C = '/cours/chapitre-c (Réparée).zmap'
 /** A ghost card: its parent no longer exists, so the map cannot be laid out. */
 const corruptCards: Card[] = [
   { id: 'c-root', level: 1, title: 'Chapitre C', parentId: null, order: 0 },
@@ -290,7 +290,7 @@ describe('App corrupted-map guard', () => {
 
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent('chapitre-c.json')
-    expect(dialog).toHaveTextContent('chapitre-c (Réparée).json')
+    expect(dialog).toHaveTextContent('chapitre-c (Réparée).zmap')
     expect(dialog).toHaveTextContent('carte fantôme (parent introuvable)')
   })
 
@@ -374,7 +374,7 @@ describe('App corrupted-map guard', () => {
     })
     await settle()
 
-    expect(saveMindMap).toHaveBeenCalledWith('/cours/chapitre-c (Réparée 2).json', expect.anything())
+    expect(saveMindMap).toHaveBeenCalledWith('/cours/chapitre-c (Réparée 2).zmap', expect.anything())
   })
 
   it('keeps the dialog open and explains itself when the copy cannot be written', async () => {

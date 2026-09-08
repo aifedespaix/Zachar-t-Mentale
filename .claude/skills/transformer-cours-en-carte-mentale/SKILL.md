@@ -39,6 +39,9 @@ type CardBlock =
   par card. Si un chapitre est trop gros, le découper en plusieurs fichiers.
 - Sortie : JSON array de `Card`, `JSON.stringify(cards, null, 2)`, un fichier
   par chapitre (voir `src/persistence/serialization.ts`).
+- Extension : `.zmap` — c'est celle que l'installeur associe à l'app, donc la
+  carte s'ouvre d'un double-clic depuis l'explorateur. Le contenu reste du JSON.
+  Les anciens `.json` continuent de s'ouvrir, mais rien de neuf n'en écrit.
 
 ## Écrire les maths en blocs, pas en texte
 

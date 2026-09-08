@@ -67,7 +67,21 @@ describe('useFileDropZone', () => {
     expect(result.current.isDragActive).toBe(false)
   })
 
-  it('opens a .json file dropped inside the zone', () => {
+  it('opens a .zmap file dropped inside the zone', () => {
+    const zoneRef = makeZoneRef()
+    const onOpenFile = vi.fn()
+    renderHook(() => useFileDropZone(zoneRef, onOpenFile))
+
+    act(() =>
+      dragDropHandler({
+        payload: { type: 'drop', paths: ['/cours/fractions.zmap'], position: { x: 100, y: 100 } },
+      })
+    )
+
+    expect(onOpenFile).toHaveBeenCalledWith('/cours/fractions.zmap')
+  })
+
+  it('still opens a map written before .zmap existed', () => {
     const zoneRef = makeZoneRef()
     const onOpenFile = vi.fn()
     renderHook(() => useFileDropZone(zoneRef, onOpenFile))
@@ -95,7 +109,7 @@ describe('useFileDropZone', () => {
     expect(onOpenFile).not.toHaveBeenCalled()
   })
 
-  it('reports an error and does not open a non-.json file', () => {
+  it('reports an error and does not open a file that is not a mind map', () => {
     const zoneRef = makeZoneRef()
     const onOpenFile = vi.fn()
     const { result } = renderHook(() => useFileDropZone(zoneRef, onOpenFile))
@@ -107,7 +121,7 @@ describe('useFileDropZone', () => {
     )
 
     expect(onOpenFile).not.toHaveBeenCalled()
-    expect(result.current.dropError).toMatch(/\.json/)
+    expect(result.current.dropError).toMatch(/\.zmap/)
   })
 
   it('clears a previous drop error once a valid file is dropped', () => {

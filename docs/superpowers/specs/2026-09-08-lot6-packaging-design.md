@@ -164,6 +164,61 @@ qui exige une élévation UAC à chaque mise à jour et peut s'installer en
 produit parallèle à côté d'une copie installée via NSIS. Un seul target
 lève l'ambiguïté et raccourcit le build CI.
 
+`productName` ne doit contenir aucune apostrophe ASCII (`'`). Tauri
+substitue ce nom tel quel dans les chemins de raccourcis NSIS, et
+plusieurs de ses macros d'installeur passent ces chemins dans une liste
+d'arguments COM entre apostrophes simples — par exemple
+`${IPersistFile::Load} $1 '("${shortcut}", ${STGM_READ})'`. Une
+apostrophe ASCII referme la chaîne trop tôt, makensis recompte alors les
+arguments de la macro et abandonne :
+
+```
+!insertmacro: macro "NSISCOMCALL" requires 4 parameter(s), passed 7!
+Error in macro IsShortcutTarget on macroline 11
+```
+
+C'est ce qui a fait échouer la release v0.1.0 : l'app compilait,
+l'installeur n'était jamais produit, et le tag ne portait que les
+archives source générées automatiquement par GitHub. Le nom est donc
+écrit avec l'apostrophe typographique `’` (U+2019) — la bonne apostrophe
+française, et pas un délimiteur de chaîne NSIS. `src/test/packaging.test.ts`
+verrouille l'invariant.
+
+### Association de fichiers — ouvrir une carte au double-clic
+
+L'installeur enregistre l'extension `.zmap` (`bundle.fileAssociations`), sous
+le ProgID `ZachartMentale.MindMap`. C'est la raison d'être de l'installeur
+plutôt que d'un portable : un `.exe` posé dans un dossier ne peut rien
+enregistrer dans `HKCU\Software\Classes`, donc pas de double-clic, et
+`APP_UNASSOCIATE` rend l'association à la désinstallation.
+
+`.zmap` et pas `.json` : associer `.json` ferait de l'app l'éditeur par défaut
+de TOUS les fichiers JSON de la machine. Le contenu, lui, ne change pas — un
+`.zmap` est le même `Card[]` sérialisé. Les cartes écrites avant l'association
+sont des `.json` et continuent de s'ouvrir (arbre, glisser-déposer, « Ouvrir
+avec ») ; seules les écritures neuves prennent `.zmap`. `MIND_MAP_EXTENSIONS`
+dans `src/persistence/paths.ts` est la liste unique qui porte cette règle.
+
+Le chemin arrive par la ligne de commande — Windows lance
+`zachart-mentale.exe "C:\cours\fractions.zmap"`. Deux moments, un seul
+comportement :
+
+- app fermée : `launch_mind_map` (commande Rust) relit `std::env::args()` ;
+- app déjà ouverte : `tauri-plugin-single-instance` replie le second processus
+  dans le premier et lui transmet son `argv`, réémis en événement
+  `open-mind-map`. Sans ce plugin, un second double-clic démarrerait un
+  DEUXIÈME éditeur — et deux copies qui autosauvegardent le même fichier
+  toutes les 500 ms s'écraseraient mutuellement.
+
+Des deux côtés, `useLaunchFile` passe le chemin à `requestOpenFile`, le même
+point d'entrée que la barre latérale et le glisser-déposer : la garde des
+modifications non enregistrées s'applique donc aussi à une ouverture depuis
+l'explorateur.
+
+Limite connue : la portée `fs` reste `$HOME/**`. Une carte rangée hors du
+dossier utilisateur (un `D:\` par exemple) est refusée à la lecture, au
+double-clic comme au glisser-déposer.
+
 ### Permissions — `src-tauri/capabilities/default.json`
 
 Ajout de `"updater:default"` à la liste de permissions existante (aux
