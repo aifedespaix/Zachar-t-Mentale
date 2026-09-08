@@ -8,6 +8,8 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  'aria-label': ariaLabel,
+  'aria-labelledby': ariaLabelledBy,
   ...props
 }: React.ComponentProps<typeof SliderPrimitive.Root>) {
   const values = React.useMemo(
@@ -32,6 +34,12 @@ function Slider({
         <SliderPrimitive.Thumb
           key={index}
           data-slot="slider-thumb"
+          // The role="slider" element is this thumb, not the root — so the
+          // accessible name must live here. Only forward it for single-thumb
+          // sliders; a range slider with multiple thumbs needs a per-thumb
+          // label, which no current consumer requires yet.
+          aria-label={values.length === 1 ? ariaLabel : undefined}
+          aria-labelledby={values.length === 1 ? ariaLabelledBy : undefined}
           className="block size-4 shrink-0 rounded-full border border-primary bg-background shadow transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
         />
       ))}
