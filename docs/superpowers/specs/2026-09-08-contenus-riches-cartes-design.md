@@ -1,8 +1,25 @@
 # Contenus riches dans les cartes — Recherche & Design
 
 **Date** : 2026-09-08
-**Statut** : Brainstorming / recherche — à arbitrer avant plan d'implémentation
+**Statut** : **Arbitré le 2026-09-08** — plan d'implémentation :
+`../plans/2026-09-08-contenus-riches.md`
 **Lot** : 6 (Contenus riches)
+
+## Arbitrage
+
+Les quatre décisions ouvertes ont été tranchées :
+
+| Décision | Choix retenu |
+|---|---|
+| Modèle | **Blocs mixtes** (`content?: CardBlock[]`), pas un mode par champ |
+| Périmètre v1 | **`text` + `math` + `image` + `table`** |
+| Éditeur de formules | **MathLive** (WYSIWYG), KaTeX à l'affichage |
+| Stockage des images | **Sidecar `<carte>.assets/`**, pas de base64 |
+
+Reportés hors v1, sans changement du modèle : `code`, `music` (abcjs), `audio`,
+`molecule`. La validation dégrade tout `kind` inconnu en bloc texte, donc un
+fichier écrit par une version ultérieure s'ouvre sans casser — c'est ce qui
+rend ces ajouts non-bloquants.
 
 ## Contexte
 
