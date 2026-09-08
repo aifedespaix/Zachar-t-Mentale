@@ -20,7 +20,9 @@ import type { QuizQuestion, QuizResult } from '../types/quiz'
 import { computeLayout, type Position } from '../layout/columns'
 import { canMoveCardTo, overflowingCardCount, subtreeDepths } from '../state/cardsReducer'
 import { CardNode } from './CardNode'
-import { levelColor } from '../colors/levelColors'
+import { clampCardLevel } from '../colors/levelColors'
+import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
+import { useResolvedTheme } from '../hooks/useResolvedTheme'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
@@ -267,6 +269,8 @@ function MindMapCanvasInner() {
   const moveCard = useCardsStore(s => s.moveCard)
   const quizQuestions = useQuizStore(s => s.questions)
   const quizResults = useQuizStore(s => s.results)
+  const theme = useResolvedTheme()
+  const levelAppearance = useAppearanceSettingsStore(s => s.levels)
   const { setCenter } = useReactFlow()
 
   const layout = useMemo(() => computeLayout(cards), [cards])
@@ -365,7 +369,7 @@ function MindMapCanvasInner() {
           // reparent target is active, so it doesn't compete with the dashed
           // ghost edge previewing the future link (added below).
           style: {
-            stroke: toCss(levelColor(card.level, 'light').border),
+            stroke: toCss(levelAppearance[clampCardLevel(card.level)].color[theme].border),
             opacity: reparentTargetId && card.id === draggingId ? 0.15 : 1,
           },
         })
@@ -378,12 +382,12 @@ function MindMapCanvasInner() {
           source: reparentTargetId,
           target: draggingId,
           className: 'reparent-ghost-edge',
-          style: { stroke: toCss(levelColor(draggedCard.level, 'light').border), opacity: 1 },
+          style: { stroke: toCss(levelAppearance[clampCardLevel(draggedCard.level)].color[theme].border), opacity: 1 },
         })
       }
     }
     return realEdges
-  }, [cards, reparentTargetId, draggingId])
+  }, [cards, reparentTargetId, draggingId, levelAppearance, theme])
 
   const handleNodeDragStart: OnNodeDrag = useCallback((_event, draggedNode) => {
     setDraggingId(draggedNode.id)
