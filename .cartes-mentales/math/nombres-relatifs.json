@@ -1,0 +1,194 @@
+[
+  {
+    "id": "root",
+    "level": 1,
+    "title": "Nombres relatifs",
+    "parentId": null,
+    "order": 0
+  },
+  {
+    "id": "def",
+    "level": 2,
+    "title": "Qu'est-ce qu'un nombre relatif ?",
+    "definition": "Un nombre positif, négatif, ou zéro.",
+    "parentId": "root",
+    "order": 0
+  },
+  {
+    "id": "comparer",
+    "level": 2,
+    "title": "Comparer deux nombres",
+    "definition": "Déterminer si deux nombres relatifs sont égaux, ou si l'un est supérieur (ou inférieur) à l'autre.",
+    "parentId": "root",
+    "order": 1
+  },
+  {
+    "id": "comparer-pos-neg",
+    "level": 3,
+    "title": "Positif contre négatif",
+    "definition": "Un nombre positif est toujours plus grand qu'un nombre négatif.",
+    "parentId": "comparer",
+    "order": 0
+  },
+  {
+    "id": "comparer-deux-pos",
+    "level": 3,
+    "title": "Deux nombres positifs",
+    "definition": "Le plus grand est celui qui a la plus grande distance à zéro.",
+    "parentId": "comparer",
+    "order": 1
+  },
+  {
+    "id": "comparer-deux-neg",
+    "level": 3,
+    "title": "Deux nombres négatifs",
+    "definition": "Le plus grand est celui qui est le plus proche de zéro.",
+    "parentId": "comparer",
+    "order": 2
+  },
+  {
+    "id": "comparer-exemples",
+    "level": 3,
+    "title": "Exemples",
+    "definition": "-4 < +7   ;   10 < 11   ;   -9 < +1",
+    "parentId": "comparer",
+    "order": 3
+  },
+  {
+    "id": "oppose",
+    "level": 2,
+    "title": "L'opposé d'un nombre relatif",
+    "definition": "Le nombre de signe contraire qui a la même distance à zéro que lui.",
+    "parentId": "root",
+    "order": 2
+  },
+  {
+    "id": "oppose-exemples",
+    "level": 3,
+    "title": "Exemples",
+    "definition": "(+4) + (−4) = 0   ;   −(−7) = 7",
+    "parentId": null,
+    "order": 0,
+    "detached": true
+  },
+  {
+    "id": "priorites",
+    "level": 2,
+    "title": "Priorités de calcul",
+    "definition": "Ordre dans lequel effectuer les étapes d'un calcul.",
+    "parentId": "root",
+    "order": 3
+  },
+  {
+    "id": "priorites-sans-parentheses",
+    "level": 3,
+    "title": "Sans parenthèses",
+    "definition": "⊕ et ⊝ se calculent de gauche à droite ; ⊗ et ⊘ se calculent de gauche à droite ; ⊗ et ⊘ sont prioritaires sur ⊕ et ⊝.",
+    "parentId": "priorites",
+    "order": 0
+  },
+  {
+    "id": "priorites-avec-parentheses",
+    "level": 3,
+    "title": "Avec parenthèses",
+    "definition": "On effectue d'abord les calculs entre parenthèses. Si les parenthèses sont imbriquées, on calcule en priorité le contenu des parenthèses les plus intérieures.",
+    "parentId": "priorites",
+    "order": 1
+  },
+  {
+    "id": "addition",
+    "level": 2,
+    "title": "Addition",
+    "definition": "Comment additionner deux nombres relatifs.",
+    "parentId": "root",
+    "order": 4
+  },
+  {
+    "id": "addition-signes-contraires",
+    "level": 3,
+    "title": "Signes contraires",
+    "definition": "La distance à zéro du résultat est la différence des distances à zéro des deux termes ; le résultat prend le signe du terme ayant la plus grande distance à zéro.",
+    "parentId": "addition",
+    "order": 0
+  },
+  {
+    "id": "addition-signes-contraires-exemples",
+    "level": 4,
+    "title": "Exemples",
+    "definition": "(+10) + (−4) = +(10−4) = +6   ;   (+1) + (−8) = −(8−1) = −7",
+    "parentId": "addition-signes-contraires",
+    "order": 0
+  },
+  {
+    "id": "addition-meme-signe",
+    "level": 3,
+    "title": "Même signe",
+    "definition": "La distance à zéro du résultat est la somme des distances à zéro des deux termes ; le résultat garde le même signe que les deux termes.",
+    "parentId": "addition",
+    "order": 1
+  },
+  {
+    "id": "addition-meme-signe-exemples",
+    "level": 4,
+    "title": "Exemples",
+    "definition": "(+3) + (+6) = +(6+3) = +9   ;   (−5) + (−2) = −(5+2) = −7",
+    "parentId": "addition-meme-signe",
+    "order": 0
+  },
+  {
+    "id": "soustraction",
+    "level": 2,
+    "title": "Soustraction",
+    "definition": "Soustraire un nombre, c'est ajouter son opposé.",
+    "parentId": "root",
+    "order": 5
+  },
+  {
+    "id": "soustraction-exemples",
+    "level": 3,
+    "title": "Exemples",
+    "definition": "(+4) − (+1) = (+4) + (−1) = +3   ;   (+2) − (−3) = (+2) + (+3) = +5",
+    "parentId": "soustraction",
+    "order": 0
+  },
+  {
+    "id": "mult-div",
+    "level": 2,
+    "title": "Multiplication et division",
+    "definition": "Règle des signes pour multiplier ou diviser deux nombres relatifs.",
+    "parentId": "root",
+    "order": 6
+  },
+  {
+    "id": "mult-div-regle",
+    "level": 3,
+    "title": "Règle des signes",
+    "definition": "Le produit ou le quotient de deux nombres de même signe est positif ; le produit ou le quotient de deux nombres de signes différents est négatif.",
+    "parentId": "mult-div",
+    "order": 0
+  },
+  {
+    "id": "mult-div-tableau",
+    "level": 3,
+    "title": "Tableau des signes",
+    "definition": "Récapitulatif des signes selon l'opération.",
+    "parentId": "mult-div",
+    "order": 1
+  },
+  {
+    "id": "tableau-multiplication",
+    "level": 4,
+    "title": "Multiplication",
+    "definition": "⊕×⊕=⊕   ;   ⊕×⊝=⊝   ;   ⊝×⊝=⊕   ;   ⊝×⊕=⊝",
+    "parentId": "mult-div-tableau",
+    "order": 0
+  },
+  {
+    "id": "tableau-division",
+    "level": 4,
+    "title": "Division",
+    "definition": "⊕÷⊕=⊕   ;   ⊕÷⊝=⊝   ;   ⊝÷⊝=⊕   ;   ⊝÷⊕=⊝",
+    "parentId": "mult-div-tableau",
+    "order": 1
+  }
+]

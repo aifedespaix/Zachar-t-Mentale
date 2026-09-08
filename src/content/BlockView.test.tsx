@@ -90,3 +90,48 @@ describe('BlockView', () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+describe('BlockView — degenerate data from a shared file', () => {
+  const cases: [string, number, number][] = [
+    ['zéro', 0, 0],
+    ['NaN', NaN, NaN],
+    ['négatif', -5, 10],
+    ['infini', Infinity, 1],
+  ]
+
+  it.each(cases)('does not emit an invalid aspect-ratio for %s dimensions', (_label, width, height) => {
+    // An invalid aspect-ratio is dropped by the CSS parser, so `height: auto`
+    // has nothing to derive from: the box collapses and jumps on decode —
+    // exactly the reflow the reserved box exists to prevent.
+    render(
+      <BlockView blocks={[{ kind: 'image', asset: 'a.png', alt: 'S', width, height }]} resolveAsset={resolve} />
+    )
+    expect(screen.getByAltText('S').style.aspectRatio).toBe('')
+  })
+
+  it('gives the not-found placeholder the same width the image would take', () => {
+    render(
+      <BlockView
+        blocks={[{ kind: 'image', asset: 'manquante.png', alt: '', width: 200, height: 100 }]}
+        resolveAsset={() => ''}
+      />
+    )
+    expect(screen.getByText(/manquante\.png/)).toHaveStyle({ width: '200px', aspectRatio: '200 / 100' })
+  })
+
+  it('wraps every block in a horizontal scroller, so wide content cannot widen the popover', () => {
+    // KaTeX display math is `white-space: nowrap` and ships no scroller.
+    const { container } = render(
+      <BlockView blocks={[{ kind: 'math', latex: 'x', display: true }]} resolveAsset={resolve} />
+    )
+    expect(container.querySelector('[style*="overflow-x"]')).not.toBeNull()
+  })
+
+  it('does not throw on a formula that makes KaTeX blow the stack', () => {
+    // A RangeError here would escape into React and tear down the canvas.
+    const deep = '\\sqrt{'.repeat(2000) + 'a' + '}'.repeat(2000)
+    expect(() =>
+      render(<BlockView blocks={[{ kind: 'math', latex: deep }]} resolveAsset={resolve} />)
+    ).not.toThrow()
+  })
+})

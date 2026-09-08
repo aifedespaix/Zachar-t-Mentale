@@ -1,0 +1,41 @@
+[
+  {
+    "id": "root",
+    "level": 1,
+    "title": "Pourcentages",
+    "parentId": null,
+    "order": 0
+  },
+  {
+    "id": "appliquer",
+    "level": 2,
+    "title": "Appliquer un pourcentage",
+    "definition": "Calculer p % de quelque chose, c'est faire p/100 × quelque chose.",
+    "parentId": "root",
+    "order": 0
+  },
+  {
+    "id": "appliquer-exemple",
+    "level": 3,
+    "title": "Exemple",
+    "definition": "Un collège compte 500 élèves. 51% sont DP. Nombre d'élèves DP : 51/100 × 500 = 255 élèves.",
+    "parentId": "appliquer",
+    "order": 0
+  },
+  {
+    "id": "calculer",
+    "level": 2,
+    "title": "Calculer un pourcentage",
+    "definition": "Calculer un pourcentage, c'est chercher une proportion ramenée à 100 (une fraction sur 100) : on pose ?/100 = partie/total, puis on applique les produits en croix pour trouver « ? ».",
+    "parentId": "root",
+    "order": 1
+  },
+  {
+    "id": "calculer-exemple",
+    "level": 3,
+    "title": "Exemple",
+    "definition": "Une classe de 27 élèves compte 13 présents. ?/100 = 13/27, donc ? = 13×100÷27 ≈ 48. Il y a environ 48% de présents.",
+    "parentId": "calculer",
+    "order": 0
+  }
+]

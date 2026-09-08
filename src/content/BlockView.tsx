@@ -1,5 +1,20 @@
+import { memo } from 'react'
 import type { CardBlock } from '../types/cardBlock'
 import { renderMathToHtml } from './renderMath'
+
+/**
+ * Dimensions good enough to reserve a box with.
+ *
+ * `aspect-ratio: 0 / 0`, `NaN / NaN`, `-5 / 10` and `Infinity / 1` are all
+ * invalid values the CSS parser drops — leaving `height: auto` with nothing to
+ * derive from, so the box collapses to zero and jumps to full size the instant
+ * the file decodes. That is the exact reflow the reserved box exists to
+ * prevent, and the data can arrive from a shared `.json`, so the renderer
+ * checks rather than trusts.
+ */
+function usableRatio(width: number, height: number): boolean {
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+}
 
 export interface BlockViewProps {
   blocks: CardBlock[]
@@ -31,13 +46,27 @@ export function BlockView({ blocks, resolveAsset }: BlockViewProps) {
       {blocks.map((block, index) => (
         // Blocks have no stable identity of their own — they are a positional
         // list the user reorders wholesale — so the index is the honest key.
-        <BlockItem key={index} block={block} resolveAsset={resolveAsset} />
+        //
+        // The horizontal scroll container is here, in the SHARED renderer, not
+        // in the popover: KaTeX display math sets `white-space: nowrap` and
+        // ships no scroller of its own, and a wide table would otherwise blow
+        // the popover's fixed width apart. Fixing it only on one side is the
+        // screen/PDF drift this component exists to prevent.
+        <div key={index} style={{ maxWidth: '100%', overflowX: 'auto' }}>
+          <BlockItem block={block} resolveAsset={resolveAsset} />
+        </div>
       ))}
     </div>
   )
 }
 
-function BlockItem({ block, resolveAsset }: { block: CardBlock; resolveAsset: (asset: string) => string }) {
+const BlockItem = memo(function BlockItem({
+  block,
+  resolveAsset,
+}: {
+  block: CardBlock
+  resolveAsset: (asset: string) => string
+}) {
   switch (block.kind) {
     case 'text':
       // `pre-wrap`, not a set of <p>: a definition's line breaks are the
@@ -54,13 +83,20 @@ function BlockItem({ block, resolveAsset }: { block: CardBlock; resolveAsset: (a
 
     case 'image': {
       const src = resolveAsset(block.asset)
+      const ratio = usableRatio(block.width, block.height)
       if (src === '') {
         // Named, never a blank gap — the app's standing rule that no state is
         // hidden without explanation.
         return (
           <div
             style={{
-              aspectRatio: `${block.width} / ${block.height}`,
+              // Same box the resolved <img> will take, or the day an asset
+              // becomes loadable after first paint the placeholder's
+              // full-width stretch jumps down to the image's own width.
+              width: ratio ? block.width : undefined,
+              maxWidth: '100%',
+              aspectRatio: ratio ? `${block.width} / ${block.height}` : undefined,
+              minHeight: ratio ? undefined : '2.5rem',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -85,7 +121,15 @@ function BlockItem({ block, resolveAsset }: { block: CardBlock; resolveAsset: (a
           // `aspectRatio` plus `height: auto` keeps the box reserved at the
           // right shape while still letting the image shrink to the container.
           // Without it the layout jumps the moment the file decodes.
-          style={{ aspectRatio: `${block.width} / ${block.height}`, maxWidth: '100%', height: 'auto' }}
+          style={{
+            aspectRatio: ratio ? `${block.width} / ${block.height}` : undefined,
+            maxWidth: '100%',
+            height: 'auto',
+            // Keeps a thumbnailed export card from squashing the picture when
+            // a parent caps the height while the width attribute stays
+            // definite (see the export's card-height cap).
+            objectFit: 'contain',
+          }}
         />
       )
     }
@@ -118,4 +162,4 @@ function BlockItem({ block, resolveAsset }: { block: CardBlock; resolveAsset: (a
         </table>
       )
   }
-}
+})
