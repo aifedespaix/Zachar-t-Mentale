@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Spike — blocs riches dans html-to-image</title>
+<link rel="stylesheet" href="/node_modules/katex/dist/katex.min.css">
+<script src="/node_modules/katex/dist/katex.min.js"></script>
+<script src="/node_modules/abcjs/dist/abcjs-basic-min.js"></script>
+<script src="/node_modules/html-to-image/dist/html-to-image.js"></script>
+<style>
+  body { margin: 0; background: #fff; font-family: system-ui, sans-serif; }
+  .card {
+    width: 260px; min-height: 120px; box-sizing: border-box;
+    background: #eef2ff; color: #1e1b4b; border: 2px solid #6366f1;
+    border-radius: 8px; padding: 10px 14px;
+    display: flex; flex-direction: column; gap: .4rem;
+  }
+  .card strong { font-size: 14px; }
+  .card .def { margin: 0; font-size: 12px; }
+  .card img { max-width: 100%; display: block; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script>
+function capture(el) {
+  return htmlToImage.toPng(el, {
+    pixelRatio: 2,
+    style: { position: 'static', left: '0px', top: '0px' },
+  })
+}
+function card(title) {
+  const d = document.createElement('div'); d.className = 'card'
+  const t = document.createElement('strong'); t.textContent = title; d.appendChild(t)
+  const def = document.createElement('div'); def.className = 'def'; d.appendChild(def)
+  return { root: d, def }
+}
+window.__cap = capture
+window.__card = card
+
+// Bloc musique : abcjs rend du SVG dans un conteneur.
+window.mountMusic = async function () {
+  const host = document.getElementById('host'); host.innerHTML = ''
+  const { root, def } = card('Gamme de do majeur')
+  host.appendChild(root)
+  ABCJS.renderAbc(def, 'X:1\nK:C\nCDEF GABc|', { scale: 0.7, staffwidth: 210 })
+  await document.fonts.ready
+  const svg = def.querySelector('svg')
+  return {
+    hasSvg: !!svg,
+    // Ce qui decide de la survie a la capture : des <path> vectoriels
+    // survivent toujours ; des <text> dependent d'une police externe.
+    paths: svg ? svg.querySelectorAll('path').length : 0,
+    texts: svg ? svg.querySelectorAll('text').length : 0,
+    textFonts: svg ? [...new Set([...svg.querySelectorAll('text')].map(t => getComputedStyle(t).fontFamily))] : [],
+    png: await capture(root),
+  }
+}
+
+// Bloc image : src http externe, ce que produit convertFileSrc() de Tauri
+// (http://asset.localhost/... sous Linux/Windows).
+window.mountImage = async function (src) {
+  const host = document.getElementById('host'); host.innerHTML = ''
+  const { root, def } = card('Schema')
+  const img = document.createElement('img')
+  img.width = 200; img.height = 60
+  const loaded = new Promise(res => { img.onload = () => res('load'); img.onerror = () => res('error') })
+  img.src = src
+  def.appendChild(img)
+  host.appendChild(root)
+  const imgState = await loaded
+  await document.fonts.ready
+  let cold = null, warm = null, error = null
+  try {
+    cold = await capture(root)
+    warm = await capture(root)
+  } catch (e) {
+    // html-to-image rejette avec un Event (pas une Error) quand il n'arrive
+    // pas a embarquer une ressource : on le decrit a la main.
+    error = e && e.message ? e.message
+      : 'rejet non-Error: type=' + (e && e.type) + ' tag=' + (e && e.target && e.target.tagName)
+  }
+  return { imgState, cold, warm, error, identical: cold !== null && cold === warm }
+}
+
+// Cout des polices : ce sont les DUREES qui portent l'information (le cache
+// interne de html-to-image se rechauffe d'une capture a l'autre). Les tailles
+// sont celles du PNG de sortie, pas du payload de polices embarquees.
+window.fontCost = async function () {
+  const host = document.getElementById('host'); host.innerHTML = ''
+  const { root, def } = card('Avec calculatrice')
+  katex.render('\\frac{20}{100} \\times 425 = 85', def, { throwOnError: false })
+  host.appendChild(root)
+  await document.fonts.ready
+  const t0 = performance.now(); const a = await capture(root); const t1 = performance.now()
+  const b = await capture(root); const t2 = performance.now()
+  const plain = card('Texte simple'); plain.def.textContent = '20/100 x 425 = 85'
+  host.appendChild(plain.root)
+  const c = await capture(plain.root)
+  return {
+    mathPremiereCaptureMs: Math.round(t1 - t0),
+    mathSecondeCaptureMs: Math.round(t2 - t1),
+    mathPngOctets: a.length, plainPngOctets: c.length,
+  }
+}
+</script>
+</body>
+</html>

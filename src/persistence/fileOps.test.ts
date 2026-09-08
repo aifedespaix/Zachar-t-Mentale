@@ -6,13 +6,14 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
   remove: vi.fn(),
   rename: vi.fn(),
   writeTextFile: vi.fn(),
+  exists: vi.fn(),
 }))
 vi.mock('@tauri-apps/api/path', () => ({
   join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
 }))
 vi.mock('./fileStore', () => ({ mindMapExists: vi.fn() }))
 
-import { mkdir, remove, rename, writeTextFile } from '@tauri-apps/plugin-fs'
+import { mkdir, remove, rename, writeTextFile, exists } from '@tauri-apps/plugin-fs'
 import { mindMapExists } from './fileStore'
 
 describe('createMindMapFile', () => {
@@ -85,5 +86,48 @@ describe('freeMindMapPath', () => {
       .mockResolvedValueOnce(false) // "Chapitre (3).json" free
     const path = await freeMindMapPath('/cours', 'Chapitre')
     expect(path).toBe('/cours/Chapitre (3).json')
+  })
+})
+
+
+describe('the asset sidecar travels with its mind map', () => {
+  beforeEach(() => {
+    vi.mocked(rename).mockReset().mockResolvedValue(undefined)
+    vi.mocked(remove).mockReset().mockResolvedValue(undefined)
+    vi.mocked(exists).mockReset().mockResolvedValue(true)
+  })
+
+  it('renames the sidecar alongside the map', async () => {
+    // Blocks address assets relative to a sidecar named after the file, so
+    // leaving it behind breaks every image in the map at once.
+    await renamePath('/cours/chapitre.json', '/cours/chapitre 2.json')
+    expect(vi.mocked(rename).mock.calls).toEqual([
+      ['/cours/chapitre.json', '/cours/chapitre 2.json'],
+      ['/cours/chapitre.assets', '/cours/chapitre 2.assets'],
+    ])
+  })
+
+  it('does not look for a sidecar when renaming a folder', async () => {
+    await renamePath('/cours/maths', '/cours/mathematiques')
+    expect(vi.mocked(rename).mock.calls).toHaveLength(1)
+  })
+
+  it('leaves a map with no sidecar alone', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    await renamePath('/cours/chapitre.json', '/cours/autre.json')
+    expect(vi.mocked(rename).mock.calls).toHaveLength(1)
+  })
+
+  it('deletes the sidecar with the map', async () => {
+    await deletePath('/cours/chapitre.json', false)
+    expect(vi.mocked(remove).mock.calls).toEqual([
+      ['/cours/chapitre.json', { recursive: false }],
+      ['/cours/chapitre.assets', { recursive: true }],
+    ])
+  })
+
+  it('deletes a folder without hunting for a sidecar', async () => {
+    await deletePath('/cours/maths', true)
+    expect(vi.mocked(remove).mock.calls).toHaveLength(1)
   })
 })

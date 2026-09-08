@@ -362,6 +362,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
         {exportCards && (
           <ExportDialog
             fileName={node.name}
+            filePath={node.path}
             cards={exportCards}
             open
             onClose={() => setExportCards(null)}

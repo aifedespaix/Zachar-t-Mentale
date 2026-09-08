@@ -259,14 +259,108 @@ describe('repairCards', () => {
  * that flags one of them is too strict — and a validator that is too strict is
  * worse than none, since it would block real files behind a repair dialog.
  */
-describe('the mind maps bundled with the app', () => {
+describe('the mind maps present in the working copy', () => {
   const files = import.meta.glob('../../.cartes-mentales/**/*.json', { eager: true, import: 'default' })
+  const paths = Object.keys(files)
 
-  it('finds at least one bundled map to check', () => {
-    expect(Object.keys(files).length).toBeGreaterThan(0)
+  // `.cartes-mentales/` is the user's own course material: gitignored, absent
+  // from a fresh clone. Requiring at least one map here made the suite pass on
+  // a machine that happens to hold them and fail in CI — so the check is
+  // conditional on their presence. What it still guards is real: a map the app
+  // itself produced must never come back needing repair.
+  it.runIf(paths.length > 0).each(paths)('%s passes validation untouched', path => {
+    expect(validateCards(files[path])).toEqual({ valid: true, issues: [] })
   })
 
-  it.each(Object.keys(files))('%s passes validation untouched', path => {
-    expect(validateCards(files[path])).toEqual({ valid: true, issues: [] })
+  it('validates a map shaped like the ones the app writes, with or without local files', () => {
+    // The glob is gitignored user data, so in CI it is empty and the `it.each`
+    // above runs zero times. This keeps the guarantee it was there for — a map
+    // the app produced must never come back needing repair — on a fixture that
+    // always exists.
+    const produced = [
+      { id: 'r', level: 1, title: 'Chapitre', parentId: null, order: 0 },
+      { id: 'a', level: 2, title: 'Thème', parentId: 'r', order: 0, definition: 'Une règle' },
+      {
+        id: 'b', level: 3, title: 'Exemple', parentId: 'a', order: 0,
+        content: [{ kind: 'math', latex: '\\frac{20}{100}' }], definition: '20/100',
+      },
+    ]
+    expect(validateCards(produced)).toEqual({ valid: true, issues: [] })
+  })
+})
+
+describe('content blocks', () => {
+  const root = { id: 'r', level: 1, title: 'Racine', parentId: null, order: 0 }
+
+  it('accepts a card carrying content blocks', () => {
+    const report = validateCards([
+      root,
+      { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0, definition: 'x²',
+        content: [{ kind: 'math', latex: 'x^2' }] },
+    ])
+    expect(report.valid).toBe(true)
+  })
+
+  it('accepts a block kind it does not know, instead of rejecting the card', () => {
+    // Forward compatibility: a file written by a later version must open.
+    const report = validateCards([
+      root,
+      { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0, definition: '[partition]',
+        content: [{ kind: 'music', abc: 'X:1' }] },
+    ])
+    expect(report.valid).toBe(true)
+  })
+
+  it('rejects a card whose content is not an array at all', () => {
+    const report = validateCards([
+      root,
+      { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0, content: 'pas un tableau' },
+    ])
+    expect(report.valid).toBe(false)
+    expect(report.issues[0].kind).toBe('malformed')
+  })
+
+  it('salvages a card whose only content is an image, instead of dropping it', () => {
+    // `id: 42` makes the entry fail isUsableCardRecord, which is what actually
+    // routes it through salvage(). An entry with a well-typed id and a ghost
+    // parent takes the newlyFloating branch instead and never reaches it.
+    const repaired = repairCards([
+      root,
+      { id: 42, level: 2, title: '', parentId: 'r', order: 0,
+        content: [{ kind: 'image', asset: 'a1.png', alt: 'Schéma', width: 100, height: 50 }] },
+    ])
+    const rescued = repaired.find(c => c.content?.[0]?.kind === 'image')
+    expect(rescued).toBeDefined()
+    expect(rescued!.detached).toBe(true)
+    // The mirror MUST be derived: without it the card is invisible to the quiz,
+    // the XMind note and the export, all of which read `definition`.
+    expect(rescued!.definition).toBe('[image : Schéma]')
+  })
+
+  it('does not resurrect junk content as a blank, unrenderable card', () => {
+    const repaired = repairCards([
+      root,
+      { id: 1, title: '', content: [null] },
+      { id: 2, title: '', content: [1, 2, 3] },
+      { id: 3, title: '', content: [{ kind: 'image', asset: 'a.png' }] },
+    ])
+    expect(repaired.filter(c => c.id !== 'r')).toHaveLength(0)
+  })
+
+  it('drops an image whose dimensions are not finite, rather than keeping a reference that dies on reload', () => {
+    const repaired = repairCards([
+      root,
+      { id: 9, title: '', content: [{ kind: 'image', asset: 'a.png', alt: 'x', width: null, height: 10 }] },
+    ])
+    expect(repaired.filter(c => c.id !== 'r')).toHaveLength(0)
+  })
+
+  it('leaves a repaired file valid even when it carries unknown blocks', () => {
+    const repaired = repairCards([
+      root,
+      { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0,
+        content: [{ kind: 'music', abc: 'X:1' }] },
+    ])
+    expect(validateCards(repaired).valid).toBe(true)
   })
 })

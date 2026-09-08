@@ -4,6 +4,7 @@ import {
   addChild,
   addSibling,
   updateTitle,
+  updateContent,
   updateDefinition,
   countDescendants,
   hasChildren,
@@ -518,5 +519,73 @@ describe('detached card invariants', () => {
     const { cards, c } = deepTree()
     const detached = detachCard(cards, c)
     expect(deleteCard(detached, c).find(x => x.id === c)).toBeUndefined()
+  })
+})
+
+describe('updateContent', () => {
+  const cards: Card[] = [
+    { id: 'r', level: 1, title: 'Racine', parentId: null, order: 0 },
+    { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0, definition: 'ancienne' },
+  ]
+
+  it('writes content and its derived definition together', () => {
+    const next = updateContent(cards, 'a', [{ kind: 'math', latex: 'x^2' }])
+    const card = next.find(c => c.id === 'a')!
+    expect(card.content).toEqual([{ kind: 'math', latex: 'x^2' }])
+    expect(card.definition).toBe('x²')
+  })
+
+  it('drops `content` entirely when the blocks normalize back to plain text', () => {
+    const withMath = updateContent(cards, 'a', [{ kind: 'math', latex: 'x^2' }])
+    const backToText = updateContent(withMath, 'a', [{ kind: 'text', text: 'Une règle' }])
+    const card = backToText.find(c => c.id === 'a')!
+    expect('content' in card).toBe(false)
+    expect(card.definition).toBe('Une règle')
+  })
+
+  it('clears both fields when every block is emptied out', () => {
+    const next = updateContent(cards, 'a', [{ kind: 'text', text: '  ' }])
+    const card = next.find(c => c.id === 'a')!
+    expect('content' in card).toBe(false)
+    expect('definition' in card).toBe(false)
+  })
+
+  it('does not mutate the input array or its cards', () => {
+    const before = structuredClone(cards)
+    updateContent(cards, 'a', [{ kind: 'math', latex: 'x^2' }])
+    expect(cards).toEqual(before)
+  })
+
+  it('leaves other cards untouched', () => {
+    const next = updateContent(cards, 'a', [{ kind: 'math', latex: 'x^2' }])
+    expect(next.find(c => c.id === 'r')).toEqual(cards.find(c => c.id === 'r'))
+  })
+
+  it('is a no-op on an unknown card id', () => {
+    expect(updateContent(cards, 'inconnu', [{ kind: 'math', latex: 'x^2' }])).toEqual(cards)
+  })
+})
+
+describe('updateDefinition routes through the same single writer', () => {
+  const cards: Card[] = [
+    { id: 'r', level: 1, title: 'Racine', parentId: null, order: 0 },
+    { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0, content: [{ kind: 'math', latex: 'x^2' }], definition: 'x²' },
+  ]
+
+  it('replacing a rich definition with plain text clears the stale content', () => {
+    // Otherwise the card would keep rendering its old formula while
+    // `definition` said something else — the exact divergence the
+    // single-writer rule exists to prevent.
+    const next = updateDefinition(cards, 'a', 'Juste du texte')
+    const card = next.find(c => c.id === 'a')!
+    expect('content' in card).toBe(false)
+    expect(card.definition).toBe('Juste du texte')
+  })
+
+  it('clearing a definition clears the content too', () => {
+    const next = updateDefinition(cards, 'a', undefined)
+    const card = next.find(c => c.id === 'a')!
+    expect('content' in card).toBe(false)
+    expect('definition' in card).toBe(false)
   })
 })

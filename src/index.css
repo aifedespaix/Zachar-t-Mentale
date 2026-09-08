@@ -2,6 +2,10 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+/* Through the bundler, NEVER a CDN: html-to-image can only embed the KaTeX
+   fonts into an export capture if it can read the stylesheet's cssRules,
+   which a cross-origin sheet forbids. See the spike's résultat 1. */
+@import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark *));
 

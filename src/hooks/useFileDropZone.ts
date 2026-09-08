@@ -1,7 +1,36 @@
 import { useEffect, useState, type RefObject } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
-const INVALID_FILE_MESSAGE = 'Seuls les fichiers .json de carte mentale peuvent être ouverts par glisser-déposer.'
+const INVALID_FILE_MESSAGE =
+  'Seuls les fichiers .json de carte mentale et les images peuvent être déposés ici.'
+
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.svg']
+
+function isImagePath(path: string): boolean {
+  const lower = path.toLowerCase()
+  return IMAGE_EXTENSIONS.some(extension => lower.endsWith(extension))
+}
+
+/**
+ * The card under a drop point, or `null`.
+ *
+ * Dropping a picture ONTO a card is the gesture that needs no explanation —
+ * far better than requiring the definition popover to be open first. The
+ * position arrives in physical pixels like every other coordinate here, so it
+ * is scaled before being handed to `elementFromPoint`.
+ */
+function cardIdAtPoint(position: { x: number; y: number }): string | null {
+  // Guarded rather than assumed: `elementFromPoint` is standard in the Tauri
+  // webviews but absent from some non-browser DOM implementations, and this
+  // runs inside an event handler where a throw would be swallowed silently.
+  if (typeof document.elementFromPoint !== 'function') return null
+
+  const scale = window.devicePixelRatio || 1
+  const element = document.elementFromPoint(position.x / scale, position.y / scale)
+  const card = element?.closest('[data-testid^="card-"]')
+  const testId = card?.getAttribute('data-testid')
+  return testId ? testId.slice('card-'.length) : null
+}
 
 function isInZone(zoneRef: RefObject<HTMLElement | null>, position: { x: number; y: number }): boolean {
   const el = zoneRef.current
@@ -27,7 +56,13 @@ function isInZone(zoneRef: RefObject<HTMLElement | null>, position: { x: number;
  */
 export function useFileDropZone(
   zoneRef: RefObject<HTMLElement | null>,
-  onOpenFile: (path: string) => void
+  onOpenFile: (path: string) => void,
+  /**
+   * Called when an image file is dropped onto a card. Absent when the host
+   * cannot store images — the drop is then reported as an unsupported file
+   * rather than silently ignored.
+   */
+  onDropImageOnCard?: (cardId: string, path: string) => void
 ): { isDragActive: boolean; dropError: string | null } {
   const [isDragActive, setIsDragActive] = useState(false)
   const [dropError, setDropError] = useState<string | null>(null)
@@ -47,13 +82,30 @@ export function useFileDropZone(
           if (payload.type === 'drop') {
             setIsDragActive(false)
             if (!isInZone(zoneRef, payload.position)) return
-            const jsonPath = payload.paths.find(p => p.toLowerCase().endsWith('.json'))
+
+            // A mind map opens; an image joins the card it landed on. Routing
+            // by extension rather than refusing everything but `.json` is what
+            // lets one window-level event serve both gestures.
+            const jsonPath = payload.paths.find(path => path.toLowerCase().endsWith('.json'))
             if (jsonPath) {
               setDropError(null)
               onOpenFile(jsonPath)
-            } else {
-              setDropError(INVALID_FILE_MESSAGE)
+              return
             }
+
+            const imagePath = payload.paths.find(isImagePath)
+            if (imagePath !== undefined && onDropImageOnCard !== undefined) {
+              const cardId = cardIdAtPoint(payload.position)
+              if (cardId !== null) {
+                setDropError(null)
+                onDropImageOnCard(cardId, imagePath)
+                return
+              }
+              setDropError('Dépose l’image sur une carte pour l’ajouter à sa définition.')
+              return
+            }
+
+            setDropError(INVALID_FILE_MESSAGE)
             return
           }
           // 'leave'
@@ -72,7 +124,7 @@ export function useFileDropZone(
       cancelled = true
       unlisten?.()
     }
-  }, [zoneRef, onOpenFile])
+  }, [zoneRef, onOpenFile, onDropImageOnCard])
 
   return { isDragActive, dropError }
 }

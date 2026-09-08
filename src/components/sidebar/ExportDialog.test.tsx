@@ -33,7 +33,11 @@ describe('ExportDialog', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Exporter' }))
 
-    expect(exportToPdfBytes).toHaveBeenCalledWith(cards, { showDefinitions: true, includeDetached: false })
+    expect(exportToPdfBytes).toHaveBeenCalledWith(cards, {
+      showDefinitions: true,
+      includeDetached: false,
+      mindMapPath: null,
+    })
     expect(saveBytesAs).toHaveBeenCalledWith(new Uint8Array([1]), 'chapitre.pdf', [{ name: 'PDF', extensions: ['pdf'] }])
     expect(onClose).toHaveBeenCalled()
     expect(onError).not.toHaveBeenCalled()
@@ -82,7 +86,11 @@ describe('ExportDialog', () => {
     await userEvent.click(screen.getByRole('radio', { name: 'Image' }))
     await userEvent.click(screen.getByRole('button', { name: 'Exporter' }))
 
-    expect(exportToImageDataUrls).toHaveBeenCalledWith(cards, { showDefinitions: true, includeDetached: false })
+    expect(exportToImageDataUrls).toHaveBeenCalledWith(cards, {
+      showDefinitions: true,
+      includeDetached: false,
+      mindMapPath: null,
+    })
     expect(saveBytesAs).toHaveBeenNthCalledWith(1, expect.any(Uint8Array), 'chapitre (1).png', [
       { name: 'Image PNG', extensions: ['png'] },
     ])

@@ -18,7 +18,9 @@ describe('exportToPdfBytes', () => {
   it('paginates, renders, and assembles a PDF', async () => {
     const bytes = await exportToPdfBytes(cards, { showDefinitions: true, includeDetached: false })
     expect(paginateForExport).toHaveBeenCalledWith(cards, { includeDetached: false })
-    expect(renderPagesToImages).toHaveBeenCalledWith([{ cards: [] }], true)
+    // The third argument is the asset resolver: assets must already be data
+    // URIs by capture time, or html-to-image rejects the whole page.
+    expect(renderPagesToImages).toHaveBeenCalledWith([{ cards: [] }], true, expect.any(Function))
     expect(assemblePdf).toHaveBeenCalled()
     expect(bytes).toEqual(new Uint8Array([1, 2, 3]))
   })

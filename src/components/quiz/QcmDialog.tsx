@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { Check, X, Lightbulb, Network } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
@@ -9,6 +10,16 @@ interface QcmDialogProps {
   noHintNote?: string
   correctOption: string
   distractors: string[]
+  /**
+   * How an option is displayed, when the plain string is a degraded view of it.
+   *
+   * The option string stays the IDENTITY — it is what dedupes the pool and what
+   * grading compares — while this only changes presentation. That split is
+   * deliberate: a `qcm-definition` option is a card's plain-text mirror, so two
+   * cards whose formulas project alike must still collide as one option, but a
+   * maths question should show a stacked fraction rather than `20/100`.
+   */
+  renderOption?: (option: string) => ReactNode
   onAnswer: (chosen: string) => void
   onCancel: () => void
   random?: () => number
@@ -32,6 +43,7 @@ export function QcmDialog({
   noHintNote,
   correctOption,
   distractors,
+  renderOption,
   onAnswer,
   onCancel,
   random = Math.random,
@@ -132,7 +144,7 @@ export function QcmDialog({
                 >
                   {revealCorrect ? <Check size={16} /> : revealWrong ? <X size={16} /> : LETTERS[index]}
                 </span>
-                <span>{option}</span>
+                <span style={{ minWidth: 0, overflowX: 'auto' }}>{renderOption ? renderOption(option) : option}</span>
               </button>
             )
           })}

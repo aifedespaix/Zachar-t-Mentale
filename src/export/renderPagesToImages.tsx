@@ -17,7 +17,11 @@ export interface CapturedPage {
  * Pages are processed one at a time: each capture is awaited, and its DOM
  * removed, before the next page mounts.
  */
-export async function renderPagesToImages(pages: ExportPage[], showDefinitions: boolean): Promise<CapturedPage[]> {
+export async function renderPagesToImages(
+  pages: ExportPage[],
+  showDefinitions: boolean,
+  resolveAsset?: (asset: string) => string
+): Promise<CapturedPage[]> {
   const results: CapturedPage[] = []
   for (const page of pages) {
     const bounds = computePageBounds(page)
@@ -31,7 +35,7 @@ export async function renderPagesToImages(pages: ExportPage[], showDefinitions: 
     document.body.appendChild(container)
     const root = createRoot(container)
     flushSync(() => {
-      root.render(<ExportPageRenderer page={page} showDefinitions={showDefinitions} />)
+      root.render(<ExportPageRenderer page={page} showDefinitions={showDefinitions} resolveAsset={resolveAsset} />)
     })
     try {
       const dataUrl = await captureElementAsPng(container)

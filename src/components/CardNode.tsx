@@ -20,6 +20,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 import { QcmDialog } from './quiz/QcmDialog'
 import { FlipCard } from './FlipCard'
 import { DefinitionPopover } from './DefinitionPopover'
+import { contentOf } from '../content/blocks'
+import { BlockView } from '../content/BlockView'
+import { imageBlockFrom } from '../content/imageBlock'
+import { pickImageFile } from '../content/pickImage'
+import { assetSrc } from '../persistence/assets'
+import { useWorkspaceStore } from '../state/useWorkspaceStore'
 
 interface QuizData {
   type: QuizQuestionType
@@ -140,6 +146,10 @@ export function CardNode({ data }: CardNodeProps) {
 
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
+  const updateContent = useCardsStore(s => s.updateContent)
+  const allCards = useCardsStore(s => s.history.present)
+  const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
+  const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const addChild = useCardsStore(s => s.addChild)
   const addSibling = useCardsStore(s => s.addSibling)
   const deleteCard = useCardsStore(s => s.deleteCard)
@@ -576,11 +586,30 @@ export function CardNode({ data }: CardNodeProps) {
             the bottom of the card regardless of title length or whether the
             definition text below it is shown. */}
         <div className="card-footer" style={{ display: 'flex', gap: '0.25rem', marginTop: 'auto' }}>
-          {card.definition ? (
+          {/* `contentOf` rather than `card.definition`: a card whose whole
+              definition is a picture has blocks but, defensively, might not
+              have text — it must still get the popover, not the "add" button. */}
+          {contentOf(card).length > 0 ? (
             <DefinitionPopover
-              definition={card.definition}
+              blocks={contentOf(card)}
               locked={locked}
-              onCommit={next => updateDefinition(card.id, next)}
+              onCommit={blocks => updateContent(card.id, blocks)}
+              // Assets live in a sidecar named after the open file, so every
+              // image capability is gated on there being one. With no file
+              // open the affordances stay hidden rather than failing on click.
+              resolveAsset={currentFilePath ? asset => assetSrc(currentFilePath, asset) : undefined}
+              onInsertImage={
+                currentFilePath ? source => imageBlockFrom(currentFilePath, source) : undefined
+              }
+              onPickImage={
+                currentFilePath
+                  ? async () => {
+                      const source = await pickImageFile()
+                      return source === null ? undefined : imageBlockFrom(currentFilePath, source)
+                    }
+                  : undefined
+              }
+              onError={setWorkspaceError}
             />
           ) : (
             <Tooltip>
@@ -700,6 +729,24 @@ export function CardNode({ data }: CardNodeProps) {
           }
           correctOption={quiz.type === 'qcm-definition' ? (card.definition ?? '') : card.title}
           distractors={quiz.type === 'qcm-definition' ? (quiz.distractorDefinitions ?? []) : (quiz.distractorTitles ?? [])}
+          // Definition options are cards' plain-text mirrors, so a formula
+          // question would otherwise offer « 20/100 × 425 » while the card
+          // itself shows a stacked fraction. The string stays the identity —
+          // grading and pool dedupe still compare it — and only the display is
+          // resolved back to the source blocks. Titles are plain by design
+          // (they are the quiz's comparison key), so they get no resolver.
+          renderOption={
+            quiz.type === 'qcm-definition'
+              ? option => {
+                  const source = allCards.find(c => c.definition === option)
+                  return source && source.content !== undefined ? (
+                    <BlockView blocks={contentOf(source)} resolveAsset={() => ''} />
+                  ) : (
+                    option
+                  )
+                }
+              : undefined
+          }
           onAnswer={chosen => {
             if (quiz.type === 'qcm-definition') answerQcmDefinition(card.id, chosen)
             else answerQcmTitle(card.id, chosen)

@@ -20,6 +20,13 @@ export function computePageBounds(page: ExportPage): PageBounds {
 export interface ExportPageRendererProps {
   page: ExportPage
   showDefinitions: boolean
+  /**
+   * Passed straight to every card. The capture pipeline supplies a resolver
+   * backed by data URIs: `html-to-image` rejects the entire page capture when
+   * it meets an image it cannot re-encode, so assets must already be inlined
+   * by the time this renders.
+   */
+  resolveAsset?: (asset: string) => string
 }
 
 /**
@@ -29,7 +36,7 @@ export interface ExportPageRendererProps {
  * page reads exactly like a slice of the real canvas, never a bespoke print
  * layout that could drift from it.
  */
-export function ExportPageRenderer({ page, showDefinitions }: ExportPageRendererProps) {
+export function ExportPageRenderer({ page, showDefinitions, resolveAsset }: ExportPageRendererProps) {
   const positions = computeLayout(page.cards)
   const bounds = computePageBounds(page)
   return (
@@ -53,7 +60,7 @@ export function ExportPageRenderer({ page, showDefinitions }: ExportPageRenderer
         const pos = positions[card.id]
         return (
           <div key={card.id} style={{ position: 'absolute', left: pos.x, top: pos.y, width: EXPORT_CARD_WIDTH }}>
-            <StaticCardView card={card} showDefinition={showDefinitions} />
+            <StaticCardView card={card} showDefinition={showDefinitions} resolveAsset={resolveAsset} />
           </div>
         )
       })}

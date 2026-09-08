@@ -1,5 +1,7 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type { Card } from '../types/card'
+import type { CardBlock } from '../types/cardBlock'
+import { reconcileCards } from '../content/blocks'
 import { createHistory, pushState, undo as undoHistory, redo as redoHistory, type History } from './history'
 import {
   createRootCard,
@@ -7,6 +9,7 @@ import {
   addSibling as addSiblingOp,
   updateTitle as updateTitleOp,
   updateDefinition as updateDefinitionOp,
+  updateContent as updateContentOp,
   deleteCard as deleteCardOp,
   deleteCardDetachingChildren as deleteCardDetachingChildrenOp,
   moveCardToIndex as moveCardToIndexOp,
@@ -26,6 +29,7 @@ interface CardsState {
   addSibling: (siblingId: string, position: 'above' | 'below') => string
   updateTitle: (id: string, title: string) => void
   updateDefinition: (id: string, definition: string | undefined) => void
+  updateContent: (id: string, blocks: CardBlock[]) => void
   deleteCard: (id: string) => void
   /** Deletes the card but keeps its descendants, flattened into floating cards. */
   deleteCardDetachingChildren: (id: string) => void
@@ -70,6 +74,14 @@ export function createCardsStore(): CardsStore {
       const next = updateDefinitionOp(get().history.present, id, definition)
       set(state => ({ history: pushState(state.history, next) }))
     },
+    updateContent: (id, blocks) => {
+      const present = get().history.present
+      const next = updateContentOp(present, id, blocks)
+      // `updateContent` returns the same array when nothing actually changed;
+      // pushing it anyway would spend an undo step on a no-op.
+      if (next === present) return
+      set(state => ({ history: pushState(state.history, next) }))
+    },
     deleteCard: id => {
       const next = deleteCardOp(get().history.present, id)
       set(state => ({ history: pushState(state.history, next) }))
@@ -102,7 +114,10 @@ export function createCardsStore(): CardsStore {
     undo: () => set(state => ({ history: undoHistory(state.history) })),
     redo: () => set(state => ({ history: redoHistory(state.history) })),
     toggleLock: () => set(state => ({ locked: !state.locked })),
-    loadCards: cards => set({ history: createHistory(cards) }),
+    // Reconciled on the way in: `content` is authoritative and `definition` is
+    // its mirror, so a file whose two fields disagree is made consistent
+    // before anything reads it. See `reconcileCards`.
+    loadCards: cards => set({ history: createHistory(reconcileCards(cards)) }),
   }))
 }
 
