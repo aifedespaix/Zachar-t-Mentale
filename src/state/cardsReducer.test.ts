@@ -6,6 +6,7 @@ import {
   updateTitle,
   updateContent,
   updateDefinition,
+  updateIcon,
   countDescendants,
   hasChildren,
   deleteCard,
@@ -77,6 +78,35 @@ describe('updateTitle', () => {
     const root = createRootCard('old')
     const cards = updateTitle([root], root.id, 'new')
     expect(cards[0].title).toBe('new')
+  })
+})
+
+describe('updateIcon', () => {
+  it('sets the icon on the targeted card', () => {
+    const root = createRootCard()
+    const cards = updateIcon([root], root.id, 'Brain')
+    expect(cards[0].icon).toBe('Brain')
+  })
+
+  it('DELETES the key when the icon is cleared, so the card serializes as it did before', () => {
+    const root = { ...createRootCard(), icon: 'Brain' }
+    const cards = updateIcon([root], root.id, undefined)
+    expect('icon' in cards[0]).toBe(false)
+  })
+
+  it('returns the same array when the icon is unchanged, so no undo step is spent', () => {
+    const root = { ...createRootCard(), icon: 'Brain' }
+    const cards = [root]
+    expect(updateIcon(cards, root.id, 'Brain')).toBe(cards)
+    expect(updateIcon(cards, 'inconnu', 'Star')).toBe(cards)
+  })
+
+  it('leaves the other cards untouched', () => {
+    const root = createRootCard()
+    const { cards: withChild, newCardId } = addChild([root], root.id)
+    const cards = updateIcon(withChild, newCardId, 'Star')
+    expect(cards.find(c => c.id === root.id)?.icon).toBeUndefined()
+    expect(cards.find(c => c.id === newCardId)?.icon).toBe('Star')
   })
 })
 

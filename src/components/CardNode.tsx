@@ -13,6 +13,7 @@ import {
   X,
   PenLine,
   ListChecks,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react'
 import type { Card, CardLevel } from '../types/card'
@@ -28,6 +29,8 @@ import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../hooks/useResolvedTheme'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
+import { CardIconBadge } from './CardIconBadge'
+import { IconPickerDialog } from './IconPickerDialog'
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { QcmDialog } from './quiz/QcmDialog'
@@ -173,6 +176,7 @@ export function CardNode({ data }: CardNodeProps) {
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
   const updateContent = useCardsStore(s => s.updateContent)
+  const updateIcon = useCardsStore(s => s.updateIcon)
   const allCards = useCardsStore(s => s.history.present)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
@@ -192,6 +196,7 @@ export function CardNode({ data }: CardNodeProps) {
   const [confirmDetachOpen, setConfirmDetachOpen] = useState(false)
   const [flipped, setFlipped] = useState(false)
   const [editingDefinition, setEditingDefinition] = useState(false)
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [draftDefinition, setDraftDefinition] = useState(card.definition ?? '')
   const isDetached = card.detached === true
   // A floating card is painted grey whatever level it last had: its level is
@@ -223,6 +228,9 @@ export function CardNode({ data }: CardNodeProps) {
   // action only makes sense while it still has descendants to empty out.
   const deleteDisabled = isRoot && !hasChildren(card.id)
   const canDetach = !isRoot && !isDetached
+  // The icon slot is only a control while the map can actually be edited; on a
+  // locked map or mid-quiz it degrades to a plain, unclickable badge.
+  const iconSlotInteractive = !locked && !quizActive
 
   // A freshly created card opens its title editor straight away, so the
   // "prise de notes en direct" flow is type -> Entrée -> next card. The field
@@ -397,6 +405,68 @@ export function CardNode({ data }: CardNodeProps) {
       >
         <GripVertical size={14} />
       </span>
+
+      {/*
+        The mnemonic icon, pinned to the card's top-right corner.
+
+        Three states in one slot: a card that HAS an icon always shows it —
+        including while locked and during a quiz, where the picture is exactly
+        the memory hook the card is meant to trigger — and only becomes
+        clickable (to change or remove it) when the map is editable. A card
+        with no icon shows a faint placeholder instead, and only while editing:
+        an empty affordance is clutter on a locked map and noise during a quiz.
+      */}
+      {iconSlotInteractive ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                data-testid="card-icon-button"
+                aria-label={card.icon ? 'Changer l’icône' : 'Ajouter une icône'}
+                onClick={event => {
+                  event.stopPropagation()
+                  setIconPickerOpen(true)
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 4,
+                  right: 4,
+                  display: 'flex',
+                  padding: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  // A card with no icon yet only hints at the slot; picking one
+                  // is an option, not something the card is asking for.
+                  opacity: card.icon ? 1 : 0.4,
+                  lineHeight: 0,
+                }}
+              >
+                <CardIconBadge name={card.icon} fallback={Sparkles} border={colors.border} theme={theme} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{card.icon ? 'Changer l’icône' : 'Ajouter une icône'}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        card.icon !== undefined && (
+          <span style={{ position: 'absolute', top: 4, right: 4, lineHeight: 0 }}>
+            <CardIconBadge name={card.icon} border={colors.border} theme={theme} />
+          </span>
+        )
+      )}
+
+      {iconPickerOpen && (
+        <IconPickerDialog
+          open
+          onOpenChange={setIconPickerOpen}
+          current={card.icon}
+          border={colors.border}
+          theme={theme}
+          onSelect={icon => updateIcon(card.id, icon)}
+        />
+      )}
 
       {canAddSibling && (
         <span style={{ visibility: locked ? 'hidden' : 'visible' }}>

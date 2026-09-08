@@ -119,6 +119,16 @@ describe('validateCards', () => {
     expect(kinds(cards)).toEqual(expect.arrayContaining(['duplicate-id', 'malformed']))
   })
 
+  it('accepts a mnemonic icon, and rejects one that is not a name', () => {
+    const withIcon = healthyMap().map(c => (c.id === 'a1' ? { ...c, icon: 'Brain' } : c))
+    expect(kinds(withIcon)).toEqual([])
+
+    // Not a usable record: `icon` is read as a Lucide name everywhere, and a
+    // number there would sail through to the card renderer.
+    const withBadIcon = healthyMap().map(c => (c.id === 'a1' ? { ...c, icon: 42 } : c))
+    expect(kinds(withBadIcon)).toEqual(expect.arrayContaining(['malformed']))
+  })
+
   it('detects a level that disagrees with the card’s real depth', () => {
     const cards = healthyMap().map(c => (c.id === 'a1' ? { ...c, level: 2 as const } : c))
     expect(kinds(cards)).toEqual(['invalid-level'])

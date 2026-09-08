@@ -9,6 +9,7 @@ import {
   addSibling as addSiblingOp,
   updateTitle as updateTitleOp,
   updateDefinition as updateDefinitionOp,
+  updateIcon as updateIconOp,
   updateContent as updateContentOp,
   deleteCard as deleteCardOp,
   deleteCardDetachingChildren as deleteCardDetachingChildrenOp,
@@ -28,6 +29,8 @@ interface CardsState {
   addChild: (parentId: string) => string
   addSibling: (siblingId: string, position: 'above' | 'below') => string
   updateTitle: (id: string, title: string) => void
+  /** Sets the card's mnemonic icon, or clears it with `undefined`. */
+  updateIcon: (id: string, icon: string | undefined) => void
   updateDefinition: (id: string, definition: string | undefined) => void
   updateContent: (id: string, blocks: CardBlock[]) => void
   deleteCard: (id: string) => void
@@ -68,6 +71,14 @@ export function createCardsStore(): CardsStore {
     },
     updateTitle: (id, title) => {
       const next = updateTitleOp(get().history.present, id, title)
+      set(state => ({ history: pushState(state.history, next) }))
+    },
+    updateIcon: (id, icon) => {
+      const present = get().history.present
+      const next = updateIconOp(present, id, icon)
+      // Identity means the card already had this icon — re-picking it from the
+      // dialog must not cost an undo step.
+      if (next === present) return
       set(state => ({ history: pushState(state.history, next) }))
     },
     updateDefinition: (id, definition) => {

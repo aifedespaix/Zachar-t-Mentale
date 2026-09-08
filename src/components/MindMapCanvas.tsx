@@ -103,6 +103,31 @@ function buildNodes(
   return zoneLabel ? [...cardNodes, zoneLabel] : cardNodes
 }
 
+/**
+ * Copies each node's `measured` box (and the `width`/`height` React Flow may
+ * have written alongside it) from the nodes currently on screen onto the ones
+ * `buildNodes` just produced.
+ *
+ * Without this, EVERY rebuild — flipping the lock, a theme change, an answered
+ * quiz card — hands React Flow node objects with no `measured` field.
+ * `adoptUserNodes` then resets both the node's size (to the `initialWidth` /
+ * `initialHeight` fallback: 200×92) and its handle bounds, so every edge is
+ * re-routed against a card-sized guess for the frame or two it takes the
+ * ResizeObserver to report the real boxes again. The cards themselves never
+ * move — they are placed by `position`, not by their size — so what the user
+ * sees is the links alone jumping and snapping back. Carrying the measurement
+ * over keeps the boxes (and, through them, the handle bounds React Flow only
+ * preserves for an already-measured node) stable across the rebuild.
+ */
+export function carryMeasured(next: Node[], previous: Node[]): Node[] {
+  const previousById = new Map(previous.map(node => [node.id, node]))
+  return next.map(node => {
+    const before = previousById.get(node.id)
+    if (!before?.measured) return node
+    return { ...node, measured: before.measured, width: before.width, height: before.height }
+  })
+}
+
 /** The floating zone's caption, anchored just above its top-left card. */
 function detachedZoneLabelNode(cards: Card[], layout: Record<string, Position>): Node | null {
   const detachedPositions = cards.filter(c => c.detached).map(c => layout[c.id]).filter(Boolean)
@@ -318,7 +343,9 @@ function MindMapCanvasInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes.current)
 
   useEffect(() => {
-    setNodes(buildNodes(cards, layout, locked, autoEditId, spawningId, quizQuestions, quizResults))
+    setNodes(current =>
+      carryMeasured(buildNodes(cards, layout, locked, autoEditId, spawningId, quizQuestions, quizResults), current)
+    )
     // `spawningId` intentionally excluded below: it is only read here to seed
     // the spawn override at CREATION time (when `cards` changes anyway). The
     // effect right after this one clears it via a targeted position patch
@@ -335,7 +362,7 @@ function MindMapCanvasInner() {
   // move — an empty drop zone, or a cancelled overflow confirmation: "la carte
   // retourne à sa place initiale".
   const resyncNodes = useCallback(() => {
-    setNodes(buildNodes(cards, layout, locked, autoEditId, null, quizQuestions, quizResults))
+    setNodes(current => carryMeasured(buildNodes(cards, layout, locked, autoEditId, null, quizQuestions, quizResults), current))
   }, [cards, layout, locked, autoEditId, quizQuestions, quizResults, setNodes])
 
   // One frame after a card spawns at its parent's position (see `buildNodes`),
