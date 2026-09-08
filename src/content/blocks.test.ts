@@ -116,3 +116,45 @@ describe('contentOf', () => {
     expect(contentOf(base)).toEqual([])
   })
 })
+
+describe('contentOf — degrading unknown blocks at READ time', () => {
+  const base: Card = { id: 'a', level: 2, title: 'T', parentId: 'r', order: 0 }
+
+  it('degrades a block kind it does not know to text, keeping its readable payload', () => {
+    // A `music` block written by a later version: rendering it is impossible
+    // here, losing it would be worse.
+    const card = { ...base, content: [{ kind: 'music', abc: 'X:1\nK:C' }] as never, definition: '[partition]' }
+    expect(contentOf(card)).toEqual([{ kind: 'text', text: 'X:1\nK:C' }])
+  })
+
+  it('does NOT mutate the card, so the unknown block survives the next autosave', () => {
+    // The load path validates but never transforms, and autosave rewrites the
+    // whole file — degrading in place would silently destroy forward content.
+    const content = [{ kind: 'music', abc: 'X:1' }] as never
+    const card = { ...base, content }
+    contentOf(card)
+    expect(card.content).toBe(content)
+    expect(card.content![0]).toEqual({ kind: 'music', abc: 'X:1' })
+  })
+
+  it('drops a known block whose payload is malformed rather than rendering it', () => {
+    const card = { ...base, content: [{ kind: 'image', alt: 'x' }] as never }
+    expect(contentOf(card)).toEqual([])
+  })
+
+  it('drops an unknown block that carries no readable string at all', () => {
+    const card = { ...base, content: [{ kind: 'widget', level: 3 }] as never }
+    expect(contentOf(card)).toEqual([])
+  })
+
+  it('keeps well-formed blocks untouched alongside a degraded one', () => {
+    const card = {
+      ...base,
+      content: [{ kind: 'math', latex: 'x^2' }, { kind: 'music', abc: 'X:1' }] as never,
+    }
+    expect(contentOf(card)).toEqual([
+      { kind: 'math', latex: 'x^2' },
+      { kind: 'text', text: 'X:1' },
+    ])
+  })
+})

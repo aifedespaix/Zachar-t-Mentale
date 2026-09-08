@@ -270,3 +270,55 @@ describe('the mind maps bundled with the app', () => {
     expect(validateCards(files[path])).toEqual({ valid: true, issues: [] })
   })
 })
+
+describe('content blocks', () => {
+  const root = { id: 'r', level: 1, title: 'Racine', parentId: null, order: 0 }
+
+  it('accepts a card carrying content blocks', () => {
+    const report = validateCards([
+      root,
+      { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0, definition: 'x²',
+        content: [{ kind: 'math', latex: 'x^2' }] },
+    ])
+    expect(report.valid).toBe(true)
+  })
+
+  it('accepts a block kind it does not know, instead of rejecting the card', () => {
+    // Forward compatibility: a file written by a later version must open.
+    const report = validateCards([
+      root,
+      { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0, definition: '[partition]',
+        content: [{ kind: 'music', abc: 'X:1' }] },
+    ])
+    expect(report.valid).toBe(true)
+  })
+
+  it('rejects a card whose content is not an array at all', () => {
+    const report = validateCards([
+      root,
+      { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0, content: 'pas un tableau' },
+    ])
+    expect(report.valid).toBe(false)
+    expect(report.issues[0].kind).toBe('malformed')
+  })
+
+  it('salvages a card whose only content is an image, instead of dropping it', () => {
+    const repaired = repairCards([
+      root,
+      { id: 'x', level: 9, title: '', parentId: 'fantome', order: 0,
+        content: [{ kind: 'image', asset: 'a1.png', alt: 'Schéma', width: 100, height: 50 }] },
+    ])
+    const rescued = repaired.find(c => c.content?.[0]?.kind === 'image')
+    expect(rescued).toBeDefined()
+    expect(rescued!.detached).toBe(true)
+  })
+
+  it('leaves a repaired file valid even when it carries unknown blocks', () => {
+    const repaired = repairCards([
+      root,
+      { id: 'a', level: 2, title: 'A', parentId: 'r', order: 0,
+        content: [{ kind: 'music', abc: 'X:1' }] },
+    ])
+    expect(validateCards(repaired).valid).toBe(true)
+  })
+})

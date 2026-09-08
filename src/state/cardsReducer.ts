@@ -1,5 +1,7 @@
 import type { Card, CardLevel } from '../types/card'
 import { canReceiveChildren, isRootCard } from '../types/card'
+import type { CardBlock } from '../types/cardBlock'
+import { normalizeContent } from '../content/blocks'
 
 export const MAX_LEVEL = 4
 
@@ -114,8 +116,42 @@ export function updateTitle(cards: Card[], cardId: string, title: string): Card[
   return cards.map(c => (c.id === cardId ? { ...c, title } : c))
 }
 
+/**
+ * The ONE place `content` and `definition` are written, always together.
+ *
+ * `definition` is the plain-text mirror every other consumer reads — the
+ * quiz's distractor pools and hints, the XMind `notes.plain.content`,
+ * `salvage()`. Deriving it here, from the same blocks in the same call, is what
+ * makes it impossible for the two fields to disagree. `normalizeContent` also
+ * decides whether `content` is needed at all: an all-text definition is stored
+ * as `definition` alone, so a plain card never acquires a `content` array just
+ * by passing through the editor.
+ *
+ * Both fields are DELETED rather than set to `undefined`, so a card that lost
+ * its definition serializes without the key — as it did before this existed.
+ */
+export function updateContent(cards: Card[], cardId: string, blocks: CardBlock[]): Card[] {
+  const { content, definition } = normalizeContent(blocks)
+  return cards.map(card => {
+    if (card.id !== cardId) return card
+    const next: Card = { ...card }
+    if (content === undefined) delete next.content
+    else next.content = content
+    if (definition === undefined) delete next.definition
+    else next.definition = definition
+    return next
+  })
+}
+
+/**
+ * Plain-text definition write, expressed in terms of `updateContent` so it
+ * cannot bypass the single-writer rule. Routing it this way is what clears a
+ * stale `content` when a rich definition is replaced by plain text — otherwise
+ * the card would go on rendering its old formula while `definition` said
+ * something else.
+ */
 export function updateDefinition(cards: Card[], cardId: string, definition: string | undefined): Card[] {
-  return cards.map(c => (c.id === cardId ? { ...c, definition } : c))
+  return updateContent(cards, cardId, definition === undefined ? [] : [{ kind: 'text', text: definition }])
 }
 
 export function hasChildren(cards: Card[], cardId: string): boolean {

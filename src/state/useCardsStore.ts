@@ -1,5 +1,6 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type { Card } from '../types/card'
+import type { CardBlock } from '../types/cardBlock'
 import { createHistory, pushState, undo as undoHistory, redo as redoHistory, type History } from './history'
 import {
   createRootCard,
@@ -7,6 +8,7 @@ import {
   addSibling as addSiblingOp,
   updateTitle as updateTitleOp,
   updateDefinition as updateDefinitionOp,
+  updateContent as updateContentOp,
   deleteCard as deleteCardOp,
   deleteCardDetachingChildren as deleteCardDetachingChildrenOp,
   moveCardToIndex as moveCardToIndexOp,
@@ -26,6 +28,7 @@ interface CardsState {
   addSibling: (siblingId: string, position: 'above' | 'below') => string
   updateTitle: (id: string, title: string) => void
   updateDefinition: (id: string, definition: string | undefined) => void
+  updateContent: (id: string, blocks: CardBlock[]) => void
   deleteCard: (id: string) => void
   /** Deletes the card but keeps its descendants, flattened into floating cards. */
   deleteCardDetachingChildren: (id: string) => void
@@ -68,6 +71,10 @@ export function createCardsStore(): CardsStore {
     },
     updateDefinition: (id, definition) => {
       const next = updateDefinitionOp(get().history.present, id, definition)
+      set(state => ({ history: pushState(state.history, next) }))
+    },
+    updateContent: (id, blocks) => {
+      const next = updateContentOp(get().history.present, id, blocks)
       set(state => ({ history: pushState(state.history, next) }))
     },
     deleteCard: id => {

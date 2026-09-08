@@ -128,7 +128,7 @@ Also cover: a `table` block projecting as ` | `-joined rows; `blocksToPlainText(
 - Produces: `sanitizeContent(value: unknown): CardBlock[] | undefined` — per-block validation that degrades rather than rejects.
 - Consumed by: the load path, unchanged otherwise.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 it('keeps a card whose only content is an image, instead of dropping it', () => {
@@ -154,12 +154,12 @@ it('rejects a malformed block payload (image without an asset)', () => {
 })
 ```
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 Extend `isUsableCardRecord` with `if (value.content !== undefined && !Array.isArray(value.content)) return false` — nothing stricter, because per-block problems are *degraded*, not fatal. `sanitizeContent` maps each entry: a known `kind` with a well-formed payload passes through, anything else becomes `{ kind: 'text', text: <projection or '' > }`, and an entry with no salvageable text is dropped. Update `salvage()` so `content` counts as recoverable material alongside `title`/`definition`.
 
-- [ ] **Step 3: Verify** — `npx vitest run src/validation/`
-- [ ] **Step 4: Commit** — `fix(validation): validate card content blocks, degrade unknown kinds instead of dropping cards`
+- [x] **Step 3: Verify** — `npx vitest run src/validation/` — vert
+- [x] **Step 4: Commit** — `fix(validation): validate card content blocks, degrade unknown kinds instead of dropping cards`
 
 ---
 
@@ -175,7 +175,7 @@ Extend `isUsableCardRecord` with `if (value.content !== undefined && !Array.isAr
 - Produces: `updateContent(cards: Card[], cardId: string, blocks: CardBlock[]): Card[]` and the store action `updateContent(id: string, blocks: CardBlock[]): void`.
 - `updateDefinition` stays, and is redefined in terms of `updateContent([{ kind: 'text', text }])` so there is genuinely one write path.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 it('writes content and its derived definition together', () => {
@@ -196,11 +196,21 @@ it('drops `content` entirely when the blocks normalize back to plain text', () =
 it('pushes exactly one undo entry per content change', () => { /* … */ })
 ```
 
-- [ ] **Step 2: Implement** — apply `normalizeContent`, then set/delete `content` and `definition` on the card. Never mutate.
-- [ ] **Step 3: Verify** — `npx vitest run src/state/`
-- [ ] **Step 4: Commit** — `feat(state): add updateContent as the single writer of content and its derived definition`
+- [x] **Step 2: Implement** — apply `normalizeContent`, then set/delete `content` and `definition` on the card. Never mutate.
+- [x] **Step 3: Verify** — `npx vitest run src/state/` — vert ; suite complète 558/558, tsc propre
+- [x] **Step 4: Commit** — `feat(state): add updateContent as the single writer of content and its derived definition`
 
 ---
+
+
+> **Écart assumé par rapport au plan.** Le plan plaçait `sanitizeContent` dans
+> la validation, donc sur le chemin de chargement. C'est faux : le chargement
+> valide sans transformer, et l'autosave réécrit ensuite tout le fichier — un
+> assainissement au chargement **détruirait** les blocs d'une version
+> ultérieure dès la première frappe. La dégradation vit donc dans `contentOf`
+> (`src/content/blocks.ts`), à la LECTURE : le disque garde le bloc inconnu
+> intact, seul l'affichage le dégrade. La validation ne vérifie plus que la
+> forme du conteneur.
 
 ## Task 4: KaTeX rendering helper
 

@@ -78,6 +78,12 @@ function isUsableCardRecord(value: unknown): value is Card {
   if (value.parentId !== null && typeof value.parentId !== 'string') return false
   if (value.detached !== undefined && typeof value.detached !== 'boolean') return false
   if (value.definition !== undefined && typeof value.definition !== 'string') return false
+  // Only the shape of the container is checked here. Per-block problems are
+  // NOT fatal: `contentOf` degrades an unknown kind to text and drops a
+  // malformed payload at render time, so a card carrying one block written by
+  // a later version of the app still opens — and, because nothing rewrites it
+  // on load, that block survives the next autosave untouched.
+  if (value.content !== undefined && !Array.isArray(value.content)) return false
   return true
 }
 
@@ -309,7 +315,11 @@ function salvage(entry: unknown): Card | null {
   if (!isRecord(entry)) return null
   const title = typeof entry.title === 'string' ? entry.title : ''
   const definition = typeof entry.definition === 'string' ? entry.definition : undefined
-  if (title === '' && definition === undefined) return null
+  const content = Array.isArray(entry.content) && entry.content.length > 0 ? entry.content : undefined
+  // `content` counts as recoverable material: a SVT card whose whole point is
+  // a diagram may legitimately have no title and no definition text, and
+  // dropping it would delete the only copy of that image reference.
+  if (title === '' && definition === undefined && content === undefined) return null
   const card: Card = {
     id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : crypto.randomUUID(),
     level: clampLevel(typeof entry.level === 'number' ? entry.level : 1),
@@ -319,6 +329,7 @@ function salvage(entry: unknown): Card | null {
     detached: true,
   }
   if (definition !== undefined) card.definition = definition
+  if (content !== undefined) card.content = content as Card['content']
   return card
 }
 

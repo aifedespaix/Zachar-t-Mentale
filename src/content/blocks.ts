@@ -124,8 +124,69 @@ export function blocksToPlainText(blocks: CardBlock[]): string {
     .join('\n')
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(entry => typeof entry === 'string')
+}
+
+/**
+ * A raw block as it came off disk, narrowed to something renderable — or
+ * `null` when there is nothing worth showing.
+ *
+ * A block of a kind this version does not know (a `music` block written by a
+ * later one) degrades to a text block carrying whatever strings it held, so it
+ * is shown poorly rather than lost. A block of a KNOWN kind whose payload is
+ * malformed is dropped instead: half an image is not an image, and rendering it
+ * would throw where the whole point of validation is that it must not.
+ */
+function sanitizeBlock(raw: unknown): CardBlock | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const block = raw as Record<string, unknown>
+
+  switch (block.kind) {
+    case 'text':
+      return typeof block.text === 'string' ? { kind: 'text', text: block.text } : null
+    case 'math':
+      return typeof block.latex === 'string'
+        ? { kind: 'math', latex: block.latex, ...(block.display === true ? { display: true } : {}) }
+        : null
+    case 'image':
+      return typeof block.asset === 'string' &&
+        typeof block.alt === 'string' &&
+        typeof block.width === 'number' &&
+        typeof block.height === 'number'
+        ? { kind: 'image', asset: block.asset, alt: block.alt, width: block.width, height: block.height }
+        : null
+    case 'table':
+      return isStringArray(block.header) && Array.isArray(block.rows) && block.rows.every(isStringArray)
+        ? { kind: 'table', header: block.header, rows: block.rows as string[][] }
+        : null
+    default: {
+      // Unknown kind: keep whatever a human could still read out of it.
+      const text = Object.entries(block)
+        .filter(([key, value]) => key !== 'kind' && typeof value === 'string')
+        .map(([, value]) => value as string)
+        .join('\n')
+        .trim()
+      return text === '' ? null : { kind: 'text', text }
+    }
+  }
+}
+
+/**
+ * The blocks of a card, ready to render.
+ *
+ * This is the ONLY read adapter — `BlockView`, the export's `StaticCardView`
+ * and the quiz all go through it — which is what lets the degradation live
+ * here rather than at load time. That placement is deliberate: the load path
+ * validates without transforming, and autosave rewrites the whole file, so
+ * sanitizing on load would silently destroy a newer version's blocks the first
+ * time the user touched the map. Degrading on READ leaves the file on disk
+ * intact; the card is never mutated.
+ */
 export function contentOf(card: Card): CardBlock[] {
-  if (card.content !== undefined) return card.content
+  if (card.content !== undefined) {
+    return card.content.map(sanitizeBlock).filter((block): block is CardBlock => block !== null)
+  }
   if (card.definition !== undefined && card.definition !== '') {
     return [{ kind: 'text', text: card.definition }]
   }
