@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Type, Sigma, Table2, Plus, Trash2, ImagePlus } from 'lucide-react'
 import type { CardBlock, CardBlockKind } from '../types/cardBlock'
 import { renderMathToHtml } from './renderMath'
+import { MathFieldEditor } from './MathFieldEditor'
 
 /**
  * Editing modes the selector offers. `image` is deliberately absent: an image
@@ -290,12 +291,26 @@ function BlockField({ block, index, resolveAsset, onChange }: BlockFieldProps) {
     case 'math':
       return (
         <div>
-          <textarea
-            aria-label={`Formule du bloc ${index + 1}`}
-            value={block.latex}
-            onChange={event => onChange({ ...block, latex: event.target.value })}
-            spellCheck={false}
-            style={{ ...FIELD_STYLE, minHeight: 34, resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
+          {/* WYSIWYG when MathLive is available, the raw LaTeX field until
+              then — and permanently if it never loads. Both edit the same
+              string, so neither is a dead end: someone who knows LaTeX can
+              still type it, and someone who does not never has to. */}
+          <MathFieldEditor
+            latex={block.latex}
+            onChange={latex => onChange({ ...block, latex })}
+            ariaLabel={`Formule du bloc ${index + 1}`}
+            fallback={
+              <textarea
+                // Distinct from the WYSIWYG field's label: both are text
+                // inputs for the same value, and sharing one name makes them
+                // indistinguishable to assistive tech and to tests alike.
+                aria-label={`Formule du bloc ${index + 1} (LaTeX)`}
+                value={block.latex}
+                onChange={event => onChange({ ...block, latex: event.target.value })}
+                spellCheck={false}
+                style={{ ...FIELD_STYLE, minHeight: 34, resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
+              />
+            }
           />
           {/* Live preview, rendered synchronously so it cannot reflow after
               paint. It is what makes raw LaTeX usable at all until MathLive

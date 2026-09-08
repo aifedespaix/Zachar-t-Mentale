@@ -5,6 +5,14 @@ import { useState } from 'react'
 import { BlockEditor, convertBlock } from './BlockEditor'
 import type { CardBlock } from '../types/cardBlock'
 
+// The WYSIWYG field is MathLive's concern, covered in MathFieldEditor.test.tsx.
+// Here it always renders its fallback, so these tests exercise BlockEditor
+// rather than depending on whether a 5.7 MB dynamic import happened to resolve
+// during an earlier test in this file.
+vi.mock('./MathFieldEditor', () => ({
+  MathFieldEditor: ({ fallback }: { fallback: React.ReactNode }) => fallback,
+}))
+
 /** Drives the editor as the popover does: it owns the draft, the editor edits it. */
 function Harness({ initial, onState }: { initial: CardBlock[]; onState: (blocks: CardBlock[]) => void }) {
   const [blocks, setBlocks] = useState(initial)
@@ -164,7 +172,7 @@ describe('the math field', () => {
     const user = userEvent.setup()
     renderEditor([{ kind: 'math', latex: '' }])
 
-    await user.type(screen.getByRole('textbox', { name: /formule du bloc 1/i }), 'x^2')
+    await user.type(screen.getByRole('textbox', { name: /formule du bloc 1 \(latex\)/i }), 'x^2')
 
     expect(screen.getByTestId('math-preview-0').querySelector('.katex')).not.toBeNull()
   })

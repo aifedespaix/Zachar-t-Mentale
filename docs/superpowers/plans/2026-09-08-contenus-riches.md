@@ -321,12 +321,28 @@ it('does not resize the card when a definition gains a formula', () => { /* règ
 - Produces: `MathFieldEditor({ latex, onChange })` — a `<math-field>` wrapper.
 - **Loaded through a dynamic `import()`**, on first edit of a math block only, so app startup pays nothing for it.
 
-- [ ] **Step 1: Write the failing tests** — renders a fallback textarea until the module resolves; emits LaTeX on change; seeds from the block's existing `latex`.
-- [ ] **Step 2: Implement** — a `useRef` callback on the custom element (JSX cannot pass a LaTeX string through props safely: both use braces).
-- [ ] **Step 3: Verify** — `npx vitest run src/content/MathFieldEditor.test.tsx`
-- [ ] **Step 4: Commit** — `feat(content): edit formulas with MathLive, loaded on demand`
+- [x] **Step 1: Write the failing tests** — renders a fallback textarea until the module resolves; emits LaTeX on change; seeds from the block's existing `latex`.
+- [x] **Step 2: Implement** — a `useRef` callback on the custom element (JSX cannot pass a LaTeX string through props safely: both use braces).
+- [x] **Step 3: Verify** — `npx vitest run src/content/MathFieldEditor.test.tsx`
+- [x] **Step 4: Commit** — `feat(content): edit formulas with MathLive, loaded on demand`
 
 ---
+
+
+> **Décision d'implémentation.** Quel éditeur afficher est arrêté UNE FOIS au
+> montage du bloc, jamais réévalué tant qu'il est ouvert. Réagir à la
+> résolution de l'import laisserait le champ se substituer en pleine phrase —
+> détruisant le curseur, le focus et la frappe en cours ; c'est arrivé en
+> développement et le test l'a attrapé. Conséquence assumée : le tout premier
+> bloc formule d'une session s'édite en LaTeX brut (et lance le chargement),
+> tous ceux ouverts ensuite ont le champ WYSIWYG.
+>
+> Le champ brut porte un libellé distinct (« Formule du bloc N (LaTeX) ») :
+> MathLive expose aussi `role=textbox`, et deux champs de même nom sont
+> indistinguables pour les technologies d'assistance comme pour les tests.
+>
+> Vérifié au build : MathLive part dans son propre chunk de 800 ko, le
+> démarrage ne le paie pas.
 
 ## Task 8: Sidecar asset storage
 
