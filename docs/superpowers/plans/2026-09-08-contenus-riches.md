@@ -452,7 +452,7 @@ Three things, in this order:
 Also normalize the `catch` in `ExportDialog`: `toPng` rejects with an `Event`, not an `Error`, so the current `error instanceof Error ? … : 'erreur inconnue'` hides the real cause.
 
 - [x] **Step 3: Verify** — `npx vitest run src/export/ src/components/sidebar/ExportDialog.test.tsx`
-- [ ] **Step 4: Commit** — `fix(export): render content blocks, inline image assets, and cap card height`
+- [x] **Step 4: Commit** — `fix(export): render content blocks, inline image assets, and cap card height`
 
 ---
 
