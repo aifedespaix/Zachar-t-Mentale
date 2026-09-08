@@ -33,7 +33,6 @@ vi.mock('./persistence/fileTree', async importOriginal => {
 })
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn().mockResolvedValue(null) }))
-vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }))
 vi.mock('./persistence/sessionState', () => ({
   loadSessionState: vi.fn(),
   saveSessionState: vi.fn(),
@@ -492,14 +491,40 @@ describe('App update banner', () => {
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
     vi.mocked(check).mockReset()
   })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /**
+   * An update the hook can find and download. `download`/`install` are split:
+   * the hook must call the former on its own and NEVER the latter — on Windows
+   * `install()` kills the running process, so only a user click may trigger it.
+   */
+  function mockAvailableUpdate() {
+    const update = {
+      download: vi.fn().mockResolvedValue(undefined),
+      install: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    }
+    vi.mocked(check).mockResolvedValue(update as never)
+    return update
+  }
+
+  /** This block runs on real timers, so `settle()`'s timer advance is unusable. */
+  async function flush() {
+    await act(async () => {})
+    await act(async () => {})
+  }
 
   it('shows the update banner once the background download finishes', async () => {
-    const downloadAndInstall = vi.fn().mockResolvedValue(undefined)
-    vi.mocked(check).mockResolvedValue({ available: true, downloadAndInstall } as never)
+    const update = mockAvailableUpdate()
 
     render(<App />)
 
     expect(await screen.findByText('Mise à jour prête')).toBeInTheDocument()
+    expect(update.download).toHaveBeenCalled()
+    // The download alone must never install: that would exit the app mid-session.
+    expect(update.install).not.toHaveBeenCalled()
   })
 
   it('does not show the update banner when no update is available', async () => {
@@ -507,6 +532,50 @@ describe('App update banner', () => {
 
     render(<App />)
     await act(async () => {})
+
+    expect(screen.queryByText('Mise à jour prête')).not.toBeInTheDocument()
+  })
+
+  it('never shows the update banner while a load error banner is visible', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const update = mockAvailableUpdate()
+    vi.mocked(loadMindMap).mockRejectedValue(new Error('corrupt'))
+
+    render(<App />)
+    await act(async () => {
+      useWorkspaceStore.getState().setCurrentFile(PATH_A)
+    })
+    await flush()
+
+    // The update really is ready — it is the error banner that suppresses it,
+    // not a download that never finished.
+    expect(update.download).toHaveBeenCalled()
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(screen.queryByText('Mise à jour prête')).not.toBeInTheDocument()
+  })
+
+  it('keeps the banner dismissed even after an unrelated error banner appears and clears', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockAvailableUpdate()
+    const user = userEvent.setup()
+
+    render(<App />)
+    await screen.findByText('Mise à jour prête')
+    await user.click(screen.getByRole('button', { name: 'Masquer le message de mise à jour' }))
+    expect(screen.queryByText('Mise à jour prête')).not.toBeInTheDocument()
+
+    // Trigger an unrelated load error: it takes the update banner's slot, so
+    // UpdateReadyBanner unmounts. Dismissal must not unmount with it.
+    vi.mocked(loadMindMap).mockRejectedValue(new Error('corrupt'))
+    await act(async () => {
+      useWorkspaceStore.getState().setCurrentFile(PATH_A)
+    })
+    await flush()
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+
+    // Clear it the way the user does — the update banner must not reappear.
+    await user.click(screen.getByRole('button', { name: 'Masquer le message d’erreur' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 
     expect(screen.queryByText('Mise à jour prête')).not.toBeInTheDocument()
   })

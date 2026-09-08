@@ -41,9 +41,10 @@ ce lot, si ce n'est que le remote GitHub est/sera public.
    `v*`, un seul job `windows-latest`, build via `tauri-apps/tauri-action`,
    publication automatique de la release GitHub (pas de brouillon —
    décision utilisateur).
-3. **Updater** : `tauri-plugin-updater` + `tauri-plugin-process`, clé de
-   signature Ed25519 générée localement, endpoint = `latest.json` de la
-   dernière release GitHub.
+3. **Updater** : `tauri-plugin-updater` seul (pas de
+   `tauri-plugin-process` : sous Windows l'installeur relance l'app
+   lui-même), clé de signature Ed25519 générée localement, endpoint =
+   `latest.json` de la dernière release GitHub.
 4. **UX** : vérification silencieuse au démarrage, téléchargement en
    arrière-plan si une mise à jour existe, bandeau discret non-bloquant
    proposant de redémarrer — jamais de popup surprise, jamais de
@@ -128,19 +129,21 @@ Points clés :
 
 ### Dépendances
 
-- Rust (`src-tauri/Cargo.toml`) : `tauri-plugin-updater = "2"`,
-  `tauri-plugin-process = "2"`.
-- JS (`package.json`) : `@tauri-apps/plugin-updater`,
-  `@tauri-apps/plugin-process`.
-- Enregistrement des plugins dans `src-tauri/src/lib.rs` (`.plugin(tauri_plugin_updater::Builder::new().build())`,
-  `.plugin(tauri_plugin_process::init())`), à côté des plugins `fs`/`dialog`
-  déjà enregistrés.
+- Rust (`src-tauri/Cargo.toml`) : `tauri-plugin-updater = "2"`.
+- JS (`package.json`) : `@tauri-apps/plugin-updater`.
+- Enregistrement du plugin dans `src-tauri/src/lib.rs`
+  (`.plugin(tauri_plugin_updater::Builder::new().build())`), à côté des
+  plugins `fs`/`dialog` déjà enregistrés.
+- Pas de `tauri-plugin-process` / `@tauri-apps/plugin-process` : le
+  redémarrage post-installation est assuré par l'installeur NSIS lui-même
+  (`restartAfterInstall`), donc `relaunch()` n'aurait aucun appelant (YAGNI).
 
 ### Configuration — `tauri.conf.json`
 
 ```json
 {
   "bundle": {
+    "targets": ["nsis"],
     "createUpdaterArtifacts": true
   },
   "plugins": {
@@ -154,11 +157,18 @@ Points clés :
 }
 ```
 
+`"targets": ["nsis"]` et non `"all"` : l'app est Windows-only, et `"all"`
+produirait aussi un MSI. Or `tauri-action` a `updaterJsonPreferNsis:
+false` par défaut, donc le `latest.json` généré pointerait vers le MSI —
+qui exige une élévation UAC à chaque mise à jour et peut s'installer en
+produit parallèle à côté d'une copie installée via NSIS. Un seul target
+lève l'ambiguïté et raccourcit le build CI.
+
 ### Permissions — `src-tauri/capabilities/default.json`
 
-Ajout de `"updater:default"` et `"process:allow-restart"` à la liste de
-permissions existante (aux côtés de celles déjà accordées aux plugins
-`fs`/`dialog`/`opener`).
+Ajout de `"updater:default"` à la liste de permissions existante (aux
+côtés de celles déjà accordées aux plugins `fs`/`dialog`/`opener`). Pas
+de `"process:allow-restart"` — le plugin `process` n'est pas utilisé.
 
 ### Génération et gestion de la clé de signature
 
@@ -183,21 +193,39 @@ l'agent la fasse à sa place) :
 ### `src/hooks/useAppUpdater.ts`
 
 ```ts
-function useAppUpdater(): { updateReady: boolean; applyUpdate: () => Promise<void> }
+function useAppUpdater(): {
+  updateReady: boolean
+  dismissed: boolean
+  applyUpdate: () => Promise<void>
+  dismissUpdate: () => void
+}
 ```
 
 - Au montage (une fois, dans `App.tsx`) : appelle `check()` de
   `@tauri-apps/plugin-updater`.
 - Si une mise à jour est disponible : appelle immédiatement
-  `update.downloadAndInstall()` en arrière-plan, sans attendre d'action
+  `update.download()` en arrière-plan, sans attendre d'action
   utilisateur. Aucune UI pendant le téléchargement (pas de barre de
-  progression — cohérent avec « jamais d'interruption »).
-- Une fois le téléchargement/l'installation terminés : passe
-  `updateReady` à `true`.
-- `applyUpdate()` : appelle `relaunch()` de `@tauri-apps/plugin-process`.
-  Jamais appelé automatiquement.
+  progression — cohérent avec « jamais d'interruption »). **Important** :
+  `download()` seul ne redémarre jamais l'app — `downloadAndInstall()`
+  (la méthode combinée) a été délibérément évitée, car sous Windows elle
+  termine le processus courant dès que l'installeur est lancé
+  (`std::process::exit(0)` côté plugin), ce qui aurait tué la session en
+  cours sans le bandeau de confirmation prévu.
+- Une fois le téléchargement terminé : passe `updateReady` à `true`.
+- `applyUpdate()` : appelle `update.install()`. Sous Windows, ceci lance
+  l'installeur visible puis termine le processus — l'installeur relance
+  l'app dans la nouvelle version (`restartAfterInstall` vaut `true` par
+  défaut côté plugin). `@tauri-apps/plugin-process`/`relaunch()` ne sont
+  donc pas utilisés : le redémarrage est entièrement porté par
+  l'installeur Windows lui-même. Jamais appelé automatiquement.
+- `dismissUpdate()` : masque le bandeau sans annuler la mise à jour déjà
+  téléchargée. L'état `dismissed` vit dans ce hook (jamais démonté tant
+  que l'app tourne), pas dans le composant du bandeau — un bandeau
+  d'erreur non lié qui apparaît puis se referme ne doit jamais faire
+  réapparaître un bandeau de mise à jour déjà masqué.
 - Toute erreur (pas de réseau, endpoint injoignable, échec de
-  téléchargement) est avalée silencieusement (`catch` vide + `console.
+  téléchargement) est avalée silencieusement (`catch` + `console.
   error` pour le débogage) : `updateReady` reste `false`, l'app continue
   normalement, un nouveau essai aura lieu au prochain lancement. Pas de
   bannière d'erreur visible — une mise à jour n'est jamais une action
@@ -213,10 +241,16 @@ s'afficher, pour ne jamais empiler deux bandeaux).
 
 Contenu : texte court (« Mise à jour prête » — sans détails de version, pas
 de changelog affiché, hors périmètre) + bouton « Redémarrer » appelant
-`applyUpdate()` + un bouton de fermeture (×) qui masque le bandeau sans
-annuler la mise à jour déjà téléchargée (elle s'appliquera au prochain
-redémarrage naturel de l'app, quoi qu'il arrive, car `downloadAndInstall`
-a déjà fait son travail — fermer le bandeau ne fait que le cacher).
+`applyUpdate()` + un bouton de fermeture (×) appelant `dismissUpdate()`,
+qui masque le bandeau sans annuler la mise à jour déjà téléchargée
+(fermer le bandeau ne fait que le cacher ; le paquet vérifié reste sur
+disque et s'installera au prochain « Redémarrer »).
+
+Le composant est purement présentationnel : il ne détient **aucun** état
+local. `App.tsx` le monte/démonte selon `updateReady && !dismissed`
+fournis par `useAppUpdater` — un `useState` interne serait perdu au
+démontage provoqué par un bandeau d'erreur concurrent, et le bandeau
+masqué réapparaîtrait.
 
 Nouveaux tokens CSS (`index.css`, light + dark, même mécanisme que
 `--warning-*` du lot 4) :
@@ -234,33 +268,40 @@ existante avec ces tokens à la place des `--warning-*`.
 
 - Réseau indisponible / endpoint GitHub injoignable au `check()` : échec
   silencieux, réessai au prochain lancement (voir ci-dessus).
-- Téléchargement interrompu en cours de route : `downloadAndInstall` lève,
+- Téléchargement interrompu en cours de route : `download()` lève,
   capturé par le même `catch` silencieux — `updateReady` reste `false`,
-  aucun fichier partiel appliqué (comportement natif du plugin, qui ne
-  remplace le binaire qu'après un téléchargement complet et une
-  vérification de signature réussie).
+  le bandeau ne s'affiche jamais et `install()` n'est donc jamais
+  atteignable ; aucun fichier partiel appliqué (comportement natif du
+  plugin, qui ne remplace le binaire qu'après un téléchargement complet
+  et une vérification de signature réussie).
 - Signature invalide (build corrompu ou mal signé) : le plugin refuse
   l'installation nativement, remonté comme une erreur `catch`ée — même
   traitement silencieux, pas de faux binaire installé.
 
 ## Tests
 
-- `useAppUpdater.ts` : mock de `@tauri-apps/plugin-updater` (`check`) et
-  `@tauri-apps/plugin-process` (`relaunch`), même pattern de mock que les
-  autres hooks Tauri du projet (ex. `fileStore.test.ts`).
-  - `check()` résout `null`/`available: false` → `updateReady` reste
-    `false`, `downloadAndInstall` jamais appelé.
-  - `check()` résout une update disponible → `downloadAndInstall` appelé
-    automatiquement, puis `updateReady` passe à `true`.
-  - `check()` ou `downloadAndInstall()` rejette → `updateReady` reste
-    `false`, pas d'exception qui remonte au composant appelant.
-  - `applyUpdate()` appelle `relaunch()`.
-- `UpdateReadyBanner.tsx` : ne rend rien si `updateReady` est `false` ;
-  affiche le bouton Redémarrer et déclenche `applyUpdate` au clic si
-  `updateReady` est `true` ; le bouton de fermeture masque le bandeau sans
-  appeler `applyUpdate`.
+- `useAppUpdater.ts` : mock de `@tauri-apps/plugin-updater` (`check`,
+  résolvant un faux `Update` avec `download`/`install`/`close`), même
+  pattern de mock que les autres hooks Tauri du projet (ex.
+  `fileStore.test.ts`).
+  - `check()` résout `null` → `updateReady` reste `false`, `download`
+    jamais appelé.
+  - `check()` résout une update disponible → `download()` appelé
+    automatiquement, `install()` **jamais** appelé, puis `updateReady`
+    passe à `true`.
+  - `check()` ou `download()` rejette → `updateReady` reste `false`, pas
+    d'exception qui remonte au composant appelant.
+  - `applyUpdate()` appelle `update.install()` ; no-op si aucune update
+    n'a été trouvée.
+  - `dismissUpdate()` passe `dismissed` à `true`.
+- `UpdateReadyBanner.tsx` : affiche le bouton Redémarrer et appelle
+  `onApply` au clic ; le bouton de fermeture appelle `onDismiss` sans
+  appeler `onApply`. (La visibilité elle-même est testée dans `App.tsx` —
+  le composant n'en décide plus.)
 - `App.tsx` : le bandeau update et les bandeaux d'erreur existants
-  (`loadError`/`dropError`) ne s'affichent jamais simultanément.
+  (`loadError`/`dropError`) ne s'affichent jamais simultanément ; et un
+  bandeau masqué reste masqué après qu'un bandeau d'erreur non lié soit
+  apparu puis refermé (régression du `useState` local).
 - Le pipeline CI lui-même n'est pas unit-testable de façon significative :
   vérifié en pratique en coupant un vrai tag une fois l'implémentation
   terminée (voir plan d'implémentation).

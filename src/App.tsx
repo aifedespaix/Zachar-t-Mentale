@@ -79,7 +79,7 @@ function App() {
   useWindowTitle(currentFilePath)
   useThemeDomSync()
   useAppliedFontFamily()
-  const { updateReady, applyUpdate } = useAppUpdater()
+  const { updateReady, dismissed, applyUpdate, dismissUpdate } = useAppUpdater()
   const { flush } = useAutosave(
     loadedPath ?? '',
     cards,
@@ -233,8 +233,8 @@ function App() {
             <span style={{ flex: 1 }}>⚠ {dropError}</span>
           </div>
         )}
-        {!loadError && !dropError && updateReady && (
-          <UpdateReadyBanner onApply={applyUpdate} />
+        {!loadError && !dropError && updateReady && !dismissed && (
+          <UpdateReadyBanner onApply={applyUpdate} onDismiss={dismissUpdate} />
         )}
         <main ref={mainRef} style={{ flex: 1, position: 'relative' }}>
           {isDragActive && (
