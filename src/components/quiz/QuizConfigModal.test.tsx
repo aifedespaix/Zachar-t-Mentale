@@ -41,7 +41,7 @@ describe('QuizConfigModal', () => {
     const user = userEvent.setup()
     render(<QuizConfigModal open onOpenChange={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: /^difficile$/i }))
+    await user.click(screen.getByRole('radio', { name: /^difficile$/i }))
     await user.click(screen.getByRole('button', { name: /lancer le quiz/i }))
 
     expect(useQuizStore.getState().config?.difficulty).toBe('difficile')
@@ -76,5 +76,45 @@ describe('QuizConfigModal', () => {
     await user.click(screen.getByRole('button', { name: /lancer le quiz/i }))
 
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+})
+
+describe('QuizConfigModal difficulty selector', () => {
+  beforeEach(() => {
+    const pristine = createQuizStore().getState()
+    useQuizStore.setState({
+      active: pristine.active,
+      showSummary: pristine.showSummary,
+      config: pristine.config,
+      questions: pristine.questions,
+      results: pristine.results,
+      recallProgress: pristine.recallProgress,
+      wasLockedBeforeQuiz: pristine.wasLockedBeforeQuiz,
+    })
+  })
+
+  it('marks exactly one difficulty as chosen', () => {
+    render(<QuizConfigModal open onOpenChange={() => {}} />)
+
+    const chosen = screen.getAllByRole('radio').filter(option => option.getAttribute('aria-checked') === 'true')
+    expect(chosen).toHaveLength(1)
+    expect(chosen[0]).toHaveAccessibleName('Moyen')
+  })
+
+  it('moves the selection when another difficulty is picked', async () => {
+    const user = userEvent.setup()
+    render(<QuizConfigModal open onOpenChange={() => {}} />)
+
+    await user.click(screen.getByRole('radio', { name: 'Facile' }))
+
+    expect(screen.getByRole('radio', { name: 'Facile' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Moyen' })).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('says what each difficulty does to a written answer, not just how many cards it draws', () => {
+    render(<QuizConfigModal open onOpenChange={() => {}} />)
+
+    expect(screen.getByText('La première lettre seulement')).toBeInTheDocument()
+    expect(screen.getByText('La moitié des lettres offertes')).toBeInTheDocument()
   })
 })

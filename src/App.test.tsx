@@ -17,7 +17,7 @@ vi.mock('./persistence/workspaceConfig', () => ({
   saveWorkspaceConfig: vi.fn(),
 }))
 vi.mock('./persistence/quizSettings', () => ({
-  loadQuizSettings: vi.fn().mockResolvedValue({ similarityThreshold: 100, lengthGuideEnabled: true }),
+  loadQuizSettings: vi.fn().mockResolvedValue({ similarityThreshold: 100, lengthGuideEnabled: true, liveLetterFeedback: false }),
   saveQuizSettings: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('./persistence/appearanceSettings', async () => {
@@ -60,6 +60,18 @@ function resetStores() {
   })
   const cards = createCardsStore().getState()
   useCardsStore.setState({ history: cards.history, locked: cards.locked })
+  // An active quiz now hides the file sidebar and frames the canvas, so a quiz
+  // left running by one test would change what every later test can even see.
+  const quiz = createQuizStore().getState()
+  useQuizStore.setState({
+    active: quiz.active,
+    showSummary: quiz.showSummary,
+    config: quiz.config,
+    questions: quiz.questions,
+    results: quiz.results,
+    recallProgress: quiz.recallProgress,
+    wasLockedBeforeQuiz: quiz.wasLockedBeforeQuiz,
+  })
 }
 
 /** Flush the pending load promise, then let the autosave debounce elapse. */
@@ -172,23 +184,23 @@ describe('App file switching', () => {
 
 describe('App quiz wiring', () => {
   beforeEach(() => {
+    resetStores()
     vi.useFakeTimers()
-    vi.mocked(loadMindMap).mockReset()
-    vi.mocked(saveMindMap).mockReset()
-    vi.mocked(loadMindMap).mockResolvedValue(null)
-    vi.mocked(saveMindMap).mockResolvedValue(undefined)
+    vi.mocked(loadMindMap).mockReset().mockResolvedValue(cardsA)
+    vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
+    vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
     vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
-    const pristine = createQuizStore().getState()
-    useQuizStore.setState({
-      active: pristine.active,
-      showSummary: pristine.showSummary,
-      config: pristine.config,
-      questions: pristine.questions,
-      results: pristine.results,
-      wasLockedBeforeQuiz: pristine.wasLockedBeforeQuiz,
-    })
+    vi.mocked(scanFolder).mockReset().mockResolvedValue([])
   })
   afterEach(() => vi.useRealTimers())
+
+  function startQuiz() {
+    useQuizStore.setState({
+      active: true,
+      questions: [{ cardId: 'a-root', type: 'recall' }],
+      results: { 'a-root': 'unanswered' },
+    })
+  }
 
   it('shows the quiz launch button when no quiz is active', async () => {
     render(<App />)
@@ -196,21 +208,41 @@ describe('App quiz wiring', () => {
     expect(screen.getByRole('button', { name: /lancer un quiz/i })).toBeInTheDocument()
   })
 
-  it('hides the quiz launch button and shows the HUD while a quiz is active', async () => {
-    useQuizStore.setState({ active: true, questions: [{ cardId: 'x', type: 'recall' }], results: { x: 'unanswered' } })
+  it('frames the canvas and hides the launch button while a quiz is active', async () => {
     render(<App />)
-    await settle()
+    await openFile(PATH_A)
+    await act(async () => startQuiz())
 
     expect(screen.queryByRole('button', { name: /lancer un quiz/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /terminer le quiz/i })).toBeInTheDocument() // proves the HUD rendered
+    expect(screen.getByTestId('quiz-frame')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /terminer le quiz/i })).toBeInTheDocument()
   })
 
   it('hides the lock toggle while a quiz is active (quiz mode inherits locked mode for its whole duration)', async () => {
-    useQuizStore.setState({ active: true, questions: [{ cardId: 'x', type: 'recall' }], results: { x: 'unanswered' } })
     render(<App />)
-    await settle()
+    await openFile(PATH_A)
+    await act(async () => startQuiz())
 
     expect(screen.queryByRole('button', { name: /verrouiller|déverrouiller/i })).not.toBeInTheDocument()
+  })
+
+  it('takes the file tree away during a quiz, so no one can switch maps mid-round', async () => {
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours'] })
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'chapitre-a.json', path: PATH_A }])
+    render(<App />)
+    await openFile(PATH_A)
+    expect(await screen.findByRole('button', { name: 'cours' })).toBeInTheDocument()
+
+    await act(async () => startQuiz())
+
+    expect(screen.queryByRole('button', { name: 'cours' })).not.toBeInTheDocument()
+  })
+
+  it('leaves the canvas unframed in the editor', async () => {
+    render(<App />)
+    await openFile(PATH_A)
+
+    expect(screen.queryByTestId('quiz-frame')).not.toBeInTheDocument()
   })
 })
 

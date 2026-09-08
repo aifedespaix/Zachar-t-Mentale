@@ -1,6 +1,6 @@
 // src/components/quiz/QuizConfigModal.tsx
 import { useState } from 'react'
-import { Sprout, Zap, Flame, type LucideIcon } from 'lucide-react'
+import { Sprout, Zap, Flame, Check, type LucideIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { useQuizStore } from '../../state/useQuizStore'
@@ -18,12 +18,14 @@ interface DifficultyOption {
   icon: LucideIcon
   hidePercent: number
   color: string
+  /** What this level actually changes about a written answer. */
+  help: string
 }
 
 const DIFFICULTIES: DifficultyOption[] = [
-  { value: 'facile', label: 'Facile', icon: Sprout, hidePercent: 20, color: '#16a34a' },
-  { value: 'moyen', label: 'Moyen', icon: Zap, hidePercent: 50, color: '#d97706' },
-  { value: 'difficile', label: 'Difficile', icon: Flame, hidePercent: 75, color: '#dc2626' },
+  { value: 'facile', label: 'Facile', icon: Sprout, hidePercent: 20, color: '#16a34a', help: 'La moitié des lettres offertes' },
+  { value: 'moyen', label: 'Moyen', icon: Zap, hidePercent: 50, color: '#d97706', help: 'Un quart des lettres offertes' },
+  { value: 'difficile', label: 'Difficile', icon: Flame, hidePercent: 75, color: '#dc2626', help: 'La première lettre seulement' },
 ]
 
 interface QuizConfigModalProps {
@@ -100,30 +102,68 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
           <legend style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8 }}>
             Difficulté
           </legend>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {DIFFICULTIES.map(({ value, label, icon: Icon, hidePercent, color }) => (
-              <button
-                key={value}
-                type="button"
-                aria-label={label}
-                aria-pressed={difficulty === value}
-                onClick={() => setDifficulty(value)}
-                style={{
-                  flex: 1,
-                  borderRadius: 12,
-                  padding: '12px 8px',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  border: `${difficulty === value ? 3 : 2}px solid ${color}`,
-                  background: 'var(--background)',
-                  color: 'inherit',
-                }}
-              >
-                <Icon style={{ color, width: 24, height: 24, margin: '0 auto 4px', display: 'block' }} />
-                <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
-                <div style={{ fontSize: 10.5, opacity: 0.75 }}>Cache {hidePercent}% des cartes</div>
-              </button>
-            ))}
+          {/*
+            The old selector said "selected" with a 3px border against a 2px
+            one — a difference nobody could see, so nobody could tell which
+            difficulty was active. Now the choice is filled with its own colour
+            and check-marked, and the two it is not are visibly stood down:
+            drained of colour, dimmed, and flat. Which one is on is now the
+            first thing you see, not something you measure.
+          */}
+          <div role="radiogroup" aria-label="Difficulté" style={{ display: 'flex', gap: 8 }}>
+            {DIFFICULTIES.map(({ value, label, icon: Icon, hidePercent, color, help }) => {
+              const selected = difficulty === value
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-label={label}
+                  aria-checked={selected}
+                  onClick={() => setDifficulty(value)}
+                  style={{
+                    flex: 1,
+                    position: 'relative',
+                    borderRadius: 12,
+                    padding: '14px 8px 12px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    border: `2px solid ${selected ? color : 'var(--border)'}`,
+                    background: selected ? `color-mix(in oklch, ${color}, transparent 88%)` : 'var(--muted)',
+                    color: selected ? 'inherit' : 'var(--muted-foreground)',
+                    opacity: selected ? 1 : 0.6,
+                    filter: selected ? 'none' : 'grayscale(1)',
+                    boxShadow: selected ? `0 0 0 3px color-mix(in oklch, ${color}, transparent 85%)` : 'none',
+                    transition: 'opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease',
+                  }}
+                >
+                  {selected && (
+                    <span
+                      aria-hidden
+                      style={{
+                        position: 'absolute',
+                        top: -8,
+                        right: -8,
+                        width: 20,
+                        height: 20,
+                        borderRadius: '9999px',
+                        background: color,
+                        color: '#fff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Check size={13} strokeWidth={3} />
+                    </span>
+                  )}
+                  <Icon style={{ color: selected ? color : 'inherit', width: 24, height: 24, margin: '0 auto 4px', display: 'block' }} />
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
+                  <div style={{ fontSize: 10.5, opacity: 0.8, marginTop: 2 }}>Cache {hidePercent}% des cartes</div>
+                  <div style={{ fontSize: 10.5, opacity: 0.8 }}>{help}</div>
+                </button>
+              )
+            })}
           </div>
         </fieldset>
 

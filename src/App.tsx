@@ -7,8 +7,7 @@ import { SaveFailedDialog } from './components/SaveFailedDialog'
 import { LockToggle } from './components/LockToggle'
 import { FileSidebar } from './components/sidebar/FileSidebar'
 import { QuizButton } from './components/quiz/QuizButton'
-import { QuizSettingsButton } from './components/quiz/QuizSettingsButton'
-import { QuizHud } from './components/quiz/QuizHud'
+import { QuizFrame } from './components/quiz/QuizFrame'
 import { QuizSummaryModal } from './components/quiz/QuizSummaryModal'
 import { useQuizSettingsStore } from './state/useQuizSettingsStore'
 import { useCardsStore } from './state/useCardsStore'
@@ -27,7 +26,7 @@ import { mimeForPath } from './content/pickImage'
 import { contentOf } from './content/blocks'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { ThemeToggleButton } from './components/ThemeToggleButton'
-import { AppearanceSettingsButton } from './components/appearance/AppearanceSettingsButton'
+import { SettingsButton } from './components/settings/SettingsButton'
 import { useAppearanceSettingsStore } from './state/useAppearanceSettingsStore'
 import { useThemeDomSync } from './hooks/useResolvedTheme'
 import { useAppliedFontFamily } from './hooks/useAppliedFontFamily'
@@ -239,13 +238,19 @@ function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
-      <FileSidebar onOpenFile={requestOpenFile} />
+      {/*
+        The file tree is gone for the duration of a quiz. Leaving it there let
+        the user switch mind maps mid-quiz — which silently answers nothing,
+        loses the round, and is never what clicking a file during a quiz was
+        meant to do. "Terminer le quiz", in the frame's header, is the way back
+        to the editor and to the rest of the workspace.
+      */}
+      {!quizActive && <FileSidebar onOpenFile={requestOpenFile} />}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
         <header style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
           {!quizActive && <LockToggle />}
           {!quizActive && <QuizButton />}
-          {!quizActive && <QuizSettingsButton />}
-          {!quizActive && <AppearanceSettingsButton />}
+          {!quizActive && <SettingsButton />}
           {!quizActive && <ThemeToggleButton />}
           <span title={currentFilePath ?? undefined} style={{ fontSize: 13, fontWeight: 500 }}>
             {currentFileName ?? 'Aucun fichier ouvert'}
@@ -306,9 +311,11 @@ function App() {
             // the instance left the viewport framing the file that was open
             // before (often nowhere near the new cards), which is what made a
             // map look like it opened and then vanished.
-            <CanvasErrorBoundary key={loadedPath} onClose={() => setCurrentFile(null)}>
-              <MindMapCanvas />
-            </CanvasErrorBoundary>
+            <QuizFrame>
+              <CanvasErrorBoundary key={loadedPath} onClose={() => setCurrentFile(null)}>
+                <MindMapCanvas />
+              </CanvasErrorBoundary>
+            </QuizFrame>
           ) : currentFilePath ? (
             <div style={{ padding: 24, color: 'var(--muted-foreground)' }}>
               Ouverture de {currentFileName}…
@@ -318,7 +325,6 @@ function App() {
               Aucun fichier ouvert. Sélectionnez ou créez une carte mentale dans la barre latérale.
             </div>
           )}
-          <QuizHud />
           <QuizSummaryModal />
         </main>
       </div>
