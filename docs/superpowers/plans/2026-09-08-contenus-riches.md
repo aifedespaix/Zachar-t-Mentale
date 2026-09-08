@@ -387,13 +387,19 @@ it('does not resize the card when a definition gains a formula', () => { /* règ
 **Files:**
 - Modify: `src/content/BlockView.tsx`, `src/content/BlockEditor.tsx` (+ tests)
 
-- [ ] **Step 1: Write the failing tests** — a table renders its header and rows; adding/removing a column keeps every row the same length; the plain-text projection joins with ` | `.
-- [ ] **Step 2: Implement** — no dependency, an editable `<table>`.
-- [ ] **Step 3: Verify** — `npx vitest run src/content/`
-- [ ] **Step 4: Commit** — `feat(content): add the table block`
+- [x] **Step 1: Write the failing tests** — a table renders its header and rows; adding/removing a column keeps every row the same length; the plain-text projection joins with ` | `.
+- [x] **Step 2: Implement** — no dependency, an editable `<table>`.
+- [x] **Step 3: Verify** — `npx vitest run src/content/`
+- [x] **Step 4: Commit** — `feat(content): add the table block`
 
 ---
 
+
+> **Fait en amont.** Le bloc `table` a été implémenté avec `BlockView`
+> (tâche 5) et `BlockEditor` (tâche 6) plutôt que dans une passe séparée :
+> le rendu et l'édition d'un type de bloc sont deux moitiés d'une même
+> chose, et les séparer aurait fait écrire deux fois le même switch.
+> Couvert par `BlockView.test.tsx` et `BlockEditor.test.tsx`.
 ## Task 12: Export — render blocks, inline assets, cap the height
 
 **Files:**
@@ -493,10 +499,10 @@ it('renders a rich definition as a QCM option instead of its source', () => { /*
 **Files:**
 - Modify: `.claude/skills/transformer-cours-en-carte-mentale/SKILL.md`
 
-- [ ] **Step 1: Update the target schema** — document `content?: CardBlock[]`, the `math` block, and the rule that `definition` is derived (so a generated file carries both, consistent).
-- [ ] **Step 2: Rewrite the comparability rule** — step 7 currently talks about `definition` length/register for QCM distractors; it must talk about the **projection**.
-- [ ] **Step 3: Update the « Nombres relatifs » example** so its formulas are math blocks rather than `(+10) + (-4) = +6` typed as text.
-- [ ] **Step 4: Commit** — `docs(skill): emit math blocks in generated mind maps`
+- [x] **Step 1: Update the target schema** — document `content?: CardBlock[]`, the `math` block, and the rule that `definition` is derived (so a generated file carries both, consistent).
+- [x] **Step 2: Rewrite the comparability rule** — step 7 currently talks about `definition` length/register for QCM distractors; it must talk about the **projection**.
+- [x] **Step 3: Update the « Nombres relatifs » example** so its formulas are math blocks rather than `(+10) + (-4) = +6` typed as text.
+- [x] **Step 4: Commit** — `docs(skill): emit math blocks in generated mind maps`
 
 This task is what makes the feature real at scale: the existing maps are full of `20/100 x 425` precisely because the skill had nowhere else to put it.
 
