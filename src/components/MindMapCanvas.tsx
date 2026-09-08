@@ -365,7 +365,7 @@ function MindMapCanvasInner() {
           // reparent target is active, so it doesn't compete with the dashed
           // ghost edge previewing the future link (added below).
           style: {
-            stroke: toCss(levelColor(card.level).border),
+            stroke: toCss(levelColor(card.level, 'light').border),
             opacity: reparentTargetId && card.id === draggingId ? 0.15 : 1,
           },
         })
@@ -378,7 +378,7 @@ function MindMapCanvasInner() {
           source: reparentTargetId,
           target: draggingId,
           className: 'reparent-ghost-edge',
-          style: { stroke: toCss(levelColor(draggedCard.level).border), opacity: 1 },
+          style: { stroke: toCss(levelColor(draggedCard.level, 'light').border), opacity: 1 },
         })
       }
     }

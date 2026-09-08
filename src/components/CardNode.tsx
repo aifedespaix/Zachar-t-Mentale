@@ -159,8 +159,8 @@ export function CardNode({ data }: CardNodeProps) {
   // A floating card is painted grey whatever level it last had: its level is
   // vestigial once it leaves the hierarchy (see the `detached` field), so
   // colouring it by that stale value would read as "still a level-3 card".
-  const colors = isDetached ? detachedColors : levelColor(card.level)
-  const childColors = !isDetached && card.level < 4 ? levelColor(card.level + 1) : null
+  const colors = isDetached ? detachedColors.light : levelColor(card.level, 'light')
+  const childColors = !isDetached && card.level < 4 ? levelColor(card.level + 1, 'light') : null
 
   const isRoot = isRootCard(card)
   // Add-actions that cannot apply here are removed outright, not greyed: a

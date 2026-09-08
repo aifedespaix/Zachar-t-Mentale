@@ -65,8 +65,8 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
           <div style={{ display: 'flex', gap: 8 }}>
             {ALL_LEVELS.map(level => {
               const checked = levels.includes(level)
-              const bg = toCss(levelColor(level).border)
-              const text = toCss(pickReadableTextColor(levelColor(level).border))
+              const bg = toCss(levelColor(level, 'light').border)
+              const text = toCss(pickReadableTextColor(levelColor(level, 'light').border))
               return (
                 <label
                   key={level}
@@ -142,8 +142,8 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
             gap: 12,
             padding: 14,
             borderRadius: 12,
-            border: `2px solid ${toCss(levelColor(3).border)}`,
-            background: qcmMode ? toCss(levelColor(3).bg) : 'var(--background)',
+            border: `2px solid ${toCss(levelColor(3, 'light').border)}`,
+            background: qcmMode ? toCss(levelColor(3, 'light').bg) : 'var(--background)',
             cursor: 'pointer',
             textAlign: 'left',
           }}
@@ -162,7 +162,7 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
               borderRadius: 11,
               flexShrink: 0,
               position: 'relative',
-              background: qcmMode ? toCss(levelColor(3).border) : '#ccc',
+              background: qcmMode ? toCss(levelColor(3, 'light').border) : '#ccc',
               transition: 'background 0.15s ease',
             }}
           >

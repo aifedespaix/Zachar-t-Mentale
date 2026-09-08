@@ -16,7 +16,7 @@ export interface StaticCardViewProps {
  * handle) — a screenshot never needs to be editable.
  */
 export function StaticCardView({ card, showDefinition }: StaticCardViewProps) {
-  const colors = card.detached ? detachedColors : levelColor(card.level)
+  const colors = card.detached ? detachedColors.light : levelColor(card.level, 'light')
   return (
     <div
       data-testid={`export-card-${card.id}`}
