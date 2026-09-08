@@ -146,3 +146,92 @@ describe('useFileDropZone', () => {
     expect(unlisten).toHaveBeenCalled()
   })
 })
+
+describe('dropping an image onto a card', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    vi.restoreAllMocks()
+  })
+
+  /**
+   * Puts a card element under `elementFromPoint`, as the canvas would.
+   * jsdom does not implement it at all, so it is defined rather than spied on.
+   */
+  function stubElementFromPoint(result: Element | null) {
+    const fn = vi.fn(() => result)
+    Object.defineProperty(document, 'elementFromPoint', { value: fn, configurable: true, writable: true })
+    return fn
+  }
+
+  function cardUnderPointer(cardId: string) {
+    const card = document.createElement('div')
+    card.setAttribute('data-testid', `card-${cardId}`)
+    document.body.appendChild(card)
+    return stubElementFromPoint(card)
+  }
+
+  it('routes the image to the card it landed on', () => {
+    cardUnderPointer('c1')
+    const onOpenFile = vi.fn()
+    const onDropImageOnCard = vi.fn()
+    renderHook(() => useFileDropZone(makeZoneRef(), onOpenFile, onDropImageOnCard))
+
+    act(() => {
+      dragDropHandler({ payload: { type: 'drop', paths: ['/cours/schema.png'], position: { x: 100, y: 100 } } })
+    })
+
+    expect(onDropImageOnCard).toHaveBeenCalledWith('c1', '/cours/schema.png')
+    expect(onOpenFile).not.toHaveBeenCalled()
+  })
+
+  it('still opens a mind map, which takes precedence', () => {
+    cardUnderPointer('c1')
+    const onOpenFile = vi.fn()
+    const onDropImageOnCard = vi.fn()
+    renderHook(() => useFileDropZone(makeZoneRef(), onOpenFile, onDropImageOnCard))
+
+    act(() => {
+      dragDropHandler({ payload: { type: 'drop', paths: ['/cours/carte.json'], position: { x: 10, y: 10 } } })
+    })
+
+    expect(onOpenFile).toHaveBeenCalledWith('/cours/carte.json')
+    expect(onDropImageOnCard).not.toHaveBeenCalled()
+  })
+
+  it('explains itself when an image lands beside a card rather than on one', () => {
+    stubElementFromPoint(null)
+    const { result } = renderHook(() => useFileDropZone(makeZoneRef(), vi.fn(), vi.fn()))
+
+    act(() => {
+      dragDropHandler({ payload: { type: 'drop', paths: ['/cours/schema.png'], position: { x: 10, y: 10 } } })
+    })
+
+    expect(result.current.dropError).toMatch(/sur une carte/i)
+  })
+
+  it('reports an unsupported file when the host cannot store images', () => {
+    cardUnderPointer('c1')
+    const { result } = renderHook(() => useFileDropZone(makeZoneRef(), vi.fn()))
+
+    act(() => {
+      dragDropHandler({ payload: { type: 'drop', paths: ['/cours/schema.png'], position: { x: 10, y: 10 } } })
+    })
+
+    expect(result.current.dropError).toMatch(/images/i)
+  })
+
+  it('converts the physical drop position to logical pixels before hit-testing', () => {
+    // Tauri reports physical pixels; the DOM works in CSS pixels.
+    const spy = cardUnderPointer('c1')
+    const original = window.devicePixelRatio
+    Object.defineProperty(window, 'devicePixelRatio', { value: 2, configurable: true })
+
+    renderHook(() => useFileDropZone(makeZoneRef(), vi.fn(), vi.fn()))
+    act(() => {
+      dragDropHandler({ payload: { type: 'drop', paths: ['/x/a.png'], position: { x: 200, y: 100 } } })
+    })
+
+    expect(spy).toHaveBeenCalledWith(100, 50)
+    Object.defineProperty(window, 'devicePixelRatio', { value: original, configurable: true })
+  })
+})

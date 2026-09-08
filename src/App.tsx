@@ -22,6 +22,10 @@ import { useUndoRedoShortcuts } from './hooks/useUndoRedoShortcuts'
 import { useWindowTitle } from './hooks/useWindowTitle'
 import { useUnsavedChangesGuard } from './hooks/useUnsavedChangesGuard'
 import { useFileDropZone } from './hooks/useFileDropZone'
+import { imageBlockFrom } from './content/imageBlock'
+import { mimeForPath } from './content/pickImage'
+import { contentOf } from './content/blocks'
+import { readFile } from '@tauri-apps/plugin-fs'
 import { ThemeToggleButton } from './components/ThemeToggleButton'
 import { AppearanceSettingsButton } from './components/appearance/AppearanceSettingsButton'
 import { useAppearanceSettingsStore } from './state/useAppearanceSettingsStore'
@@ -85,7 +89,39 @@ function App() {
     () => setSaveFailed(true)
   )
   const { requestOpenFile, prompt, dismissPrompt } = useUnsavedChangesGuard(flush, setCurrentFile)
-  const { isDragActive, dropError } = useFileDropZone(mainRef, requestOpenFile)
+  /**
+   * An image dropped on a card is appended to that card's definition.
+   *
+   * Reads the card fresh from the store rather than closing over a snapshot:
+   * a drop can land long after this callback was created, and appending to a
+   * stale block list would silently discard edits made in between.
+   */
+  const handleDropImageOnCard = useCallback(
+    async (cardId: string, path: string) => {
+      const mapPath = useWorkspaceStore.getState().currentFilePath
+      if (mapPath === null) return
+      try {
+        const source = { bytes: await readFile(path), mime: mimeForPath(path), name: fileNameOf(path) }
+        const block = await imageBlockFrom(mapPath, source)
+        const cards = useCardsStore.getState().history.present
+        const card = cards.find(entry => entry.id === cardId)
+        if (card === undefined) return
+        useCardsStore.getState().updateContent(cardId, [...contentOf(card), block])
+      } catch (error) {
+        // The app-wide channel the file operations already use, rather than
+        // this component's own load-error state: a failed drop is a workspace
+        // failure, not a failure to open the map.
+        useWorkspaceStore
+          .getState()
+          .setWorkspaceError(
+            error instanceof Error ? error.message : 'Impossible d’ajouter cette image à la carte.'
+          )
+      }
+    },
+    []
+  )
+
+  const { isDragActive, dropError } = useFileDropZone(mainRef, requestOpenFile, handleDropImageOnCard)
 
   useEffect(() => {
     useQuizSettingsStore.getState().init()
