@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Spike — KaTeX dans html-to-image</title>
+<!--
+  Chargé via <link> et non inline : c'est ce que produit le build Vite en
+  production (un .css lié dont les url() de polices sont relatives), et c'est
+  le cas défavorable qu'on veut mesurer.
+-->
+<link rel="stylesheet" href="/node_modules/katex/dist/katex.min.css">
+<script src="/node_modules/katex/dist/katex.min.js"></script>
+<script src="/node_modules/html-to-image/dist/html-to-image.js"></script>
+<style>
+  body { margin: 0; background: #fff; font-family: system-ui, sans-serif; }
+  /* Réplique de StaticCardView (src/export/StaticCardView.tsx) */
+  .card {
+    width: 260px; min-height: 120px; box-sizing: border-box;
+    background: #eef2ff; color: #1e1b4b; border: 2px solid #6366f1;
+    border-radius: 8px; padding: 10px 14px;
+    display: flex; flex-direction: column; gap: .4rem;
+  }
+  .card strong { font-size: 14px; }
+  .card .def { margin: 0; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script>
+// Réplique exacte de src/export/captureElement.ts:14
+function captureElementAsPng(element) {
+  return htmlToImage.toPng(element, {
+    pixelRatio: 2,
+    style: { position: 'static', left: '0px', top: '0px' },
+  })
+}
+
+function makeCard(kind) {
+  const el = document.createElement('div')
+  el.className = 'card'
+  const title = document.createElement('strong')
+  title.textContent = 'Avec calculatrice'
+  el.appendChild(title)
+  const def = document.createElement('div')
+  def.className = 'def'
+  if (kind === 'math') {
+    // Cas réel tiré de .cartes-mentales/math/pourcentages-v2.json
+    katex.render('\\frac{20}{100} \\times 425 = 85', def, { throwOnError: false })
+  } else {
+    def.textContent = '20/100 x 425 = 85. Il y a 85 eleves D.P.'
+  }
+  el.appendChild(def)
+  return el
+}
+
+// Compte les pixels non-blancs : une formule dont les glyphes manquent ne
+// laisse que le trait de fraction, donc un compte d'encre effondré.
+function inkOf(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const c = document.createElement('canvas')
+      c.width = img.width; c.height = img.height
+      const ctx = c.getContext('2d')
+      ctx.drawImage(img, 0, 0)
+      const d = ctx.getImageData(0, 0, c.width, c.height).data
+      let ink = 0
+      for (let i = 0; i < d.length; i += 4) {
+        // "encre" = nettement plus sombre que le fond lavande de la carte
+        if (d[i] < 150 && d[i + 1] < 150 && d[i + 2] < 150) ink++
+      }
+      resolve({ ink, w: img.width, h: img.height })
+    }
+    img.onerror = () => reject(new Error('image de capture illisible'))
+    img.src = dataUrl
+  })
+}
+
+const KATEX_FACES = [
+  '10px KaTeX_Main', '10px KaTeX_Math', '10px KaTeX_Size1',
+  '10px KaTeX_Size2', '10px KaTeX_AMS', '10px KaTeX_Caligraphic',
+]
+
+window.runSpike = async function () {
+  const host = document.getElementById('host')
+  const out = {}
+
+  // --- Contrôle : carte texte seul, capture unique.
+  {
+    const el = makeCard('text'); host.appendChild(el)
+    await document.fonts.ready
+    out.textCold = await inkOf(await captureElementAsPng(el))
+    el.remove()
+  }
+
+  // --- Cas nominal : carte math, exactement le pipeline actuel.
+  //     Deux captures successives sur le MEME element : c'est le test du
+  //     contournement "premier toPng qui amorce le cache de polices".
+  {
+    const el = makeCard('math'); host.appendChild(el)
+    await document.fonts.ready
+    out.mathCold = await inkOf(await captureElementAsPng(el))
+    out.mathWarm = await inkOf(await captureElementAsPng(el))
+    out.mathThird = await inkOf(await captureElementAsPng(el))
+    el.remove()
+  }
+
+  // --- Variante : document.fonts.load() sur chaque fonte KaTeX AVANT capture,
+  //     sur un element neuf (pas de cache htmlToImage tiede d'avant).
+  {
+    const el = makeCard('math'); host.appendChild(el)
+    await Promise.all(KATEX_FACES.map(f => document.fonts.load(f, '0123456789=')))
+    await document.fonts.ready
+    out.mathPreloaded = await inkOf(await captureElementAsPng(el))
+    el.remove()
+  }
+
+  return out
+}
+
+// Oracle : rendu natif du navigateur, hors foreignObject. C'est la reference
+// de ce que la capture DEVRAIT contenir.
+window.mountOracle = async function (kind) {
+  const host = document.getElementById('host')
+  host.innerHTML = ''
+  const el = makeCard(kind)
+  host.appendChild(el)
+  await document.fonts.ready
+  const r = el.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+window.inkOf = inkOf
+</script>
+</body>
+</html>

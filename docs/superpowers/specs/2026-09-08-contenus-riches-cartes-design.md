@@ -330,7 +330,9 @@ Pourquoi ne pas prendre MathLive seul (il sait aussi rendre, via
 `convertLatexToMarkup()`) : le support de `\ce{}` / mhchem n'y est pas
 documenté, alors qu'il est explicite côté KaTeX. Garder KaTeX à l'affichage,
 c'est garder la chimie gratuitement. Le coût est une légère dérive de glyphes
-entre l'éditeur et le rendu — à mesurer dans le spike, acceptable a priori.
+entre l'éditeur et le rendu — à mesurer (spike 4), acceptable a priori. Le
+spike 1 ayant montré que KaTeX traverse l'export sans dommage, garder KaTeX à
+l'affichage ne coûte plus rien du tout.
 
 ## Images : capture, stockage, cycle de vie
 
@@ -375,6 +377,11 @@ Demande explicite : *vérifier que l'export gère bien tout ça.* Réponse court
 **non, pas en l'état** — et pas seulement parce que le rendu n'est pas branché.
 Onze points, du plus bloquant au plus mineur.
 
+Trois d'entre eux ont été **mesurés** plutôt que supposés, dans un spike qui
+rejoue le pipeline réel (mêmes options que `captureElement.ts`) sous Chromium :
+`docs/superpowers/spikes/2026-09-08-contenus-riches/`. Le point 3 s'est révélé
+**faux**, le point 4 **pire que prévu**, et abcjs **sans problème**.
+
 ### Ce qui casse aujourd'hui
 
 **1. `StaticCardView` ignorerait complètement les blocs.**
@@ -395,26 +402,35 @@ vignette ~48 px, `overflow: hidden`) — `computeLayout` reste pure et
 intouchée. *Traitement long terme* : un troisième format d'export (voir
 point 11).
 
-**3. Les polices KaTeX ne s'afficheront pas à la première capture.**
-`html-to-image` sérialise le DOM dans un `<foreignObject>` SVG ; les `@font-face`
-n'y résolvent pas de façon fiable. KaTeX dépend entièrement de ses polices
-(`KaTeX_Main`, `KaTeX_Math`…) : le symptôme est une formule dont il ne reste
-que les traits de fraction, sans glyphes.
-*Traitement* : `document.fonts.load()` sur chaque fonte KaTeX au démarrage de
-l'export, **plus** une capture d'échauffement jetée avant la page 1 (le premier
-`toPng` amorce le cache de polices interne d'`html-to-image`, le second rend
-correctement). Une page de plus à rasteriser, et le pipeline
-`renderPagesToImages` boucle déjà page par page — le point d'insertion est
-naturel.
-*Repli si ça reste instable* : rendre les formules via MathJax en sortie SVG
-`fontCache: 'local'`, qui produit des `<path>` autoportants, immunisés au
-problème. Coût : un second moteur math et une dérive visuelle.
+**3. ~~Les polices KaTeX ne s'afficheront pas à la première capture.~~
+Mesuré : faux dans cette configuration.**
+Crainte initiale : `html-to-image` sérialise le DOM dans un `<foreignObject>`
+SVG où les `@font-face` ne résolvent pas de façon fiable, et KaTeX dépend
+entièrement de ses polices — symptôme attendu, une formule réduite à ses traits
+de fraction. **Le spike (`docs/superpowers/spikes/2026-09-08-contenus-riches/`)
+l'infirme** : la formule sort intacte dès la **première** capture, avec un
+compte d'encre identique à froid, à chaud et après préchargement, et une
+capture visuellement indiscernable du rendu natif du navigateur.
+`html-to-image` lit les `cssRules` de la feuille KaTeX et embarque ses
+`.woff2`/`.woff`/`.ttf` en data URI — les requêtes sont visibles côté serveur.
+*Conséquence* : ni capture d'échauffement, ni `document.fonts.load()`, ni repli
+MathJax. **Un seul moteur math, pas de dérive visuelle à craindre.**
+*Seule condition à tenir* : la CSS KaTeX doit venir du **bundle** (même
+origine). Depuis un CDN, l'accès aux `cssRules` lève et les polices ne sont pas
+embarquées — donc **jamais de CDN pour KaTeX**, à inscrire comme contrainte.
 
-**4. Les images en `asset://` ne seront pas capturées.**
-`convertFileSrc()` produit une URL `asset://localhost/…` qu'`html-to-image`
-tentera de récupérer, avec un échec silencieux ou un canvas *tainted*.
-*Traitement* : le pipeline d'export inline chaque asset en data URI **avant**
-la capture. C'est du travail réel, pas une option.
+**4. Une image d'une autre origine fait échouer *tout* l'export.**
+*Confirmé par le spike, et pire que prévu.* `convertFileSrc()` produit une URL
+servie par le protocole `asset:` de Tauri, donc d'origine distincte de la page.
+L'image s'affiche parfaitement dans le DOM — et `toPng` **rejette sa promesse**
+en tentant de la ré-encoder en data URI. Ce n'est pas « l'image manque sur la
+page exportée », c'est « l'export lève », page comprise.
+*Traitement* : inliner chaque asset en data URI **avant** la capture (ou servir
+`asset:` avec `Access-Control-Allow-Origin` — les deux correctifs sont validés
+dans le spike). C'est du travail réel, pas une option, et il faut en plus un
+message d'erreur : une exception nue sur un rejet non-`Error` (`toPng` rejette
+avec un `Event`, pas une `Error`) traverserait mal le `catch` d'`ExportDialog`,
+qui affiche `error instanceof Error ? … : 'erreur inconnue'`.
 
 **5. La pagination compte des feuilles, pas des hauteurs.**
 `PAGE_ROW_BUDGET = 6` (`pagination.ts:10`) suppose qu'une rangée ≈ une hauteur
@@ -479,11 +495,11 @@ différents. Le second est le bon endroit pour les images pleine taille, et il
 | Bloc | PDF / Image | XMind | JSON |
 |---|---|---|---|
 | `text` | ✅ | ✅ | ✅ |
-| `math` | ✅ *(après points 1 + 3)* | ⚠️ unicode dégradé | ✅ |
+| `math` | ✅ *(vérifié ; reste le point 1)* | ⚠️ unicode dégradé | ✅ |
 | `image` | ✅ *(après points 1 + 2 + 4 + 5)* | ⚠️ `[image : alt]` | ⚠️ sidecar (point 11) |
 | `table` | ✅ | ⚠️ lignes en texte | ✅ |
 | `code` | ✅ | ✅ | ✅ |
-| `music` | ✅ *(spike à faire)* | ⚠️ marqueur | ✅ |
+| `music` | ✅ *(vérifié : SVG 100 % vectoriel)* | ⚠️ marqueur | ✅ |
 | `audio` | ❌ *(impossible)* — marqueur | ⚠️ marqueur | ✅ |
 
 ## Impacts hors export
@@ -512,19 +528,26 @@ différents. Le second est le bon endroit pour les images pleine taille, et il
 | 6h | `table`, puis `code` | 6b |
 | 6i | `music` (abcjs), `audio` | 6b |
 
-## Spikes à faire avant de figer
+## Spikes
 
-1. **KaTeX dans `html-to-image`** — capturer une formule via le pipeline
-   existant et vérifier la présence des glyphes. Valider le correctif
-   `document.fonts.load` + capture d'échauffement. *C'est le spike bloquant :
-   il décide entre un moteur math et deux.*
-2. **abcjs en capture** — abcjs produit du SVG et ses glyphes sont
-   personnalisables par `path`, mais la documentation ne dit pas explicitement
-   s'il rend en `<path>` ou en glyphes de police. Si c'est une police, il hérite
-   du même problème que KaTeX. Une capture suffit à trancher.
+Les deux premiers sont **faits** — harnais, protocole et résultats dans
+`docs/superpowers/spikes/2026-09-08-contenus-riches/` (rejouable :
+`node docs/superpowers/spikes/2026-09-08-contenus-riches/run.mjs`).
+
+1. ~~**KaTeX dans `html-to-image`**~~ ✅ **fait — KaTeX passe.** Glyphes
+   intacts dès la première capture, aucun contournement nécessaire. Le
+   spike bloquant est levé : **un seul moteur math**. Seule contrainte qui en
+   sort : charger la CSS KaTeX depuis le bundle, jamais depuis un CDN.
+   Sous-produit : l'image d'une autre origine fait échouer tout l'export
+   (point 4), et `toPng` rejette avec un `Event`, pas une `Error`.
+2. ~~**abcjs en capture**~~ ✅ **fait — abcjs passe.** Le SVG produit contient
+   26 `<path>` et **zéro `<text>`** : purement vectoriel, aucune police à
+   résoudre, donc immunisé par construction. La partition sort intacte du PDF.
 3. **`Ctrl+V` d'image dans le webview Tauri**, par OS — pour savoir si le
    plugin clipboard est un repli ou une nécessité.
 4. **Dérive visuelle MathLive ↔ KaTeX** sur une dizaine de formules de collège.
+   Reste le seul inconnu sur le choix des moteurs, et il ne concerne plus que
+   le confort d'édition — l'affichage et l'export sont tranchés.
 
 ## Hors périmètre
 
