@@ -1,10 +1,27 @@
+import type { CardBlock } from './cardBlock'
+
 export type CardLevel = 1 | 2 | 3 | 4
 
 export interface Card {
   id: string
   level: CardLevel
   title: string
+  /**
+   * The definition as plain text. Stays the field every consumer reads — the
+   * quiz's distractor pools and hints, the XMind `notes.plain.content`,
+   * `salvage()` — whether or not the card also has `content`.
+   *
+   * When `content` is present this is its DERIVED mirror, never typed by hand:
+   * `updateContent` recomputes it through `blocksToPlainText` on every write,
+   * so the two cannot disagree.
+   */
   definition?: string
+  /**
+   * Rich content, when the definition is more than plain text. Absent for a
+   * plain-text card — including one that was just re-saved through the block
+   * editor (see `normalizeContent`), so existing files do not churn.
+   */
+  content?: CardBlock[]
   parentId: string | null
   order: number
   /**

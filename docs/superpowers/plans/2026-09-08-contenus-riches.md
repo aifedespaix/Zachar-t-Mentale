@@ -47,7 +47,7 @@ The design listed the export overlap (point 2) and the pagination budget (point 
   - `contentOf(card: Card): CardBlock[]` — the reading adapter: `card.content` when present, else a single `text` block from `card.definition`, else `[]`
 - Consumed by: every later task.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // src/content/blocks.test.ts
@@ -108,12 +108,12 @@ describe('contentOf', () => {
 
 Also cover: a `table` block projecting as ` | `-joined rows; `blocksToPlainText([])` returning `''`; `normalizeContent` preserving block order.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 `latexToPlainText` is a small ordered list of regex replacements (`\frac{a}{b}` → `a/b`, `^2`/`^3` → `²`/`³`, `\sqrt{x}` → `√x`, `\times` → `×`, `\div` → `÷`, `\leq`/`\geq` → `≤`/`≥`, `\pi` → `π`), then a strip of the remaining `\command` braces. It is deliberately partial: anything unmapped survives as raw LaTeX, because the contract is « jamais de champ vide », not « rendu fidèle ».
 
-- [ ] **Step 3: Verify** — `npx vitest run src/content/blocks.test.ts`
-- [ ] **Step 4: Commit** — `feat(content): add the CardBlock model and its plain-text projection`
+- [x] **Step 3: Verify** — `npx vitest run src/content/blocks.test.ts` — 18/18, suite complète 540/540, `tsc --noEmit` propre
+- [x] **Step 4: Commit** — `feat(content): add the CardBlock model and its plain-text projection`
 
 ---
 
