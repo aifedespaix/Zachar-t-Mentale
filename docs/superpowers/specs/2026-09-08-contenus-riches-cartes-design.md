@@ -415,6 +415,13 @@ capture visuellement indiscernable du rendu natif du navigateur.
 `.woff2`/`.woff`/`.ttf` en data URI — les requêtes sont visibles côté serveur.
 *Conséquence* : ni capture d'échauffement, ni `document.fonts.load()`, ni repli
 MathJax. **Un seul moteur math, pas de dérive visuelle à craindre.**
+*Réserve à lever* : le spike a tourné sous **Chromium**, ce qui couvre
+directement Windows (WebView2) mais **ni macOS (WKWebView) ni Linux
+(WebKitGTK)** — or `tauri.conf.json` déclare `"targets": "all"`, et c'est
+justement sous WebKit que les `@font-face` dans un `<foreignObject>` ont été
+historiquement les plus fragiles. À rejouer dans l'app réelle sur ces deux
+plateformes (spike 5) avant de tenir le risque pour définitivement levé. Les
+résultats abcjs et image cross-origin, eux, ne dépendent pas du moteur.
 *Seule condition à tenir* : la CSS KaTeX doit venir du **bundle** (même
 origine). Depuis un CDN, l'accès aux `cssRules` lève et les polices ne sont pas
 embarquées — donc **jamais de CDN pour KaTeX**, à inscrire comme contrainte.
@@ -546,8 +553,11 @@ Les deux premiers sont **faits** — harnais, protocole et résultats dans
 3. **`Ctrl+V` d'image dans le webview Tauri**, par OS — pour savoir si le
    plugin clipboard est un repli ou une nécessité.
 4. **Dérive visuelle MathLive ↔ KaTeX** sur une dizaine de formules de collège.
-   Reste le seul inconnu sur le choix des moteurs, et il ne concerne plus que
-   le confort d'édition — l'affichage et l'export sont tranchés.
+   Ne concerne que le confort d'édition.
+5. **Rejouer le spike 1 dans l'app Tauri réelle, sous macOS et sous Linux**
+   (webviews WebKit, non couverts par une mesure sous Chromium). C'est la
+   seule réserve qui pèse encore sur « un seul moteur math » ; les spikes 1
+   à 3 restent acquis sous Windows.
 
 ## Hors périmètre
 

@@ -83,11 +83,47 @@ ses captures dans `resultats/` et son rapport sur la sortie standard.
    (`mathPngOctets` / `plainPngOctets` mesurent le PNG de sortie, pas le
    volume de polices embarquées : ne rien en conclure.)
 
+## Portée : ce spike a tourné sous Chromium, pas dans le webview de Tauri
+
+Limite à connaître avant de s'appuyer sur le résultat 1. Tauri n'embarque pas
+de navigateur : il utilise celui du système, et ce n'est pas le même moteur
+partout.
+
+| Plateforme | Webview | Couvert par ce spike |
+|---|---|---|
+| Windows | WebView2 (**Chromium**) | ✅ directement |
+| macOS | WKWebView (**WebKit**) | ❌ non vérifié |
+| Linux | WebKitGTK (**WebKit**) | ❌ non vérifié |
+
+`tauri.conf.json` déclare `"targets": "all"` : les trois sont donc concernées.
+
+Les trois résultats ne se transposent pas également :
+
+- **Résultat 2 (abcjs) — transposable tel quel.** Un SVG sans aucun `<text>`
+  n'a rien à résoudre : il n'y a pas de police en jeu, donc pas de moteur qui
+  puisse s'en tirer différemment.
+- **Résultat 3 (image cross-origin) — transposable.** C'est le modèle de
+  sécurité des origines, pas une particularité de rendu ; le comportement est
+  standard d'un moteur à l'autre. À confirmer tout de même, l'implémentation
+  du protocole `asset:` de Tauri variant par plateforme.
+- **Résultat 1 (KaTeX) — le moins transposable, et c'est le plus important.**
+  C'est précisément sur WebKit que la résolution des `@font-face` dans un
+  `<foreignObject>` a historiquement été la plus fragile. Rien ici ne dit
+  qu'elle échoue sous WebKit — simplement que ce spike ne l'a pas testée.
+
+**À faire avant de considérer le risque « moteur math » comme définitivement
+levé : rejouer `page-katex.html` dans l'app Tauri réelle, sous macOS et sous
+Linux.** Si les glyphes manquent là-bas, les correctifs déjà écartés
+redeviennent la réponse (préchargement `document.fonts.load` + capture
+d'échauffement, puis repli MathJax en sortie SVG `fontCache: 'local'`) — mais
+sur ces plateformes seulement.
+
 ## Conséquence
 
-Le contournement « double `toPng` » et le repli « MathJax en sortie SVG »
-envisagés dans
+Sous réserve de la portée ci-dessus, le contournement « double `toPng` » et le
+repli « MathJax en sortie SVG » envisagés dans
 `../../specs/2026-09-08-contenus-riches-cartes-design.md`
-sont **inutiles**. Un seul moteur d'affichage (KaTeX), pas de dérive visuelle
-à craindre. Le vrai travail d'export est ailleurs : l'inlining des assets
-image, et les hauteurs fixes de la mise en page.
+sont **inutiles** : un seul moteur d'affichage (KaTeX), pas de dérive visuelle
+à craindre. Le vrai travail d'export est ailleurs — l'inlining des assets
+image, et les hauteurs fixes de la mise en page — et celui-là ne dépend
+d'aucun moteur.
