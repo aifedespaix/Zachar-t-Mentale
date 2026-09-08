@@ -97,14 +97,9 @@ passe en `content`**, en découpant règle et formule en deux blocs :
    l'élève) : ce n'est pas un fait de cours à structurer. Ne garder que les
    exemples déjà résolus/corrigés dans le support de cours, en `definition`
    de niveau 4.
-7. **Comparabilité pour le mode quiz.** Le quiz pioche ses distracteurs de
-   QCM parmi les `definition` de cards sœurs de même niveau — donc parmi les
-   PROJECTIONS texte, pas parmi les blocs. C'est cette projection qui doit
-   rester de forme comparable (longueur, registre) entre sœurs, sinon les
-   distracteurs se repèrent par élimination. Corollaire : deux formules dont
-   la projection est identique se percutent en une seule option de QCM, ce
-   qui est correct mais réduit le nombre de distracteurs — varier les
-   formulations entre sœurs.
+7. **Écrire pour le quiz** — voir la section dédiée ci-dessous. C'est la
+   contrainte la plus facile à rater et celle qui casse le plus le mode
+   révision.
 8. **Valider avant de livrer** : une seule racine, tout `parentId` référence
    un `id` existant du même fichier, aucun niveau hors 1-4.
 
@@ -141,6 +136,114 @@ Son frère niveau 3 "Même signe" reçoit une `definition` de longueur et de
 registre comparables, pas deux fois plus courte — sinon un QCM les
 distinguerait trivialement.
 
+## Écrire pour le mode quiz
+
+Chaque card devient une question. Une carte mentale bien structurée mais
+écrite sans y penser produit un quiz incohérent — c'est la principale cause
+de quiz inutilisables, et ça ne se voit qu'à l'usage.
+
+L'app pose trois types de questions, et chacune impose une contrainte
+différente sur ce qui est écrit :
+
+| Question | Ce que l'app montre | Ce que l'utilisateur fournit | Déclenchée quand |
+|---|---|---|---|
+| `qcm-definition` | le `title` de la card | il choisit la bonne `definition` parmi 4 | la card A une `definition` |
+| `recall` | le `title` en texte à trous | il écrit le titre lettre par lettre | la card n'a PAS de `definition` |
+| `qcm-title` | la `definition` (comme indice) | il choisit le bon `title` parmi 4 | mode QCM activé |
+
+### 1. Titre et définition doivent se déterminer l'un l'autre
+
+C'est la règle centrale, et elle vaut dans les DEUX SENS, parce que le quiz
+pose la question dans les deux sens :
+
+- **Du titre vers la définition** (`qcm-definition`) : en lisant le titre
+  seul, la bonne définition doit être identifiable parmi celles de ses sœurs.
+- **De la définition vers le titre** (`qcm-title`) : en lisant la définition
+  seule, le titre doit être retrouvable.
+
+Une définition qui ne dit pas de QUOI elle parle casse le second sens :
+
+```json
+// MAUVAIS — la définition marche pour n'importe quelle opération
+{ "title": "Addition de fractions", "definition": "On applique la règle vue plus haut." }
+
+// BON — la définition contient ce qui la rattache à son titre
+{ "title": "Addition de fractions", "definition": "Mettre au même dénominateur, puis additionner les numérateurs en gardant le dénominateur commun." }
+```
+
+Test à faire mentalement sur chaque card : **si je masque le titre, la
+définition suffit-elle à le retrouver ? Si je masque la définition, le titre
+suffit-il à la reconnaître parmi ses sœurs ?** Si l'une des deux réponses est
+non, réécrire.
+
+### 2. Les sœurs doivent être distinguables — mais pas trivialement
+
+Les distracteurs d'un QCM sont pris parmi les cards sœurs (même parent, sinon
+même niveau, sinon tout le fichier). D'où deux échecs symétriques :
+
+- **Trop proches** : deux sœurs dont les définitions ne diffèrent que par un
+  mot que le titre ne laisse pas deviner → la bonne réponse est indevinable.
+- **Trop lointaines** : une définition deux fois plus longue, ou seule à
+  citer un exemple chiffré, se repère par sa FORME sans lire son contenu →
+  question gratuite.
+
+Viser des sœurs de longueur et de registre comparables, qui se distinguent
+par leur CONTENU (la règle énoncée) et pas par leur emballage.
+
+Corollaire pour les maths : deux formules dont la projection texte est
+identique fusionnent en une seule option de QCM — c'est correct mais ça
+réduit le nombre de distracteurs. Varier les formulations entre sœurs.
+
+### 3. Un titre sans définition sera écrit à la main
+
+Une card sans `definition` devient une question `recall` : l'app affiche le
+titre en texte à trous (`P____s______e`) et l'utilisateur tape les lettres
+manquantes. La difficulté choisie décide du nombre de lettres offertes au
+départ (moitié en facile, un quart en moyen, la première lettre seule en
+difficile), et chaque essai raté en offre une de plus.
+
+Un titre destiné à être tapé doit donc être :
+
+- **court et unique** — « Théorème de Pythagore », pas « Le théorème de
+  Pythagore et ses applications au calcul de longueurs » ;
+- **sans ponctuation décorative** — les parenthèses, guillemets et tirets
+  sont affichés en clair (ce sont des repères, pas des lettres à trouver),
+  donc un titre qui en abuse offre sa structure gratuitement ;
+- **écrit tel qu'on l'écrirait de mémoire** — pas d'abréviation improvisée ni
+  de numérotation (« 3.2 Addition »), qui rendent la saisie devinette.
+
+Si un titre ne peut pas être court, donner une `definition` à la card : elle
+bascule alors en QCM, où la longueur du titre n'est plus un problème.
+
+### 4. Rédiger l'indice de `qcm-title` via la définition
+
+En mode QCM, la `definition` sert d'indice pour retrouver le titre, gradué
+par difficulté : intégrale en facile, tronquée à la moitié en moyen, absente
+en difficile (il ne reste que la position dans l'arbre).
+
+Ce que ça impose :
+
+- **L'information qui rattache la définition à son titre doit venir en
+  DÉBUT de définition** — en difficulté moyenne, la seconde moitié est
+  coupée. Une définition qui ne nomme son sujet qu'à la dernière phrase
+  devient un indice vide.
+- **Ne jamais écrire le titre mot pour mot dans la définition** : l'indice
+  donnerait la réponse. Le reformuler.
+
+```json
+// MAUVAIS — l'indice donne la réponse, et l'essentiel arrive trop tard
+{ "title": "Périmètre du cercle", "definition": "Voir la figure. On parle ici du périmètre du cercle, qui vaut 2πr." }
+
+// BON — sujet identifiable dès le début, titre non recopié
+{ "title": "Périmètre du cercle", "definition": "Longueur du tour complet, égale à 2 × π × rayon." }
+```
+
+### 5. Une définition par card, autoportante
+
+Pas de renvoi (« comme vu plus haut », « idem », « voir la card
+précédente ») : en quiz, une définition est lue SEULE, hors de son contexte
+dans l'arbre, à côté de trois distracteurs. Un renvoi y devient du bruit.
+
 ## Erreurs fréquentes
 
 | Erreur | Pourquoi c'est faux |
@@ -148,7 +251,11 @@ distinguerait trivialement.
 | Copier la hiérarchie d'une carte mentale existante fournie en référence | Cette carte n'a pas forcément été construite selon les règles de l'app (4 niveaux fixes, arbre strict) — c'est une source de contenu, pas un modèle structurel |
 | Laisser des "…………" recopiés du PDF à trous | Le fichier sert à réviser ; du contenu manquant n'aide pas à apprendre |
 | Créer une card par exercice d'un énoncé d'application | Les exercices sont de la pratique, pas des connaissances de cours — hors périmètre de la carte mentale |
-| `definition` très inégales entre cards sœurs | Casse la génération de distracteurs QCM du mode quiz (lot 2) |
+| `definition` très inégales entre cards sœurs | La bonne réponse d'un QCM se repère à sa forme, sans lire le contenu |
+| Définition qui ne nomme pas son sujet (« On applique la règle ») | Illisible comme indice en mode QCM : le titre devient introuvable |
+| Titre recopié mot pour mot dans sa propre définition | En mode QCM, l'indice donne directement la réponse |
+| Titre long ou numéroté sur une card sans définition | Elle devient une question à écrire lettre par lettre : intapable |
+| Renvoi d'une card à une autre (« comme ci-dessus ») | Une définition est lue seule en quiz, hors de son contexte |
 | Inventer un numéro de chapitre non trouvé dans les sources | Nommer par slug thématique si le numéro réel n'est pas connu |
 
 ## Adaptation à d'autres matières

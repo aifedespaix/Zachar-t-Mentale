@@ -245,6 +245,7 @@ describe('MindMapCanvas quiz mode', () => {
       config: pristine.config,
       questions: [{ cardId: 'child', type: 'recall' }],
       results: { child: 'unanswered' },
+      recallProgress: pristine.recallProgress,
       wasLockedBeforeQuiz: pristine.wasLockedBeforeQuiz,
     })
   })
@@ -252,10 +253,21 @@ describe('MindMapCanvas quiz mode', () => {
   it('masks only the card that has an active quiz question', () => {
     render(<MindMapCanvas />)
 
+    // The undrawn card keeps its ordinary title field; the drawn one swaps it
+    // for the blank the user has to fill.
     const rootInput = within(screen.getByTestId('card-root')).getByRole('textbox', { name: /titre/i })
-    const childInput = within(screen.getByTestId('card-child')).getByRole('textbox', { name: /titre/i })
     expect(rootInput).toHaveValue('Racine')
-    expect(childInput).not.toHaveValue('Enfant')
+
+    const childTitle = within(screen.getByTestId('card-child')).getByTestId('quiz-title')
+    expect(childTitle).not.toHaveTextContent('Enfant')
+    expect(within(screen.getByTestId('card-child')).queryByRole('textbox', { name: /titre/i })).toBeNull()
+  })
+
+  it('offers a way to answer only on the card that was drawn', () => {
+    render(<MindMapCanvas />)
+
+    expect(within(screen.getByTestId('card-child')).getByTestId('answer-button')).toBeInTheDocument()
+    expect(within(screen.getByTestId('card-root')).queryByTestId('answer-button')).toBeNull()
   })
 })
 
