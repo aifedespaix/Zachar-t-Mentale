@@ -20,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 import { QcmDialog } from './quiz/QcmDialog'
 import { FlipCard } from './FlipCard'
 import { DefinitionPopover } from './DefinitionPopover'
+import { contentOf } from '../content/blocks'
 
 interface QuizData {
   type: QuizQuestionType
@@ -140,6 +141,7 @@ export function CardNode({ data }: CardNodeProps) {
 
   const updateTitle = useCardsStore(s => s.updateTitle)
   const updateDefinition = useCardsStore(s => s.updateDefinition)
+  const updateContent = useCardsStore(s => s.updateContent)
   const addChild = useCardsStore(s => s.addChild)
   const addSibling = useCardsStore(s => s.addSibling)
   const deleteCard = useCardsStore(s => s.deleteCard)
@@ -576,11 +578,14 @@ export function CardNode({ data }: CardNodeProps) {
             the bottom of the card regardless of title length or whether the
             definition text below it is shown. */}
         <div className="card-footer" style={{ display: 'flex', gap: '0.25rem', marginTop: 'auto' }}>
-          {card.definition ? (
+          {/* `contentOf` rather than `card.definition`: a card whose whole
+              definition is a picture has blocks but, defensively, might not
+              have text — it must still get the popover, not the "add" button. */}
+          {contentOf(card).length > 0 ? (
             <DefinitionPopover
-              definition={card.definition}
+              blocks={contentOf(card)}
               locked={locked}
-              onCommit={next => updateDefinition(card.id, next)}
+              onCommit={blocks => updateContent(card.id, blocks)}
             />
           ) : (
             <Tooltip>

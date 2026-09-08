@@ -17,20 +17,24 @@ const SUPERSCRIPTS: Record<string, string> = {
   '+': '⁺', '-': '⁻', n: 'ⁿ', i: 'ⁱ',
 }
 
-/** Longest command first: `\times` must not be partially eaten by a shorter pattern. */
+/**
+ * Every pattern ends in `(?![a-zA-Z])`. Without it a command is matched by any
+ * LONGER command sharing its prefix: `\\top` became `→p`, `\\cdots` became `·s`,
+ * `\\leqslant` became `≤slant` — all of them ordinary notation.
+ */
 const SYMBOLS: [RegExp, string][] = [
-  [/\\times/g, '×'],
-  [/\\cdot/g, '·'],
-  [/\\div/g, '÷'],
-  [/\\leq/g, '≤'],
-  [/\\geq/g, '≥'],
-  [/\\neq/g, '≠'],
-  [/\\approx/g, '≈'],
-  [/\\infty/g, '∞'],
-  [/\\rightarrow/g, '→'],
-  [/\\to/g, '→'],
-  [/\\pm/g, '±'],
-  [/\\pi/g, 'π'],
+  [/\\times(?![a-zA-Z])/g, '×'],
+  [/\\cdot(?![a-zA-Z])/g, '·'],
+  [/\\div(?![a-zA-Z])/g, '÷'],
+  [/\\leq(?![a-zA-Z])/g, '≤'],
+  [/\\geq(?![a-zA-Z])/g, '≥'],
+  [/\\neq(?![a-zA-Z])/g, '≠'],
+  [/\\approx(?![a-zA-Z])/g, '≈'],
+  [/\\infty(?![a-zA-Z])/g, '∞'],
+  [/\\rightarrow(?![a-zA-Z])/g, '→'],
+  [/\\to(?![a-zA-Z])/g, '→'],
+  [/\\pm(?![a-zA-Z])/g, '±'],
+  [/\\pi(?![a-zA-Z])/g, 'π'],
 ]
 
 function toSuperscript(exponent: string): string | null {
@@ -72,7 +76,12 @@ export function latexToPlainText(latex: string): string {
   // `^{12}` and `^2` alike; an exponent with no unicode form keeps its source.
   out = out.replace(/\^\{([^{}]*)\}|\^(\S)/g, (whole, braced?: string, single?: string) => {
     const exponent = braced ?? single ?? ''
-    return toSuperscript(exponent) ?? whole
+    const superscript = toSuperscript(exponent)
+    if (superscript !== null) return superscript
+    // Returning `whole` is not enough: the brace strip further down would then
+    // turn `x^{2x}` into `x^2x`, which reads as x²·x. Parenthesising keeps the
+    // grouping the braces carried.
+    return braced === undefined ? whole : `^(${braced})`
   })
 
   for (const [pattern, replacement] of SYMBOLS) out = out.replace(pattern, replacement)
@@ -110,8 +119,10 @@ function isEmptyBlock(block: CardBlock): boolean {
     case 'math':
       return block.latex.trim() === ''
     case 'image':
-      // An image block with no asset is a broken reference, not an image.
-      return block.asset.trim() === ''
+      // No asset is a broken reference, not an image; non-finite dimensions
+      // would serialize to `null` and be dropped on the next load, leaving the
+      // definition claiming a picture that no longer exists.
+      return block.asset.trim() === '' || !Number.isFinite(block.width) || !Number.isFinite(block.height)
     case 'table':
       return ![...block.header, ...block.rows.flat()].some(cell => cell.trim() !== '')
   }
@@ -122,6 +133,18 @@ export function blocksToPlainText(blocks: CardBlock[]): string {
     .map(blockToPlainText)
     .filter(text => text !== '')
     .join('\n')
+}
+
+/**
+ * A block detached from whoever handed it over. The editor holds a live draft
+ * array; storing its objects by reference would let a later keystroke mutate
+ * the card already written — and every undo snapshot sharing that object with
+ * it — so `definition` and `content` would silently drift apart.
+ */
+function cloneBlock(block: CardBlock): CardBlock {
+  return block.kind === 'table'
+    ? { kind: 'table', header: [...block.header], rows: block.rows.map(row => [...row]) }
+    : { ...block }
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -152,13 +175,19 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
     case 'image':
       return typeof block.asset === 'string' &&
         typeof block.alt === 'string' &&
+        // `Number.isFinite`, not `typeof === 'number'`: a failed image decode
+        // yields NaN, which JSON.stringify writes as `null` and this function
+        // then rejects on reload — silently dropping the image while the
+        // definition still claimed one.
         typeof block.width === 'number' &&
-        typeof block.height === 'number'
+        Number.isFinite(block.width) &&
+        typeof block.height === 'number' &&
+        Number.isFinite(block.height)
         ? { kind: 'image', asset: block.asset, alt: block.alt, width: block.width, height: block.height }
         : null
     case 'table':
       return isStringArray(block.header) && Array.isArray(block.rows) && block.rows.every(isStringArray)
-        ? { kind: 'table', header: block.header, rows: block.rows as string[][] }
+        ? { kind: 'table', header: [...block.header], rows: (block.rows as string[][]).map(row => [...row]) }
         : null
     default: {
       // Unknown kind: keep whatever a human could still read out of it.
@@ -184,13 +213,22 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
  * intact; the card is never mutated.
  */
 export function contentOf(card: Card): CardBlock[] {
-  if (card.content !== undefined) {
-    return card.content.map(sanitizeBlock).filter((block): block is CardBlock => block !== null)
-  }
+  const blocks = sanitizeBlocks(card.content)
+  // An empty result is not the same as "no definition": `content: []`, or a
+  // content array whose every block was unreadable, would otherwise render
+  // blank while the quiz and the export still showed `definition`. Falling
+  // back keeps the two in agreement, which is the whole point of the mirror.
+  if (blocks.length > 0) return blocks
   if (card.definition !== undefined && card.definition !== '') {
     return [{ kind: 'text', text: card.definition }]
   }
   return []
+}
+
+/** Every readable block of a raw `content` array. Exported for the repair path. */
+export function sanitizeBlocks(raw: unknown): CardBlock[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map(sanitizeBlock).filter((block): block is CardBlock => block !== null)
 }
 
 /**
@@ -218,5 +256,5 @@ export function normalizeContent(blocks: CardBlock[]): { content?: CardBlock[]; 
   if (definition === '') return {}
 
   if (kept.every(block => block.kind === 'text')) return { definition }
-  return { content: kept, definition }
+  return { content: kept.map(cloneBlock), definition }
 }

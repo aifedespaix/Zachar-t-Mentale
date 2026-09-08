@@ -158,3 +158,89 @@ describe('contentOf — degrading unknown blocks at READ time', () => {
     ])
   })
 })
+
+describe('the definition/content invariant', () => {
+  // The single property the whole design rests on, asserted directly: after any
+  // write, `definition` is exactly the plain-text projection of `content`.
+  const cases: CardBlock[][] = [
+    [{ kind: 'text', text: 'Une règle' }],
+    [{ kind: 'math', latex: '\\frac{20}{100} \\times 425' }],
+    [{ kind: 'image', asset: 'a1.png', alt: 'Schéma', width: 10, height: 5 }],
+    [{ kind: 'table', header: ['a', 'b'], rows: [['1', '2']] }],
+    [{ kind: 'text', text: 'Règle' }, { kind: 'math', latex: 'x^2' }],
+    [{ kind: 'text', text: 'garder' }, { kind: 'math', latex: '   ' }],
+  ]
+
+  it.each(cases)('holds for %j', (...blocks) => {
+    const { content, definition } = normalizeContent(blocks as CardBlock[])
+    const card: Card = { id: 'a', level: 2, title: 'T', parentId: 'r', order: 0, content, definition }
+    expect(definition).toBe(blocksToPlainText(contentOf(card)))
+  })
+
+  it('holds after a JSON save/load round-trip', () => {
+    const { content, definition } = normalizeContent([
+      { kind: 'math', latex: 'x^2' },
+      { kind: 'image', asset: 'a.png', alt: 'S', width: 10, height: 5 },
+    ])
+    const card = JSON.parse(
+      JSON.stringify({ id: 'a', level: 2, title: 'T', parentId: 'r', order: 0, content, definition })
+    ) as Card
+    expect(card.definition).toBe(blocksToPlainText(contentOf(card)))
+  })
+})
+
+describe('normalizeContent does not alias the caller’s blocks', () => {
+  it('a later mutation of the draft cannot reach the stored content', () => {
+    // The editor holds a live draft array; sharing its objects would let a
+    // keystroke mutate an already-written card and every undo snapshot with it.
+    const draft: CardBlock[] = [{ kind: 'math', latex: 'x^2' }, { kind: 'text', text: 'note' }]
+    const { content, definition } = normalizeContent(draft)
+    ;(draft[0] as { latex: string }).latex = 'MUTÉ'
+    expect(content![0]).toEqual({ kind: 'math', latex: 'x^2' })
+    expect(definition).toBe('x²\nnote')
+  })
+
+  it('a table’s rows are copied, not shared', () => {
+    const draft: CardBlock[] = [{ kind: 'table', header: ['a'], rows: [['1']] }]
+    const { content } = normalizeContent(draft)
+    ;(draft[0] as { rows: string[][] }).rows[0][0] = 'MUTÉ'
+    expect((content![0] as { rows: string[][] }).rows[0][0]).toBe('1')
+  })
+
+  it('contentOf does not share a table’s rows with the card', () => {
+    const card: Card = {
+      id: 'a', level: 2, title: 'T', parentId: 'r', order: 0,
+      content: [{ kind: 'table', header: ['a'], rows: [['1']] }], definition: 'a\n1',
+    }
+    const got = contentOf(card) as { rows: string[][] }[]
+    got[0].rows[0][0] = 'MUTÉ'
+    expect((card.content![0] as { rows: string[][] }).rows[0][0]).toBe('1')
+  })
+})
+
+describe('latexToPlainText — command boundaries and exponents', () => {
+  it('does not let a short command eat a longer one sharing its prefix', () => {
+    expect(latexToPlainText('\\top')).toBe('top')
+    expect(latexToPlainText('\\cdots')).toBe('cdots')
+    expect(latexToPlainText('\\leqslant')).toBe('leqslant')
+    expect(latexToPlainText('\\pmod{n}')).toBe('pmodn')
+  })
+
+  it('keeps the grouping of an exponent it cannot map to unicode', () => {
+    // `x^{2x}` must not become `x^2x`, which reads as x² · x.
+    expect(latexToPlainText('x^{2x}')).toBe('x^(2x)')
+  })
+})
+
+describe('contentOf falls back rather than rendering blank', () => {
+  const base: Card = { id: 'a', level: 2, title: 'T', parentId: 'r', order: 0 }
+
+  it('uses the definition when content is present but empty', () => {
+    expect(contentOf({ ...base, content: [], definition: 'Règle' })).toEqual([{ kind: 'text', text: 'Règle' }])
+  })
+
+  it('uses the definition when every block was unreadable', () => {
+    const card = { ...base, content: [{ kind: 'audio', duration: 30 }] as never, definition: '[audio]' }
+    expect(contentOf(card)).toEqual([{ kind: 'text', text: '[audio]' }])
+  })
+})

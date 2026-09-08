@@ -704,20 +704,42 @@ describe('CardNode footer', () => {
     expect(screen.getByTestId(`card-${testCard.id}`)).toHaveStyle({ borderColor: '#dc2626' })
   })
 
-  it('wires the definition popover to updateDefinition when a new value is committed', async () => {
+  it('wires the definition popover to the store when a new value is committed', async () => {
     const user = userEvent.setup()
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
 
     await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
     await user.click(screen.getByText('Définition existante'))
-    const field = screen.getByRole('textbox', { name: /définition/i })
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
     await user.clear(field)
-    await user.type(field, 'Définition modifiée{Enter}')
+    await user.type(field, 'Définition modifiée')
+    await user.click(screen.getByRole('button', { name: /terminer/i }))
 
-    expect(useCardsStore.getState().history.present.find(c => c.id === cardWithDefinition.id)?.definition).toBe(
-      'Définition modifiée'
-    )
+    const card = useCardsStore.getState().history.present.find(c => c.id === cardWithDefinition.id)
+    expect(card?.definition).toBe('Définition modifiée')
+    // Plain text stays plain: editing a text-only definition must not leave a
+    // `content` array behind on a card that never needed one.
+    expect(card && 'content' in card).toBe(false)
+  })
+
+  it('stores a formula as a content block, with `definition` kept as its plain-text mirror', async () => {
+    const user = userEvent.setup()
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    await user.click(screen.getByText('Définition existante'))
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
+    await user.clear(field)
+    // No braces in the typed string: userEvent reads `{...}` as key-descriptor
+    // syntax, which would swallow them before they reached the field.
+    await user.type(field, 'x^2$$')
+    await user.click(screen.getByRole('button', { name: /terminer/i }))
+
+    const card = useCardsStore.getState().history.present.find(c => c.id === cardWithDefinition.id)
+    expect(card?.content).toEqual([{ kind: 'math', latex: 'x^2' }])
+    expect(card?.definition).toBe('x²')
   })
 
   it('renders the definition outside the card element (portaled), so the card never has to resize to fit it', async () => {

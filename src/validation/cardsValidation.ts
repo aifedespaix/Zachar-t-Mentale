@@ -1,5 +1,6 @@
 import type { Card, CardLevel } from '../types/card'
 import { MAX_LEVEL, createRootCard } from '../state/cardsReducer'
+import { normalizeContent, sanitizeBlocks } from '../content/blocks'
 
 /**
  * Structural validation of a raw mind map, run BEFORE anything tries to render
@@ -314,11 +315,21 @@ function clampLevel(level: number): CardLevel {
 function salvage(entry: unknown): Card | null {
   if (!isRecord(entry)) return null
   const title = typeof entry.title === 'string' ? entry.title : ''
-  const definition = typeof entry.definition === 'string' ? entry.definition : undefined
-  const content = Array.isArray(entry.content) && entry.content.length > 0 ? entry.content : undefined
   // `content` counts as recoverable material: a SVT card whose whole point is
   // a diagram may legitimately have no title and no definition text, and
   // dropping it would delete the only copy of that image reference.
+  //
+  // It goes through the SAME sanitize + normalize pair the editor writes
+  // through, for two reasons. Junk (`[null]`, `[1,2,3]`, a half-image) would
+  // otherwise resurrect as a card that renders nothing at all — exactly the
+  // blank card this function refuses to create — and, more importantly,
+  // `definition` MUST be derived from the blocks. Writing `content` without
+  // its mirror leaves the card invisible to everything that reads the mirror:
+  // the quiz's question typing, the XMind note, the export.
+  const salvaged = normalizeContent(sanitizeBlocks(entry.content))
+  const definition =
+    salvaged.definition ?? (typeof entry.definition === 'string' ? entry.definition : undefined)
+  const content = salvaged.content
   if (title === '' && definition === undefined && content === undefined) return null
   const card: Card = {
     id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : crypto.randomUUID(),

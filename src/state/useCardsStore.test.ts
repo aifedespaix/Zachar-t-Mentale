@@ -105,4 +105,55 @@ describe('useCardsStore', () => {
     expect(store.getState().history.present).toEqual(freshCards)
     expect(store.getState().history.past).toEqual([])
   })
+
+  describe('updateContent', () => {
+    it('writes content with its derived definition, and is undoable', () => {
+      const store = createCardsStore()
+      const rootId = store.getState().history.present[0].id
+
+      store.getState().updateContent(rootId, [{ kind: 'math', latex: 'x^2' }])
+      const after = store.getState().history.present[0]
+      expect(after.content).toEqual([{ kind: 'math', latex: 'x^2' }])
+      expect(after.definition).toBe('x²')
+
+      store.getState().undo()
+      expect(store.getState().history.present[0].content).toBeUndefined()
+      expect(store.getState().history.present[0].definition).toBeUndefined()
+
+      store.getState().redo()
+      expect(store.getState().history.present[0].definition).toBe('x²')
+    })
+
+    it('pushes exactly one undo entry per content change', () => {
+      const store = createCardsStore()
+      const rootId = store.getState().history.present[0].id
+
+      store.getState().updateContent(rootId, [{ kind: 'math', latex: 'x^2' }])
+      store.getState().undo()
+
+      expect(store.getState().history.present[0].definition).toBeUndefined()
+    })
+
+    it('does not push a history entry for a card that does not exist', () => {
+      // The single write path must not let a no-op consume the user's undo.
+      const store = createCardsStore()
+      const before = store.getState().history.past.length
+
+      store.getState().updateContent('inconnu', [{ kind: 'math', latex: 'x^2' }])
+
+      expect(store.getState().history.past.length).toBe(before)
+    })
+
+    it('updateDefinition clears a stale content through the same path', () => {
+      const store = createCardsStore()
+      const rootId = store.getState().history.present[0].id
+      store.getState().updateContent(rootId, [{ kind: 'math', latex: 'x^2' }])
+
+      store.getState().updateDefinition(rootId, 'Juste du texte')
+
+      const after = store.getState().history.present[0]
+      expect('content' in after).toBe(false)
+      expect(after.definition).toBe('Juste du texte')
+    })
+  })
 })

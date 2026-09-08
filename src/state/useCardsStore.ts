@@ -74,7 +74,11 @@ export function createCardsStore(): CardsStore {
       set(state => ({ history: pushState(state.history, next) }))
     },
     updateContent: (id, blocks) => {
-      const next = updateContentOp(get().history.present, id, blocks)
+      const present = get().history.present
+      const next = updateContentOp(present, id, blocks)
+      // `updateContent` returns the same array when nothing actually changed;
+      // pushing it anyway would spend an undo step on a no-op.
+      if (next === present) return
       set(state => ({ history: pushState(state.history, next) }))
     },
     deleteCard: id => {

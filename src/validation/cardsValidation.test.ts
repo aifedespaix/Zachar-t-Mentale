@@ -303,14 +303,38 @@ describe('content blocks', () => {
   })
 
   it('salvages a card whose only content is an image, instead of dropping it', () => {
+    // `id: 42` makes the entry fail isUsableCardRecord, which is what actually
+    // routes it through salvage(). An entry with a well-typed id and a ghost
+    // parent takes the newlyFloating branch instead and never reaches it.
     const repaired = repairCards([
       root,
-      { id: 'x', level: 9, title: '', parentId: 'fantome', order: 0,
+      { id: 42, level: 2, title: '', parentId: 'r', order: 0,
         content: [{ kind: 'image', asset: 'a1.png', alt: 'Schéma', width: 100, height: 50 }] },
     ])
     const rescued = repaired.find(c => c.content?.[0]?.kind === 'image')
     expect(rescued).toBeDefined()
     expect(rescued!.detached).toBe(true)
+    // The mirror MUST be derived: without it the card is invisible to the quiz,
+    // the XMind note and the export, all of which read `definition`.
+    expect(rescued!.definition).toBe('[image : Schéma]')
+  })
+
+  it('does not resurrect junk content as a blank, unrenderable card', () => {
+    const repaired = repairCards([
+      root,
+      { id: 1, title: '', content: [null] },
+      { id: 2, title: '', content: [1, 2, 3] },
+      { id: 3, title: '', content: [{ kind: 'image', asset: 'a.png' }] },
+    ])
+    expect(repaired.filter(c => c.id !== 'r')).toHaveLength(0)
+  })
+
+  it('drops an image whose dimensions are not finite, rather than keeping a reference that dies on reload', () => {
+    const repaired = repairCards([
+      root,
+      { id: 9, title: '', content: [{ kind: 'image', asset: 'a.png', alt: 'x', width: null, height: 10 }] },
+    ])
+    expect(repaired.filter(c => c.id !== 'r')).toHaveLength(0)
   })
 
   it('leaves a repaired file valid even when it carries unknown blocks', () => {

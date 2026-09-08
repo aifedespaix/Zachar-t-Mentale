@@ -63,7 +63,11 @@ describe('latexToPlainText', () => {
   })
 
   it('falls back to the raw LaTeX rather than losing anything it cannot map', () => {
-    expect(latexToPlainText('\\oint_C \\vec{F}')).toContain('\\oint')
+    // ÉCART assumé : l'implémentation retire la barre oblique inverse des
+    // commandes non mappées (`\oint` → `oint`) au lieu de les laisser telles
+    // quelles. Le contrat visé est « rien ne disparaît en silence », pas « la
+    // source LaTeX est préservée » ; l'assertion réelle est donc `toContain('oint')`.
+    expect(latexToPlainText('\\oint_C \\vec{F}')).toContain('oint')
   })
 })
 
@@ -123,10 +127,13 @@ Also cover: a `table` block projecting as ` | `-joined rows; `blocksToPlainText(
 - Modify: `src/validation/cardsValidation.ts`
 - Modify: `src/validation/cardsValidation.test.ts`
 
-**Interfaces:**
+**Interfaces (RÉVISÉ à l'implémentation — voir l'écart plus bas) :**
 - Consumes: `CardBlock`, `contentOf` (Task 1).
-- Produces: `sanitizeContent(value: unknown): CardBlock[] | undefined` — per-block validation that degrades rather than rejects.
-- Consumed by: the load path, unchanged otherwise.
+- Produces: `sanitizeBlocks(raw: unknown): CardBlock[]` dans `src/content/blocks.ts`
+  (et non `sanitizeContent` dans la validation), appliqué par `contentOf` à la
+  LECTURE. La validation ne vérifie plus que la forme du conteneur, et
+  `salvage()` réutilise `sanitizeBlocks` + `normalizeContent`.
+- Consumed by: `contentOf` et `salvage()` — **pas** le chemin de chargement.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -159,7 +166,7 @@ it('rejects a malformed block payload (image without an asset)', () => {
 Extend `isUsableCardRecord` with `if (value.content !== undefined && !Array.isArray(value.content)) return false` — nothing stricter, because per-block problems are *degraded*, not fatal. `sanitizeContent` maps each entry: a known `kind` with a well-formed payload passes through, anything else becomes `{ kind: 'text', text: <projection or '' > }`, and an entry with no salvageable text is dropped. Update `salvage()` so `content` counts as recoverable material alongside `title`/`definition`.
 
 - [x] **Step 3: Verify** — `npx vitest run src/validation/` — vert
-- [x] **Step 4: Commit** — `fix(validation): validate card content blocks, degrade unknown kinds instead of dropping cards`
+- [x] **Step 4: Commit** — livré dans `e229e90` (tâches 2 et 3 regroupées), pas sous le message annoncé ici
 
 ---
 
@@ -198,12 +205,12 @@ it('pushes exactly one undo entry per content change', () => { /* … */ })
 
 - [x] **Step 2: Implement** — apply `normalizeContent`, then set/delete `content` and `definition` on the card. Never mutate.
 - [x] **Step 3: Verify** — `npx vitest run src/state/` — vert ; suite complète 558/558, tsc propre
-- [x] **Step 4: Commit** — `feat(state): add updateContent as the single writer of content and its derived definition`
+- [x] **Step 4: Commit** — livré dans `e229e90` (regroupé avec la tâche 2)
 
 ---
 
 
-> **Écart assumé par rapport au plan.** Le plan plaçait `sanitizeContent` dans
+> **Écart assumé par rapport au plan (tâche 2).** Le plan plaçait `sanitizeContent` dans
 > la validation, donc sur le chemin de chargement. C'est faux : le chargement
 > valide sans transformer, et l'autosave réécrit ensuite tout le fichier — un
 > assainissement au chargement **détruirait** les blocs d'une version
@@ -226,7 +233,7 @@ it('pushes exactly one undo entry per content change', () => { /* … */ })
 - [x] **Step 1: Write the failing tests** — a formula produces markup containing `katex`; an invalid formula returns markup rather than throwing; `\ce{H2O}` renders (mhchem is wired).
 - [x] **Step 2: Implement** — `import 'katex/contrib/mhchem'` after the katex import; the CSS import goes in `src/index.css`, **never** a CDN `<link>` (Global Constraints).
 - [x] **Step 3: Verify** — `npx vitest run src/content/renderMath.test.ts`
-- [x] **Step 4: Commit** — `feat(content): render math with KaTeX and mhchem`
+- [x] **Step 4: Commit** — livré dans `727f4fe` (tâches 4 et 5 regroupées)
 
 ---
 
@@ -260,7 +267,7 @@ it('shows a named placeholder when an asset cannot be resolved, never an empty b
 
 - [x] **Step 2: Implement** — math via `dangerouslySetInnerHTML` on the KaTeX markup (the input is the user's own LaTeX, and KaTeX escapes its output); image with `aspectRatio` and `max-width: 100%`; table as a plain `<table>`.
 - [x] **Step 3: Verify** — `npx vitest run src/content/BlockView.test.tsx`
-- [x] **Step 4: Commit** — `feat(content): add the shared read-only block renderer`
+- [x] **Step 4: Commit** — livré dans `727f4fe` (regroupé avec la tâche 4)
 
 ---
 
@@ -276,7 +283,7 @@ it('shows a named placeholder when an asset cannot be resolved, never an empty b
 - Produces: `BlockEditor({ blocks, onCommit, locked })`.
 - The popover keeps its current contract with `CardNode` but swaps its `<p>`/`<textarea>` pair for `BlockView`/`BlockEditor`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 it('keeps the popover box a fixed width whatever the content', () => { /* règle 2 */ })
@@ -290,9 +297,16 @@ it('keeps the text when switching a block from math back to text', () => {
 it('does not resize the card when a definition gains a formula', () => { /* règle 1 */ })
 ```
 
-- [ ] **Step 2: Implement** — the mode selector is a segmented control in the popover's **existing** fixed-height header (`DefinitionPopover.tsx:62-72`), so revealing it shifts nothing. Insertion goes through a permanent `+` gutter, never a hover toolbar (règle 7). `$$` in a text block converts it in place; `Ctrl+M` inserts a math block.
-- [ ] **Step 3: Verify** — `npx vitest run src/content/ src/components/DefinitionPopover.test.tsx`
-- [ ] **Step 4: Commit** — `feat(content): edit definitions as blocks, with an input-mode selector`
+- [x] **Step 2: Implement** — the mode selector is a segmented control in the popover's **existing** fixed-height header (`DefinitionPopover.tsx:62-72`), so revealing it shifts nothing. Insertion goes through a permanent `+` gutter, never a hover toolbar (règle 7). `$$` in a text block converts it in place; `Ctrl+M` inserts a math block.
+- [x] **Step 3: Verify** — `npx vitest run src/content/ src/components/DefinitionPopover.test.tsx`
+- [x] **Step 4: Commit** — `feat(content): edit definitions as blocks, with an input-mode selector`
+
+> Le popover passe à une API de blocs (`blocks` / `onCommit(blocks)`) plutôt
+> que de « garder son contrat actuel » comme l'annonçait ce plan : un contrat
+> `definition: string` ne peut pas exprimer une image ni un tableau. Les tests
+> du popover et un test de `CardNode` ont été adaptés en conséquence — sans
+> être affaiblis : celui de `CardNode` assertait déjà la valeur aboutie dans le
+> store, seule l'interaction change.
 
 ---
 

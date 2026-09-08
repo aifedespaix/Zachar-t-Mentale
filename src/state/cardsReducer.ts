@@ -132,15 +132,22 @@ export function updateTitle(cards: Card[], cardId: string, title: string): Card[
  */
 export function updateContent(cards: Card[], cardId: string, blocks: CardBlock[]): Card[] {
   const { content, definition } = normalizeContent(blocks)
-  return cards.map(card => {
+  let changed = false
+  const next = cards.map(card => {
     if (card.id !== cardId) return card
-    const next: Card = { ...card }
-    if (content === undefined) delete next.content
-    else next.content = content
-    if (definition === undefined) delete next.definition
-    else next.definition = definition
-    return next
+    // Opening the editor and closing it unchanged must not cost the user an
+    // undo step, and neither must a write aimed at a card that is not there.
+    if (card.definition === definition && JSON.stringify(card.content) === JSON.stringify(content)) return card
+    changed = true
+    const updated: Card = { ...card }
+    if (content === undefined) delete updated.content
+    else updated.content = content
+    if (definition === undefined) delete updated.definition
+    else updated.definition = definition
+    return updated
   })
+  // Same reference when nothing moved, so the store can skip the history push.
+  return changed ? next : cards
 }
 
 /**
