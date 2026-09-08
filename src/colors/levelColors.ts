@@ -85,6 +85,16 @@ export function levelColor(level: number, theme: 'light' | 'dark'): LevelColor {
 }
 
 /**
+ * Clamps a possibly-corrupt level to a real 1..4 `CardLevel` — the same rule
+ * `levelColor` applies internally, exported for callers that index
+ * `levels`/`useAppearanceSettingsStore` directly rather than going through
+ * `levelColor`.
+ */
+export function clampCardLevel(level: number): CardLevel {
+  return Math.min(Math.max(Math.round(level) || 1, 1), 4) as CardLevel
+}
+
+/**
  * Floating ("volante") cards: deliberately achromatic, so a detached card reads
  * as OUT of the four-level hierarchy at a glance rather than as a fifth level.
  * Kept above the WCAG AA text/background ratio like every level palette, in

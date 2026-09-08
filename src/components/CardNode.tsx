@@ -10,7 +10,7 @@ import { useQuizStore } from '../state/useQuizStore'
 import { useQuizSettingsStore } from '../state/useQuizSettingsStore'
 import { computeTitleSimilarity, similarityColor } from '../utils/textSimilarity'
 import { buildLengthGuide } from '../utils/lengthGuide'
-import { detachedColors } from '../colors/levelColors'
+import { clampCardLevel, detachedColors } from '../colors/levelColors'
 import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../hooks/useResolvedTheme'
 import { toCss } from '../colors/contrast'
@@ -162,9 +162,10 @@ export function CardNode({ data }: CardNodeProps) {
   // vestigial once it leaves the hierarchy (see the `detached` field), so
   // colouring it by that stale value would read as "still a level-3 card".
   const theme = useResolvedTheme()
-  const levelAppearance = useAppearanceSettingsStore(s => s.levels[card.level])
+  const level = clampCardLevel(card.level)
+  const levelAppearance = useAppearanceSettingsStore(s => s.levels[level])
   const childLevelAppearance = useAppearanceSettingsStore(s =>
-    card.level < 4 ? s.levels[(card.level + 1) as CardLevel] : null
+    level < 4 ? s.levels[(level + 1) as CardLevel] : null
   )
   const colors = isDetached ? detachedColors[theme] : levelAppearance.color[theme]
   const childColors = !isDetached && childLevelAppearance ? childLevelAppearance.color[theme] : null
