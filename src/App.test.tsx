@@ -20,6 +20,13 @@ vi.mock('./persistence/quizSettings', () => ({
   loadQuizSettings: vi.fn().mockResolvedValue({ similarityThreshold: 100, lengthGuideEnabled: true }),
   saveQuizSettings: vi.fn().mockResolvedValue(undefined),
 }))
+vi.mock('./persistence/appearanceSettings', async () => {
+  const { DEFAULT_APPEARANCE_SETTINGS } = await import('./types/appearanceSettings')
+  return {
+    loadAppearanceSettings: vi.fn().mockResolvedValue(DEFAULT_APPEARANCE_SETTINGS),
+    saveAppearanceSettings: vi.fn().mockResolvedValue(undefined),
+  }
+})
 vi.mock('./persistence/fileTree', async importOriginal => {
   const actual = await importOriginal<typeof import('./persistence/fileTree')>()
   return { ...actual, scanFolder: vi.fn() }

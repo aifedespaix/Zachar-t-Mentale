@@ -22,6 +22,11 @@ import { useUndoRedoShortcuts } from './hooks/useUndoRedoShortcuts'
 import { useWindowTitle } from './hooks/useWindowTitle'
 import { useUnsavedChangesGuard } from './hooks/useUnsavedChangesGuard'
 import { useFileDropZone } from './hooks/useFileDropZone'
+import { ThemeToggleButton } from './components/ThemeToggleButton'
+import { AppearanceSettingsButton } from './components/appearance/AppearanceSettingsButton'
+import { useAppearanceSettingsStore } from './state/useAppearanceSettingsStore'
+import { useThemeDomSync } from './hooks/useResolvedTheme'
+import { useAppliedFontFamily } from './hooks/useAppliedFontFamily'
 import type { Card } from './types/card'
 
 /** A map that failed validation, held until the user decides what to do with it. */
@@ -70,6 +75,8 @@ function App() {
   const mainRef = useRef<HTMLElement | null>(null)
   useUndoRedoShortcuts()
   useWindowTitle(currentFilePath)
+  useThemeDomSync()
+  useAppliedFontFamily()
   const { flush } = useAutosave(
     loadedPath ?? '',
     cards,
@@ -82,6 +89,7 @@ function App() {
 
   useEffect(() => {
     useQuizSettingsStore.getState().init()
+    useAppearanceSettingsStore.getState().init()
   }, [])
 
   // Re-runs on every file switch (open a different file, or a rename that
@@ -193,6 +201,8 @@ function App() {
           {!quizActive && <LockToggle />}
           {!quizActive && <QuizButton />}
           {!quizActive && <QuizSettingsButton />}
+          {!quizActive && <AppearanceSettingsButton />}
+          {!quizActive && <ThemeToggleButton />}
           <span title={currentFilePath ?? undefined} style={{ fontSize: 13, fontWeight: 500 }}>
             {currentFileName ?? 'Aucun fichier ouvert'}
           </span>
