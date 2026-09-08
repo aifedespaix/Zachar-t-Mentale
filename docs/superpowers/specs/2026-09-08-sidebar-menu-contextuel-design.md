@@ -94,7 +94,12 @@ déjà en place dans `FileTreeRow.tsx`.
 - Créer une carte mentale → `Nouvelle carte mentale` (ou
   `Nouvelle carte mentale (2)` si déjà pris, etc.).
 - Créer un sous-dossier → `Nouveau dossier` (même logique).
-- Dupliquer → `<nom actuel> (copie)` (ou `(copie 2)`, etc. si déjà pris).
+- Dupliquer → `<nom actuel> (copie)` (ou `<nom actuel> (copie) (2)`, etc. si
+  déjà pris — même suffixe numéroté générique que pour créer, appliqué
+  par-dessus le `(copie)` plutôt qu'un format `(copie 2)` dédié : rester sur
+  l'unique convention de suffixe déjà testée pour les trois actions évite une
+  seconde règle de nommage pour un cas rarement atteint — dupliquer deux fois
+  le même fichier sans renommer la première copie).
 
 Ce choix s'écarte volontairement de la formulation initiale (« pré-rempli
 par le nom actuel ») : un nom par défaut *déjà libre* évite qu'une
