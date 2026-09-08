@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { FileTreeRow } from './FileTreeRow'
@@ -13,6 +13,8 @@ vi.mock('../../persistence/fileOps', async importOriginal => {
     createSubfolder: vi.fn(),
     renamePath: vi.fn(),
     deletePath: vi.fn(),
+    duplicatePath: vi.fn(),
+    freeSiblingPath: vi.fn(),
   }
 })
 vi.mock('../../persistence/fileTree', async importOriginal => {
@@ -23,7 +25,14 @@ vi.mock('../../persistence/fileStore', () => ({ loadMindMap: vi.fn(), saveMindMa
 vi.mock('../../persistence/exportIO', () => ({ pickXmindFile: vi.fn(), readBinaryFile: vi.fn() }))
 vi.mock('../../xmind/importXmind', () => ({ readXmindFile: vi.fn() }))
 
-import { createMindMapFile, createSubfolder, renamePath, deletePath } from '../../persistence/fileOps'
+import {
+  createMindMapFile,
+  createSubfolder,
+  renamePath,
+  deletePath,
+  duplicatePath,
+  freeSiblingPath,
+} from '../../persistence/fileOps'
 import { scanFolder } from '../../persistence/fileTree'
 import { loadMindMap, saveMindMap } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
@@ -39,6 +48,11 @@ function resetWorkspaceStore() {
   })
 }
 
+/** Opens the row's context menu — the only way any action but open/toggle is reachable. */
+function openMenu(rowName: string | RegExp) {
+  fireEvent.contextMenu(screen.getByRole('button', { name: rowName }))
+}
+
 describe('FileTreeRow', () => {
   beforeEach(() => {
     resetWorkspaceStore()
@@ -46,12 +60,23 @@ describe('FileTreeRow', () => {
     vi.mocked(createSubfolder).mockReset()
     vi.mocked(renamePath).mockReset()
     vi.mocked(deletePath).mockReset()
+    vi.mocked(duplicatePath).mockReset()
     vi.mocked(scanFolder).mockReset()
     vi.mocked(loadMindMap).mockReset()
     vi.mocked(saveMindMap).mockReset()
     vi.mocked(pickXmindFile).mockReset()
     vi.mocked(readBinaryFile).mockReset()
     vi.mocked(readXmindFile).mockReset()
+    // The naming modal's pre-filled default always comes from `freeSiblingPath` —
+    // most tests care about the name the user actually submits, not this
+    // default, so simulate "always free" (no numbered suffix) unless a test
+    // overrides it.
+    vi.mocked(freeSiblingPath)
+      .mockReset()
+      .mockImplementation(async (folderPath, baseName, isFolder) => {
+        const separator = folderPath.includes('\\') ? '\\' : '/'
+        return `${folderPath}${separator}${isFolder ? baseName : `${baseName}.json`}`
+      })
   })
 
   it('renders a mindmap file and opens it on click', async () => {
@@ -103,62 +128,55 @@ describe('FileTreeRow', () => {
     expect(screen.queryByText('atomes.json')).not.toBeInTheDocument()
   })
 
-  it('shows a "retirer de la liste" action on a root folder row, and calls onRemoveRoot with its path', async () => {
-    const user = userEvent.setup()
-    const onRemoveRoot = vi.fn()
-    const node: FileTreeNode = { type: 'folder', name: 'cours-svt', path: '/cours-svt', children: [] }
-    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot onRemoveRoot={onRemoveRoot} />)
-
-    await user.click(screen.getByRole('button', { name: 'Retirer cours-svt de la liste' }))
-
-    expect(onRemoveRoot).toHaveBeenCalledWith('/cours-svt')
-  })
-
-  it('does not show a "retirer" action on a non-root folder row', () => {
-    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours-svt/chimie', children: [] }
-    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
-
-    expect(screen.queryByRole('button', { name: /retirer/i })).not.toBeInTheDocument()
-  })
-
-  it('creates a new mind map file inside a folder and opens it', async () => {
-    const user = userEvent.setup()
-    vi.mocked(createMindMapFile).mockResolvedValue('/cours/chimie/nouveau.json')
-    vi.mocked(scanFolder).mockResolvedValue([
-      { type: 'mindmap', name: 'nouveau.json', path: '/cours/chimie/nouveau.json' },
-    ])
-    const onOpenFile = vi.fn()
-    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
-    render(<FileTreeRow node={node} depth={0} onOpenFile={onOpenFile} />)
-
-    await user.click(screen.getByRole('button', { name: 'Nouvelle carte mentale' }))
-    await user.type(screen.getByRole('textbox', { name: /nom de la nouvelle carte mentale/i }), 'nouveau{Enter}')
-
-    expect(createMindMapFile).toHaveBeenCalledWith('/cours/chimie', 'nouveau')
-    await waitFor(() => expect(onOpenFile).toHaveBeenCalledWith('/cours/chimie/nouveau.json'))
-  })
-
-  it('creates a new subfolder', async () => {
-    const user = userEvent.setup()
-    vi.mocked(createSubfolder).mockResolvedValue('/cours/chimie/atomes')
-    vi.mocked(scanFolder).mockResolvedValue([])
-    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
-    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
-
-    await user.click(screen.getByRole('button', { name: 'Nouveau sous-dossier' }))
-    await user.type(screen.getByRole('textbox', { name: /nom du nouveau dossier/i }), 'atomes{Enter}')
-
-    expect(createSubfolder).toHaveBeenCalledWith('/cours/chimie', 'atomes')
-  })
-
-  it('renames a mind map file', async () => {
+  it('renames a mind map file via double-click, with no menu involved', async () => {
     const user = userEvent.setup()
     vi.mocked(renamePath).mockResolvedValue(undefined)
     vi.mocked(scanFolder).mockResolvedValue([])
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Renommer' }))
+    await user.dblClick(screen.getByRole('button', { name: 'chapitre1.json' }))
+    const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
+    await user.clear(input)
+    await user.type(input, 'chapitre1-v2.json{Enter}')
+
+    expect(renamePath).toHaveBeenCalledWith('/cours/chapitre1.json', '/cours/chapitre1-v2.json')
+  })
+
+  it('renames a non-root folder via double-click', async () => {
+    const user = userEvent.setup()
+    vi.mocked(renamePath).mockResolvedValue(undefined)
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.dblClick(screen.getByRole('button', { name: /chimie/i }))
+    const input = screen.getByRole('textbox', { name: /renommer chimie/i })
+    await user.clear(input)
+    await user.type(input, 'chimie-2026{Enter}')
+
+    expect(renamePath).toHaveBeenCalledWith('/cours/chimie', '/cours/chimie-2026')
+  })
+
+  it('does not offer renaming a root folder, even via double-click', async () => {
+    const user = userEvent.setup()
+    const node: FileTreeNode = { type: 'folder', name: 'cours-svt', path: '/cours-svt', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot onRemoveRoot={() => {}} />)
+
+    await user.dblClick(screen.getByRole('button', { name: /cours-svt/i }))
+
+    expect(screen.queryByRole('textbox', { name: /renommer/i })).not.toBeInTheDocument()
+  })
+
+  it('renames a mind map file via the context menu', async () => {
+    const user = userEvent.setup()
+    vi.mocked(renamePath).mockResolvedValue(undefined)
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
     await user.type(input, 'chapitre1-v2.json{Enter}')
@@ -174,7 +192,8 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Renommer' }))
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
     await user.type(input, 'chapitre1-v2.json{Enter}')
@@ -182,9 +201,6 @@ describe('FileTreeRow', () => {
     await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre1-v2.json'))
   })
 
-  // A folder rename moves every file underneath it. Handling only the exact
-  // match left currentFilePath pointing into a directory that no longer
-  // exists: autosave kept writing to nowhere and the highlight disappeared.
   it('rewrites the current file path when renaming a FOLDER that contains the open file', async () => {
     const user = userEvent.setup()
     vi.mocked(renamePath).mockResolvedValue(undefined)
@@ -193,15 +209,14 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Renommer' }))
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chimie/i })
     await user.clear(input)
     await user.type(input, 'chimie-2026{Enter}')
 
     expect(renamePath).toHaveBeenCalledWith('/cours/chimie', '/cours/chimie-2026')
-    await waitFor(() =>
-      expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chimie-2026/atomes.json')
-    )
+    await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chimie-2026/atomes.json'))
   })
 
   it('leaves the current file alone when renaming a folder that merely shares a name prefix', async () => {
@@ -212,25 +227,14 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Renommer' }))
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chimie/i })
     await user.clear(input)
     await user.type(input, 'chimie-2026{Enter}')
 
     await waitFor(() => expect(renamePath).toHaveBeenCalled())
     expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chimie-avancee/atomes.json')
-  })
-
-  it('reports a failed creation instead of silently doing nothing', async () => {
-    const user = userEvent.setup()
-    vi.mocked(createMindMapFile).mockRejectedValue(new Error('lecture seule'))
-    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
-    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
-
-    await user.click(screen.getByRole('button', { name: 'Nouvelle carte mentale' }))
-    await user.type(screen.getByRole('textbox', { name: /nom de la nouvelle carte mentale/i }), 'nouveau{Enter}')
-
-    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/lecture seule/))
   })
 
   it('reports a failed rename instead of silently doing nothing', async () => {
@@ -240,14 +244,173 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Renommer' }))
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
     await user.type(input, 'chapitre1-v2.json{Enter}')
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/fichier verrouillé/))
-    // The rename did not happen on disk, so the open file must not move either.
     expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre1.json')
+  })
+
+  it('shows a "retirer de la liste" action in the context menu of a root folder, and calls onRemoveRoot with its path', async () => {
+    const user = userEvent.setup()
+    const onRemoveRoot = vi.fn()
+    const node: FileTreeNode = { type: 'folder', name: 'cours-svt', path: '/cours-svt', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot onRemoveRoot={onRemoveRoot} />)
+
+    openMenu(/cours-svt/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Retirer cours-svt de la liste' }))
+
+    expect(onRemoveRoot).toHaveBeenCalledWith('/cours-svt')
+  })
+
+  it('does not show "retirer", "renommer", "supprimer" or "dupliquer" on a root folder, only creation actions', async () => {
+    const node: FileTreeNode = { type: 'folder', name: 'cours-svt', path: '/cours-svt', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot onRemoveRoot={() => {}} />)
+
+    openMenu(/cours-svt/i)
+
+    expect(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Nouveau sous-dossier' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Importer XMind' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Retirer cours-svt de la liste' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Renommer' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Supprimer' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Dupliquer' })).not.toBeInTheDocument()
+  })
+
+  it('does not show "retirer" on a non-root folder, but does show renommer/supprimer/dupliquer', async () => {
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours-svt/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu(/chimie/i)
+
+    expect(await screen.findByRole('menuitem', { name: 'Renommer' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Supprimer' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Dupliquer' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /retirer/i })).not.toBeInTheDocument()
+  })
+
+  it('creates a new mind map file inside a folder and opens it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(createMindMapFile).mockResolvedValue('/cours/chimie/nouveau.json')
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'nouveau.json', path: '/cours/chimie/nouveau.json' },
+    ])
+    const onOpenFile = vi.fn()
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={onOpenFile} />)
+
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' }))
+    const input = await screen.findByRole('textbox', { name: 'Nouvelle carte mentale' })
+    await user.clear(input)
+    await user.type(input, 'nouveau{Enter}')
+
+    expect(createMindMapFile).toHaveBeenCalledWith('/cours/chimie', 'nouveau')
+    await waitFor(() => expect(onOpenFile).toHaveBeenCalledWith('/cours/chimie/nouveau.json'))
+  })
+
+  it('pre-fills the new-mind-map dialog with a name already free in the folder', async () => {
+    const user = userEvent.setup()
+    vi.mocked(freeSiblingPath).mockResolvedValue('/cours/chimie/Nouvelle carte mentale (2).json')
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' }))
+
+    expect(freeSiblingPath).toHaveBeenCalledWith('/cours/chimie', 'Nouvelle carte mentale', false)
+    expect(await screen.findByRole('textbox', { name: 'Nouvelle carte mentale (2)' })).toHaveValue(
+      'Nouvelle carte mentale (2)'
+    )
+  })
+
+  it('creates a new subfolder', async () => {
+    const user = userEvent.setup()
+    vi.mocked(createSubfolder).mockResolvedValue('/cours/chimie/atomes')
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Nouveau sous-dossier' }))
+    const input = await screen.findByRole('textbox', { name: 'Nouveau dossier' })
+    await user.clear(input)
+    await user.type(input, 'atomes{Enter}')
+
+    expect(createSubfolder).toHaveBeenCalledWith('/cours/chimie', 'atomes')
+  })
+
+  it('reports a failed creation instead of silently doing nothing', async () => {
+    const user = userEvent.setup()
+    vi.mocked(createMindMapFile).mockRejectedValue(new Error('lecture seule'))
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' }))
+    const input = await screen.findByRole('textbox', { name: 'Nouvelle carte mentale' })
+    await user.type(input, '{Enter}')
+
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/lecture seule/))
+  })
+
+  it('duplicates a mind map file and opens the copy', async () => {
+    const user = userEvent.setup()
+    vi.mocked(freeSiblingPath).mockResolvedValue('/cours/chapitre1 (copie).json')
+    vi.mocked(duplicatePath).mockResolvedValue(undefined)
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const onOpenFile = vi.fn()
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={onOpenFile} />)
+
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Dupliquer' }))
+
+    expect(freeSiblingPath).toHaveBeenCalledWith('/cours', 'chapitre1 (copie)', false)
+    const input = await screen.findByRole('textbox', { name: /dupliquer/i })
+    await user.type(input, '{Enter}')
+
+    expect(duplicatePath).toHaveBeenCalledWith('/cours/chapitre1.json', '/cours/chapitre1 (copie).json', false)
+    await waitFor(() => expect(onOpenFile).toHaveBeenCalledWith('/cours/chapitre1 (copie).json'))
+  })
+
+  it('duplicates a folder without opening anything', async () => {
+    const user = userEvent.setup()
+    vi.mocked(freeSiblingPath).mockResolvedValue('/cours/chimie (copie)')
+    vi.mocked(duplicatePath).mockResolvedValue(undefined)
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const onOpenFile = vi.fn()
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={onOpenFile} />)
+
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Dupliquer' }))
+    expect(freeSiblingPath).toHaveBeenCalledWith('/cours', 'chimie (copie)', true)
+    const input = await screen.findByRole('textbox', { name: /dupliquer/i })
+    await user.type(input, '{Enter}')
+
+    expect(duplicatePath).toHaveBeenCalledWith('/cours/chimie', '/cours/chimie (copie)', true)
+    await waitFor(() => expect(scanFolder).toHaveBeenCalledWith('/cours'))
+    expect(onOpenFile).not.toHaveBeenCalled()
+  })
+
+  it('reports a failed duplication instead of silently doing nothing', async () => {
+    const user = userEvent.setup()
+    vi.mocked(freeSiblingPath).mockResolvedValue('/cours/chapitre1 (copie).json')
+    vi.mocked(duplicatePath).mockRejectedValue(new Error('disque plein'))
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Dupliquer' }))
+    const input = await screen.findByRole('textbox', { name: /dupliquer/i })
+    await user.type(input, '{Enter}')
+
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/disque plein/))
   })
 
   it('reports a failed deletion instead of silently doing nothing', async () => {
@@ -257,11 +420,11 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
     await user.click(screen.getByRole('button', { name: 'Confirmer' }))
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/fichier verrouillé/))
-    // Nothing was deleted, so the file stays open.
     expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre1.json')
   })
 
@@ -272,7 +435,8 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
     expect(screen.getByRole('heading', { name: /supprimer le fichier « chapitre1.json » ?/i })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Confirmer' }))
 
@@ -287,7 +451,8 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
     await user.click(screen.getByRole('button', { name: 'Confirmer' }))
 
     await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBeNull())
@@ -308,7 +473,8 @@ describe('FileTreeRow', () => {
     }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
     expect(
       screen.getByRole('heading', { name: /supprimer le dossier « chimie » et son contenu \(2 éléments\)/i })
     ).toBeInTheDocument()
@@ -317,25 +483,14 @@ describe('FileTreeRow', () => {
     expect(deletePath).toHaveBeenCalledWith('/cours/chimie', true)
   })
 
-  it('does not show rename/delete on a root folder row, only creation and "retirer"', () => {
-    const node: FileTreeNode = { type: 'folder', name: 'cours-svt', path: '/cours-svt', children: [] }
-    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot onRemoveRoot={() => {}} />)
-
-    expect(screen.queryByRole('button', { name: 'Renommer' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Supprimer' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Nouvelle carte mentale' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Nouveau sous-dossier' })).toBeInTheDocument()
-  })
-
   it('opens the export dialog with the file\'s cards once they are loaded and validated', async () => {
     const user = userEvent.setup()
-    vi.mocked(loadMindMap).mockResolvedValue([
-      { id: 'root', level: 1, title: 'Racine', parentId: null, order: 0 },
-    ])
+    vi.mocked(loadMindMap).mockResolvedValue([{ id: 'root', level: 1, title: 'Racine', parentId: null, order: 0 }])
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Exporter' }))
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Exporter' }))
 
     expect(await screen.findByText('Exporter « chapitre1 »')).toBeInTheDocument()
   })
@@ -346,7 +501,8 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Exporter' }))
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Exporter' }))
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/n’existe plus/))
     expect(screen.queryByText(/^Exporter «/)).not.toBeInTheDocument()
@@ -356,12 +512,13 @@ describe('FileTreeRow', () => {
     const user = userEvent.setup()
     vi.mocked(loadMindMap).mockResolvedValue([
       { id: 'a', level: 1, title: 'A', parentId: null, order: 0 },
-      { id: 'b', level: 1, title: 'B', parentId: null, order: 0 }, // a second root: invalid
+      { id: 'b', level: 1, title: 'B', parentId: null, order: 0 },
     ])
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.click(screen.getByRole('button', { name: 'Exporter' }))
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Exporter' }))
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/structure du fichier est invalide/))
   })
@@ -378,7 +535,8 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'folder', name: 'cours', path: '/cours', children: [] }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
 
-    await user.click(screen.getByRole('button', { name: 'Importer XMind' }))
+    openMenu(/cours/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Importer XMind' }))
 
     await waitFor(() => expect(saveMindMap).toHaveBeenCalledTimes(2))
     expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 1.json', [
@@ -396,7 +554,8 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'folder', name: 'cours', path: '/cours', children: [] }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
 
-    await user.click(screen.getByRole('button', { name: 'Importer XMind' }))
+    openMenu(/cours/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Importer XMind' }))
 
     expect(saveMindMap).not.toHaveBeenCalled()
   })
@@ -409,7 +568,8 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'folder', name: 'cours', path: '/cours', children: [] }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
 
-    await user.click(screen.getByRole('button', { name: 'Importer XMind' }))
+    openMenu(/cours/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Importer XMind' }))
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/corrompu\.xmind.*archive corrompue/))
   })
@@ -427,7 +587,8 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'folder', name: 'cours', path: '/cours', children: [] }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
 
-    await user.click(screen.getByRole('button', { name: 'Importer XMind' }))
+    openMenu(/cours/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Importer XMind' }))
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/1 carte.*mentale.*déjà importée/))
     expect(scanFolder).toHaveBeenCalledWith('/cours')

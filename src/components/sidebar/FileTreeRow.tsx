@@ -1,35 +1,30 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useState } from 'react'
-import {
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  FileJson,
-  FilePlus,
-  File,
-  ChevronRight,
-  ChevronDown,
-  Pencil,
-  Trash2,
-  X,
-  Download,
-  FileUp,
-  type LucideIcon,
-} from 'lucide-react'
+import { Folder, FolderOpen, FolderPlus, FileJson, FilePlus, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, FileUp, Copy } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
-import { createMindMapFile, createSubfolder, renamePath, deletePath, freeMindMapPath } from '../../persistence/fileOps'
+import {
+  createMindMapFile,
+  createSubfolder,
+  renamePath,
+  deletePath,
+  duplicatePath,
+  freeMindMapPath,
+  freeSiblingPath,
+  withJsonExtension,
+} from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
-import { parentDirOf, separatorOf, fileNameOf } from '../../persistence/paths'
+import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName } from '../../persistence/paths'
 import { loadMindMap, saveMindMap } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
 import { validateCards } from '../../validation/cardsValidation'
-import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
+import { Button } from '../ui/button'
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu'
 import { ExportDialog } from './ExportDialog'
+import { NameDialog } from './NameDialog'
 
 interface FileTreeRowProps {
   node: FileTreeNode
@@ -39,17 +34,11 @@ interface FileTreeRowProps {
   onRemoveRoot?: (path: string) => void
 }
 
-function ActionButton({ label, icon: Icon, onClick }: { label: string; icon: LucideIcon; onClick: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={label} onClick={onClick}>
-          <Icon size={14} />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  )
+interface NamingAction {
+  title: string
+  initialName: string
+  confirmLabel: string
+  onConfirm: (name: string) => void
 }
 
 function ConfirmDeleteDialog({
@@ -88,37 +77,25 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
   const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
 
-  const [creatingKind, setCreatingKind] = useState<'mindmap' | 'folder' | null>(null)
-  const [draftCreateName, setDraftCreateName] = useState('')
   const [renaming, setRenaming] = useState(false)
   const [draftRenameName, setDraftRenameName] = useState(node.name)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [exportCards, setExportCards] = useState<Card[] | null>(null)
+  const [namingAction, setNamingAction] = useState<NamingAction | null>(null)
 
   const indent = { paddingLeft: 8 + depth * 16 }
 
-  async function submitCreate() {
-    const name = draftCreateName.trim()
-    const kind = creatingKind
-    setCreatingKind(null)
-    if (!name) return
-    try {
-      if (kind === 'mindmap') {
-        const path = await createMindMapFile(node.path, name)
-        await refreshFolder(node.path)
-        onOpenFile(path)
-      } else if (kind === 'folder') {
-        await createSubfolder(node.path, name)
-        await refreshFolder(node.path)
-      }
-    } catch (error) {
-      // A read-only folder, an illegal filename, a name already taken: the
-      // tree would otherwise just not change, with nothing to explain why.
-      const what = kind === 'mindmap' ? 'la carte mentale' : 'le dossier'
-      setWorkspaceError(`Impossible de créer ${what} « ${name} » : ${describeError(error)}`)
-      return
-    }
-    setDraftCreateName('')
+  /**
+   * Entering rename mode from a menu item, not a double-click, needs a tick
+   * of delay: Radix's context menu still owns focus (via its roving focus
+   * group) at the moment `onSelect` fires, and closing the menu synchronously
+   * afterward steals focus right back from the just-mounted, `autoFocus`ed
+   * rename `<input>` — firing its `onBlur` (which submits/cancels the
+   * rename) before the user ever sees it. Deferring past that lets the menu
+   * finish closing first.
+   */
+  function startRenaming() {
+    setTimeout(() => setRenaming(true), 0)
   }
 
   async function submitRename() {
@@ -135,10 +112,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
       return
     }
     // Same containment check `confirmDelete` uses: renaming a FOLDER moves
-    // every file under it too, so the open file's path has to follow. Handling
-    // only the exact match left `currentFilePath` pointing into a directory
-    // that no longer exists — autosave stayed armed and wrote to nowhere, and
-    // the active-file highlight vanished from the tree with no explanation.
+    // every file under it too, so the open file's path has to follow.
     if (node.path === currentFilePath) setCurrentFile(newPath)
     else if (currentFilePath?.startsWith(node.path + separator)) {
       setCurrentFile(newPath + currentFilePath.slice(node.path.length))
@@ -175,9 +149,6 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
       }
       await refreshFolder(node.path)
     } catch (error) {
-      // Refresh BEFORE reporting the error: a successful refreshFolder resets
-      // workspaceError to null as part of its own state update, which would
-      // otherwise immediately clobber the message we're about to set below.
       if (sheetsWritten > 0) await refreshFolder(node.path)
       const partial = sheetsWritten > 0 ? ` (${sheetsWritten} carte(s) mentale(s) déjà importée(s) avant l’échec)` : ''
       setWorkspaceError(`Impossible d’importer « ${path ? fileNameOf(path) : 'le fichier XMind'} » : ${describeError(error)}${partial}`)
@@ -203,99 +174,179 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     setExportCards(raw)
   }
 
+  async function openCreateMindMapDialog() {
+    const fullPath = await freeSiblingPath(node.path, 'Nouvelle carte mentale', false)
+    const name = mindMapBaseName(fileNameOf(fullPath))
+    setNamingAction({
+      title: name,
+      initialName: name,
+      confirmLabel: 'Créer',
+      onConfirm: submitCreateMindMap,
+    })
+  }
+
+  async function submitCreateMindMap(name: string) {
+    setNamingAction(null)
+    try {
+      const path = await createMindMapFile(node.path, name)
+      await refreshFolder(node.path)
+      onOpenFile(path)
+    } catch (error) {
+      setWorkspaceError(`Impossible de créer la carte mentale « ${name} » : ${describeError(error)}`)
+    }
+  }
+
+  async function openCreateFolderDialog() {
+    const fullPath = await freeSiblingPath(node.path, 'Nouveau dossier', true)
+    const name = fileNameOf(fullPath)
+    setNamingAction({
+      title: name,
+      initialName: name,
+      confirmLabel: 'Créer',
+      onConfirm: submitCreateFolder,
+    })
+  }
+
+  async function submitCreateFolder(name: string) {
+    setNamingAction(null)
+    try {
+      await createSubfolder(node.path, name)
+      await refreshFolder(node.path)
+    } catch (error) {
+      setWorkspaceError(`Impossible de créer le dossier « ${name} » : ${describeError(error)}`)
+    }
+  }
+
+  async function openDuplicateDialog() {
+    const parentPath = parentDirOf(node.path)
+    const isFolder = node.type === 'folder'
+    const currentBaseName = isFolder ? node.name : mindMapBaseName(node.name)
+    const fullPath = await freeSiblingPath(parentPath, `${currentBaseName} (copie)`, isFolder)
+    setNamingAction({
+      title: `Dupliquer « ${node.name} »`,
+      initialName: isFolder ? fileNameOf(fullPath) : mindMapBaseName(fileNameOf(fullPath)),
+      confirmLabel: 'Dupliquer',
+      onConfirm: submitDuplicate,
+    })
+  }
+
+  async function submitDuplicate(name: string) {
+    setNamingAction(null)
+    const parentPath = parentDirOf(node.path)
+    const separator = separatorOf(node.path)
+    const isFolder = node.type === 'folder'
+    const destPath = `${parentPath}${separator}${isFolder ? name : withJsonExtension(name)}`
+    try {
+      await duplicatePath(node.path, destPath, isFolder)
+      await refreshFolder(parentPath)
+      if (!isFolder) onOpenFile(destPath)
+    } catch (error) {
+      setWorkspaceError(`Impossible de dupliquer « ${node.name} » : ${describeError(error)}`)
+    }
+  }
+
   if (node.type === 'folder') {
     const isExpanded = expandedPaths.has(node.path)
     return (
       <div>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <button
-            type="button"
-            onClick={() => toggleExpanded(node.path)}
-            aria-expanded={isExpanded}
-            style={{
-              ...indent,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              textAlign: 'left',
-              cursor: 'pointer',
-            }}
-          >
-            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
-            <span>{node.name}</span>
-          </button>
-          <TooltipProvider>
-            <ActionButton
-              label="Nouvelle carte mentale"
-              icon={FilePlus}
-              onClick={() => {
-                setCreatingKind('mindmap')
-                setDraftCreateName('')
-              }}
-            />
-            <ActionButton
-              label="Nouveau sous-dossier"
-              icon={FolderPlus}
-              onClick={() => {
-                setCreatingKind('folder')
-                setDraftCreateName('')
-              }}
-            />
-            <ActionButton label="Importer XMind" icon={FileUp} onClick={handleImportXmind} />
-            {!isRoot && <ActionButton label="Renommer" icon={Pencil} onClick={() => setRenaming(true)} />}
-            {!isRoot && <ActionButton label="Supprimer" icon={Trash2} onClick={() => setConfirmDeleteOpen(true)} />}
-            {isRoot && (
-              <ActionButton
-                label={`Retirer ${node.name} de la liste`}
-                icon={X}
-                onClick={() => onRemoveRoot?.(node.path)}
-              />
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              {renaming ? (
+                <input
+                  autoFocus
+                  aria-label={`Renommer ${node.name}`}
+                  value={draftRenameName}
+                  onChange={e => setDraftRenameName(e.target.value)}
+                  onBlur={submitRename}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') e.currentTarget.blur()
+                    if (e.key === 'Escape') {
+                      setDraftRenameName(node.name)
+                      setRenaming(false)
+                    }
+                  }}
+                  style={{ ...indent, display: 'block', flex: 1 }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => toggleExpanded(node.path)}
+                  onDoubleClick={() => {
+                    if (!isRoot) setRenaming(true)
+                  }}
+                  aria-expanded={isExpanded}
+                  style={{
+                    ...indent,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    flex: 1,
+                    background: 'transparent',
+                    border: 'none',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
+                  <span>{node.name}</span>
+                </button>
+              )}
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent onCloseAutoFocus={e => e.preventDefault()}>
+            <ContextMenuItem onSelect={openCreateMindMapDialog}>
+              <FilePlus size={14} /> Nouvelle carte mentale
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={openCreateFolderDialog}>
+              <FolderPlus size={14} /> Nouveau sous-dossier
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={handleImportXmind}>
+              <FileUp size={14} /> Importer XMind
+            </ContextMenuItem>
+            {!isRoot && (
+              <ContextMenuItem onSelect={openDuplicateDialog}>
+                <Copy size={14} /> Dupliquer
+              </ContextMenuItem>
             )}
-          </TooltipProvider>
-        </div>
-
-        {renaming && (
-          <input
-            autoFocus
-            aria-label={`Renommer ${node.name}`}
-            value={draftRenameName}
-            onChange={e => setDraftRenameName(e.target.value)}
-            onBlur={submitRename}
-            onKeyDown={e => {
-              if (e.key === 'Enter') e.currentTarget.blur()
-              if (e.key === 'Escape') {
-                setDraftRenameName(node.name)
-                setRenaming(false)
-              }
-            }}
-            style={{ ...indent, display: 'block', width: '100%' }}
-          />
-        )}
-
-        {creatingKind && (
-          <input
-            autoFocus
-            aria-label={creatingKind === 'mindmap' ? 'Nom de la nouvelle carte mentale' : 'Nom du nouveau dossier'}
-            value={draftCreateName}
-            onChange={e => setDraftCreateName(e.target.value)}
-            onBlur={submitCreate}
-            onKeyDown={e => {
-              if (e.key === 'Enter') e.currentTarget.blur()
-              if (e.key === 'Escape') setCreatingKind(null)
-            }}
-            style={{ paddingLeft: 8 + (depth + 1) * 16, display: 'block', width: '100%' }}
-          />
-        )}
+            {!isRoot && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={startRenaming}>
+                  <Pencil size={14} /> Renommer
+                </ContextMenuItem>
+                <ContextMenuItem variant="destructive" onSelect={() => setConfirmDeleteOpen(true)}>
+                  <Trash2 size={14} /> Supprimer
+                </ContextMenuItem>
+              </>
+            )}
+            {isRoot && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => onRemoveRoot?.(node.path)}>
+                  <X size={14} /> Retirer {node.name} de la liste
+                </ContextMenuItem>
+              </>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
 
         {confirmDeleteOpen && (
           <ConfirmDeleteDialog
             title={`Supprimer le dossier « ${node.name} » et son contenu (${countDescendants(node)} éléments) ?`}
             onCancel={() => setConfirmDeleteOpen(false)}
             onConfirm={confirmDelete}
+          />
+        )}
+
+        {namingAction && (
+          <NameDialog
+            title={namingAction.title}
+            initialName={namingAction.initialName}
+            confirmLabel={namingAction.confirmLabel}
+            onConfirm={namingAction.onConfirm}
+            onCancel={() => setNamingAction(null)}
           />
         )}
 
@@ -309,53 +360,80 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     const isActive = node.path === currentFilePath
     return (
       <div style={{ display: 'flex', alignItems: 'center' }}>
-        {renaming ? (
-          <input
-            autoFocus
-            aria-label={`Renommer ${node.name}`}
-            value={draftRenameName}
-            onChange={e => setDraftRenameName(e.target.value)}
-            onBlur={submitRename}
-            onKeyDown={e => {
-              if (e.key === 'Enter') e.currentTarget.blur()
-              if (e.key === 'Escape') {
-                setDraftRenameName(node.name)
-                setRenaming(false)
-              }
-            }}
-            style={{ ...indent, display: 'block', flex: 1 }}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => onOpenFile(node.path)}
-            style={{
-              ...indent,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              flex: 1,
-              background: isActive ? 'var(--muted)' : 'transparent',
-              border: 'none',
-              textAlign: 'left',
-              cursor: 'pointer',
-            }}
-          >
-            <FileJson size={16} />
-            <span>{node.name}</span>
-          </button>
-        )}
-        <TooltipProvider>
-          <ActionButton label="Renommer" icon={Pencil} onClick={() => setRenaming(true)} />
-          <ActionButton label="Exporter" icon={Download} onClick={openExport} />
-          <ActionButton label="Supprimer" icon={Trash2} onClick={() => setConfirmDeleteOpen(true)} />
-        </TooltipProvider>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+              {renaming ? (
+                <input
+                  autoFocus
+                  aria-label={`Renommer ${node.name}`}
+                  value={draftRenameName}
+                  onChange={e => setDraftRenameName(e.target.value)}
+                  onBlur={submitRename}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') e.currentTarget.blur()
+                    if (e.key === 'Escape') {
+                      setDraftRenameName(node.name)
+                      setRenaming(false)
+                    }
+                  }}
+                  style={{ ...indent, display: 'block', flex: 1 }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpenFile(node.path)}
+                  onDoubleClick={() => setRenaming(true)}
+                  style={{
+                    ...indent,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    flex: 1,
+                    background: isActive ? 'var(--muted)' : 'transparent',
+                    border: 'none',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <FileJson size={16} />
+                  <span>{node.name}</span>
+                </button>
+              )}
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent onCloseAutoFocus={e => e.preventDefault()}>
+            <ContextMenuItem onSelect={openDuplicateDialog}>
+              <Copy size={14} /> Dupliquer
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={openExport}>
+              <Download size={14} /> Exporter
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={startRenaming}>
+              <Pencil size={14} /> Renommer
+            </ContextMenuItem>
+            <ContextMenuItem variant="destructive" onSelect={() => setConfirmDeleteOpen(true)}>
+              <Trash2 size={14} /> Supprimer
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
 
         {confirmDeleteOpen && (
           <ConfirmDeleteDialog
             title={`Supprimer le fichier « ${node.name} » ?`}
             onCancel={() => setConfirmDeleteOpen(false)}
             onConfirm={confirmDelete}
+          />
+        )}
+
+        {namingAction && (
+          <NameDialog
+            title={namingAction.title}
+            initialName={namingAction.initialName}
+            confirmLabel={namingAction.confirmLabel}
+            onConfirm={namingAction.onConfirm}
+            onCancel={() => setNamingAction(null)}
           />
         )}
 

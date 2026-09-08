@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { FileSidebar } from './FileSidebar'
@@ -93,7 +93,9 @@ describe('FileSidebar', () => {
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('cours-svt')
 
-    await user.click(screen.getByRole('button', { name: 'Retirer cours-svt de la liste' }))
+    // The row's actions moved into a right-click context menu (Task 4).
+    fireEvent.contextMenu(screen.getByRole('button', { name: /cours-svt/i }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Retirer cours-svt de la liste' }))
 
     await waitFor(() => expect(screen.queryByText('cours-svt')).not.toBeInTheDocument())
     expect(saveWorkspaceConfig).toHaveBeenCalledWith({ rootFolders: [] })
