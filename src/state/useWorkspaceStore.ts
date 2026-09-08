@@ -21,6 +21,12 @@ interface WorkspaceState {
   refreshFolder: (folderPath: string) => Promise<void>
   refreshAll: () => Promise<void>
   toggleExpanded: (path: string) => void
+  /**
+   * Expands every folder in `paths` (a root-to-leaf trail), so a file created
+   * somewhere the user cannot currently see is revealed rather than opened
+   * into a collapsed tree with no visible trace.
+   */
+  expandPaths: (paths: string[]) => void
   setCurrentFile: (path: string | null) => void
   setWorkspaceError: (message: string | null) => void
 }
@@ -167,6 +173,13 @@ export function createWorkspaceStore(): WorkspaceStore {
       })
       set({ rootFolders, workspaceError: failed.length > 0 ? scanFailureMessage(failed) : null })
     },
+    expandPaths: paths =>
+      set(state => {
+        const next = new Set(state.expandedPaths)
+        for (const path of paths) next.add(path)
+        saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next] })
+        return { expandedPaths: next }
+      }),
     toggleExpanded: path =>
       set(state => {
         const next = new Set(state.expandedPaths)
