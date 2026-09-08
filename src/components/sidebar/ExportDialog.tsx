@@ -4,6 +4,7 @@ import type { Card } from '../../types/card'
 import { exportToPdfBytes, exportToImageDataUrls } from '../../export/exportMindMap'
 import { writeXmindFile } from '../../xmind/exportXmind'
 import { saveBytesAs } from '../../persistence/exportIO'
+import { describeExportError } from '../../export/describeExportError'
 import { mindMapBaseName } from '../../persistence/paths'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
@@ -68,7 +69,7 @@ export function ExportDialog({ fileName, cards, open, onClose, onError }: Export
       // happened, rather than closing it as though the export succeeded.
       if (saved) onClose()
     } catch (error) {
-      onError(`Échec de l’export : ${error instanceof Error ? error.message : 'erreur inconnue'}`)
+      onError(`Échec de l’export : ${describeExportError(error)}`)
     } finally {
       setExporting(false)
     }

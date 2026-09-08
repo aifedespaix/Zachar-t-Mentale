@@ -406,7 +406,7 @@ it('does not resize the card when a definition gains a formula', () => { /* règ
 - Produces: `inlineAssets(cards: Card[], mindMapPath: string): Promise<Map<string, string>>` — asset name → data URI.
 - `StaticCardView` gains `resolveAsset` and renders through `BlockView` (Task 5).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 it('renders a math block in the export card, not its LaTeX source', () => { /* point 1 */ })
@@ -420,7 +420,7 @@ it('reports a readable message when toPng rejects with an Event rather than an E
 })
 ```
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement** — volets 1 et 2 faits ; le volet 3 (inlining des assets) attend la tâche 8, qui crée les assets
 
 Three things, in this order:
 1. `StaticCardView` renders `contentOf(card)` through `BlockView`, resolving assets from the inlined map.
@@ -429,10 +429,24 @@ Three things, in this order:
 
 Also normalize the `catch` in `ExportDialog`: `toPng` rejects with an `Event`, not an `Error`, so the current `error instanceof Error ? … : 'erreur inconnue'` hides the real cause.
 
-- [ ] **Step 3: Verify** — `npx vitest run src/export/ src/components/sidebar/ExportDialog.test.tsx`
+- [x] **Step 3: Verify** — `npx vitest run src/export/ src/components/sidebar/ExportDialog.test.tsx`
 - [ ] **Step 4: Commit** — `fix(export): render content blocks, inline image assets, and cap card height`
 
 ---
+
+
+> **État : partiel.** Les blocs sont rendus par `BlockView` (donc écran et PDF
+> ne peuvent plus diverger) et la hauteur est plafonnée à
+> `EXPORT_CARD_MAX_HEIGHT = ROW_HEIGHT - 16`, ce qui rend le chevauchement
+> impossible et garde le budget de pagination en feuilles valide —
+> `computeLayout` et `paginateForExport` restent intouchés, comme prévu.
+> `resolveAsset` traverse déjà `ExportPageRenderer` : le volet 3 n'aura plus
+> qu'à lui fournir une table de data URI.
+>
+> **Limite connue** : un contenu plus haut que le plafond est rogné sans
+> indicateur visuel. C'est le compromis assumé d'un export « vue d'ensemble » ;
+> le contenu en taille réelle relève du format « fiche de révision », hors
+> périmètre. À revoir si l'usage montre que ça surprend.
 
 ## Task 13: Quiz — read the projection, not the raw field
 
