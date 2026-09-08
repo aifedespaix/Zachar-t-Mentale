@@ -1738,7 +1738,7 @@ describe('ThemeToggleButton', () => {
     await user.click(screen.getByRole('button', { name: 'Passer au thème sombre' }))
 
     expect(circularReveal.startCircularThemeTransition).toHaveBeenCalledWith(
-      expect.objectContaining({ apply: expect.any(Function) })
+      expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), apply: expect.any(Function) })
     )
     expect(useAppearanceSettingsStore.getState().themeMode).toBe('dark')
   })
@@ -1750,6 +1750,9 @@ describe('ThemeToggleButton', () => {
 
     await user.click(screen.getByRole('button', { name: 'Passer au thème clair' }))
 
+    expect(circularReveal.startCircularThemeTransition).toHaveBeenCalledWith(
+      expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), apply: expect.any(Function) })
+    )
     expect(useAppearanceSettingsStore.getState().themeMode).toBe('light')
   })
 })
