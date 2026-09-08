@@ -1100,9 +1100,13 @@ git commit -m "feat(theme): apply the configured font family to --font-sans"
 
 **Files:**
 - Modify: `src/components/CardNode.tsx`
+- Modify: `src/colors/levelColors.ts` (adds `clampCardLevel`, a small reusable
+  helper — see Step 2)
 
 **Interfaces:**
 - Consumes: `useResolvedTheme` (Task 5), `useAppearanceSettingsStore` (Task 4).
+- Produces: `export function clampCardLevel(level: number): CardLevel` in
+  `src/colors/levelColors.ts`, reused by Tasks 8 and 10.
 
 - [ ] **Step 1: Update imports**
 
@@ -1115,10 +1119,12 @@ import { detachedColors, levelColor } from '../colors/levelColors'
 with:
 
 ```ts
-import { detachedColors } from '../colors/levelColors'
+import { clampCardLevel, detachedColors } from '../colors/levelColors'
 import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../hooks/useResolvedTheme'
 ```
+
+(`clampCardLevel` doesn't exist yet — Step 2 below adds it. Import it here now so this step's edit is complete in one pass.)
 
 and add `CardLevel` to the existing `Card` type import (line 5-6):
 
@@ -1127,29 +1133,57 @@ import type { Card, CardLevel } from '../types/card'
 import { isRootCard } from '../types/card'
 ```
 
-- [ ] **Step 2: Replace the color resolution lines**
+- [ ] **Step 2: Add a reusable level-clamping helper to `levelColors.ts`**
+
+The old `levelColor(level, theme)` (Task 1) clamps an out-of-range/non-integer
+level to a real 1..4 before indexing — a second line of defense behind
+`validateCards`, documented on `levelColor`'s own doc comment: "keeps the
+rendering path itself total, so a bad level can only ever look wrong, never
+break." Indexing the store directly (`s.levels[card.level]`, next step) loses
+that guard unless it's re-applied at the call site. Export the same clamp
+rule as its own function so every direct-index call site (this task, and
+Tasks 8 and 10 later in this plan) can reuse it instead of trusting
+`card.level`'s static `CardLevel` type, which does not protect against a
+hand-edited file's actual runtime value.
+
+In `src/colors/levelColors.ts`, add after the existing `levelColor` function:
+
+```ts
+/**
+ * Clamps a possibly-corrupt level to a real 1..4 `CardLevel` — the same rule
+ * `levelColor` applies internally, exported for callers that index
+ * `levels`/`useAppearanceSettingsStore` directly rather than going through
+ * `levelColor`.
+ */
+export function clampCardLevel(level: number): CardLevel {
+  return Math.min(Math.max(Math.round(level) || 1, 1), 4) as CardLevel
+}
+```
+
+- [ ] **Step 3: Replace the color resolution lines**
 
 Replace lines 162-163 (already rewritten once in Task 1 to pass `'light'` — this step removes that literal in favor of the live theme and the store):
 
 ```ts
   const theme = useResolvedTheme()
-  const levelAppearance = useAppearanceSettingsStore(s => s.levels[card.level])
+  const level = clampCardLevel(card.level)
+  const levelAppearance = useAppearanceSettingsStore(s => s.levels[level])
   const childLevelAppearance = useAppearanceSettingsStore(s =>
-    card.level < 4 ? s.levels[(card.level + 1) as CardLevel] : null
+    level < 4 ? s.levels[(level + 1) as CardLevel] : null
   )
   const colors = isDetached ? detachedColors[theme] : levelAppearance.color[theme]
   const childColors = !isDetached && childLevelAppearance ? childLevelAppearance.color[theme] : null
 ```
 
-- [ ] **Step 3: Run the existing test suite to confirm no regression**
+- [ ] **Step 4: Run the existing test suite to confirm no regression**
 
-Run: `npx vitest run src/components/CardNode.test.tsx`
-Expected: PASS — `DEFAULT_APPEARANCE_SETTINGS.levels[level].color.light` is byte-for-byte the same palette `CardNode` rendered before this task, and the store resolves to `'light'` by default in a jsdom test environment (no `matchMedia`, `themeMode` defaults to `'system'` → `useResolvedTheme` falls back to `'light'`).
+Run: `npx vitest run src/colors/levelColors.test.ts src/components/CardNode.test.tsx`
+Expected: PASS — `DEFAULT_APPEARANCE_SETTINGS.levels[level].color.light` is byte-for-byte the same palette `CardNode` rendered before this task, and the store resolves to `'light'` by default in a jsdom test environment (no `matchMedia`, `themeMode` defaults to `'system'` → `useResolvedTheme` falls back to `'light'`). `clampCardLevel` is new but has no dedicated test in this task — Task 1's existing `levelColors.test.ts` already exercises the identical clamp formula through `levelColor`'s own fallback tests, so this is covered by inspection/parity rather than a duplicate direct test.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/components/CardNode.tsx
+git add src/colors/levelColors.ts src/components/CardNode.tsx
 git commit -m "feat(card): read level colors from the appearance store"
 ```
 
@@ -1161,7 +1195,7 @@ git commit -m "feat(card): read level colors from the appearance store"
 - Modify: `src/components/MindMapCanvas.tsx`
 
 **Interfaces:**
-- Consumes: `useResolvedTheme` (Task 5), `useAppearanceSettingsStore` (Task 4).
+- Consumes: `useResolvedTheme` (Task 5), `useAppearanceSettingsStore` (Task 4), `clampCardLevel` (Task 7, `src/colors/levelColors.ts`).
 
 - [ ] **Step 1: Update imports**
 
@@ -1174,9 +1208,15 @@ import { levelColor } from '../colors/levelColors'
 with:
 
 ```ts
+import { clampCardLevel } from '../colors/levelColors'
 import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../hooks/useResolvedTheme'
 ```
+
+(`clampCardLevel`, added in Task 7, clamps a possibly-corrupt level to a real
+1..4 before indexing `levelAppearance` below — the same defense-in-depth the
+old `levelColor()` provided internally, needed again here since `levelAppearance`
+is now indexed directly.)
 
 - [ ] **Step 2: Add the theme/appearance selectors**
 
@@ -1207,7 +1247,7 @@ Replace the `edges` `useMemo` (lines 353-386):
           // reparent target is active, so it doesn't compete with the dashed
           // ghost edge previewing the future link (added below).
           style: {
-            stroke: toCss(levelAppearance[card.level].color[theme].border),
+            stroke: toCss(levelAppearance[clampCardLevel(card.level)].color[theme].border),
             opacity: reparentTargetId && card.id === draggingId ? 0.15 : 1,
           },
         })
@@ -1220,7 +1260,7 @@ Replace the `edges` `useMemo` (lines 353-386):
           source: reparentTargetId,
           target: draggingId,
           className: 'reparent-ghost-edge',
-          style: { stroke: toCss(levelAppearance[draggedCard.level].color[theme].border), opacity: 1 },
+          style: { stroke: toCss(levelAppearance[clampCardLevel(draggedCard.level)].color[theme].border), opacity: 1 },
         })
       }
     }
@@ -1324,7 +1364,7 @@ git commit -m "feat(quiz): read level labels and colors from the appearance stor
 - Modify: `src/export/StaticCardView.tsx`
 
 **Interfaces:**
-- Consumes: `useAppearanceSettingsStore` (Task 4).
+- Consumes: `useAppearanceSettingsStore` (Task 4), `clampCardLevel` (Task 7, `src/colors/levelColors.ts`).
 
 - [ ] **Step 1: Update the component**
 
@@ -1332,7 +1372,7 @@ Replace the full contents of `src/export/StaticCardView.tsx`:
 
 ```ts
 import type { Card } from '../types/card'
-import { detachedColors } from '../colors/levelColors'
+import { clampCardLevel, detachedColors } from '../colors/levelColors'
 import { toCss } from '../colors/contrast'
 import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 
@@ -1356,7 +1396,7 @@ export interface StaticCardViewProps {
  */
 export function StaticCardView({ card, showDefinition }: StaticCardViewProps) {
   const levelAppearance = useAppearanceSettingsStore(s => s.levels)
-  const colors = card.detached ? detachedColors.light : levelAppearance[card.level].color.light
+  const colors = card.detached ? detachedColors.light : levelAppearance[clampCardLevel(card.level)].color.light
   return (
     <div
       data-testid={`export-card-${card.id}`}
