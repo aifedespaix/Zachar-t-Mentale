@@ -3,20 +3,11 @@ import { join } from '@tauri-apps/api/path'
 import { createRootCard } from '../state/cardsReducer'
 import { serializeCards } from './serialization'
 import { mindMapExists } from './fileStore'
-import { sanitizeFileName } from './paths'
+import { isMindMapPath, sanitizeFileName, withMindMapExtension } from './paths'
 import { sidecarDirOf } from './assets'
 
-/** Only a mind map owns a sidecar; a folder or any other file never does. */
-function isMindMapPath(path: string): boolean {
-  return path.toLowerCase().endsWith('.json')
-}
-
-export function withJsonExtension(name: string): string {
-  return name.toLowerCase().endsWith('.json') ? name : `${name}.json`
-}
-
 export async function createMindMapFile(folderPath: string, fileName: string): Promise<string> {
-  const path = await join(folderPath, withJsonExtension(fileName))
+  const path = await join(folderPath, withMindMapExtension(fileName))
   await writeTextFile(path, serializeCards([createRootCard('Nouveau chapitre')]))
   return path
 }
@@ -30,11 +21,11 @@ export async function createSubfolder(folderPath: string, folderName: string): P
 /**
  * Renames a path, carrying a mind map's asset sidecar with it.
  *
- * Without this, renaming `chapitre.json` orphans `chapitre.assets` and every
+ * Without this, renaming `chapitre.zmap` orphans `chapitre.assets` and every
  * image in the map breaks at once — the blocks address assets relative to a
  * sidecar named after the file.
  *
- * The sidecar move is best-effort ON PURPOSE: the `.json` rename has already
+ * The sidecar move is best-effort ON PURPOSE: the map's own rename has already
  * succeeded by then, and throwing here would report a failure for an operation
  * that half-happened, leaving the caller unable to tell what state the disk is
  * in. A missing sidecar (the common case — most maps have no images) is not an
@@ -49,8 +40,8 @@ export async function renamePath(oldPath: string, newPath: string): Promise<void
     if (!(await exists(oldSidecar))) return
     await rename(oldSidecar, sidecarDirOf(newPath))
   } catch {
-    // Genuinely best-effort, as the comment above promises: the `.json` rename
-    // has already succeeded, so rejecting here would report a failure for an
+    // Genuinely best-effort, as the comment above promises: the map's own
+    // rename has already succeeded, so rejecting here would report a failure for an
     // operation that half-happened. A cross-device rename (EXDEV) is the
     // realistic case.
   }
@@ -71,7 +62,7 @@ export async function deletePath(path: string, recursive: boolean): Promise<void
 }
 
 /**
- * A free `<folderPath>/<baseName>[ (n)]` path, with a forced `.json`
+ * A free `<folderPath>/<baseName>[ (n)]` path, with a forced mind-map
  * extension when `isFolder` is false: the plain sanitized name if free,
  * else the first numbered variant that doesn't collide. Generalizes what
  * `freeMindMapPath` used to do inline, to also cover folders and
@@ -80,7 +71,7 @@ export async function deletePath(path: string, recursive: boolean): Promise<void
 export async function freeSiblingPath(folderPath: string, baseName: string, isFolder: boolean): Promise<string> {
   const safe = sanitizeFileName(baseName)
   const separator = folderPath.includes('\\') ? '\\' : '/'
-  const nameOf = (candidateBase: string) => (isFolder ? candidateBase : withJsonExtension(candidateBase))
+  const nameOf = (candidateBase: string) => (isFolder ? candidateBase : withMindMapExtension(candidateBase))
   const isTaken = (candidatePath: string) => (isFolder ? exists(candidatePath) : mindMapExists(candidatePath))
   let candidate = `${folderPath}${separator}${nameOf(safe)}`
   let attempt = 1
@@ -92,7 +83,7 @@ export async function freeSiblingPath(folderPath: string, baseName: string, isFo
 }
 
 /**
- * A free `<folderPath>/<baseName>[ (n)].json` path. Used when writing a
+ * A free `<folderPath>/<baseName>[ (n)]` mind-map path. Used when writing a
  * file whose name comes from external data (an XMind sheet title) that
  * could coincidentally match something already in the folder.
  */
@@ -135,6 +126,6 @@ export async function duplicatePath(sourcePath: string, destPath: string, isFold
     if (!(await exists(sourceSidecar))) return
     await copyDirRecursive(sourceSidecar, sidecarDirOf(destPath))
   } catch {
-    // Best-effort, as in `renamePath`: the `.json` copy already succeeded.
+    // Best-effort, as in `renamePath`: the primary copy already succeeded.
   }
 }

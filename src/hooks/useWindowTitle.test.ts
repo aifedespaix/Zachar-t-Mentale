@@ -15,12 +15,12 @@ describe('useWindowTitle', () => {
 
   it('sets the window title to just the app name when no file is open', () => {
     renderHook(() => useWindowTitle(null))
-    expect(setTitle).toHaveBeenCalledWith("Zachar't Mentale")
+    expect(setTitle).toHaveBeenCalledWith("Zachar’t Mentale")
   })
 
   it('sets the window title to the app name plus the open file name', () => {
     renderHook(() => useWindowTitle('/cours/fractions.json'))
-    expect(setTitle).toHaveBeenCalledWith("Zachar't Mentale - fractions")
+    expect(setTitle).toHaveBeenCalledWith("Zachar’t Mentale - fractions")
   })
 
   it('updates the title again when the open file changes', () => {
@@ -28,6 +28,6 @@ describe('useWindowTitle', () => {
       initialProps: { path: '/cours/fractions.json' as string | null },
     })
     rerender({ path: '/cours/pourcentages.json' })
-    expect(setTitle).toHaveBeenLastCalledWith("Zachar't Mentale - pourcentages")
+    expect(setTitle).toHaveBeenLastCalledWith("Zachar’t Mentale - pourcentages")
   })
 })

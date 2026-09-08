@@ -387,10 +387,10 @@ describe('FileTreeRow', () => {
     await user.clear(input)
     await user.type(input, 'existant{Enter}')
 
-    expect(mindMapExists).toHaveBeenCalledWith('/cours/chimie/existant.json')
+    expect(mindMapExists).toHaveBeenCalledWith('/cours/chimie/existant.zmap')
     expect(createMindMapFile).not.toHaveBeenCalled()
     await waitFor(() =>
-      expect(useWorkspaceStore.getState().workspaceError).toMatch(/existant\.json[^]*existe déjà/)
+      expect(useWorkspaceStore.getState().workspaceError).toMatch(/existant\.zmap[^]*existe déjà/)
     )
   })
 
@@ -410,8 +410,8 @@ describe('FileTreeRow', () => {
     const input = await screen.findByRole('textbox', { name: /dupliquer/i })
     await user.type(input, '{Enter}')
 
-    expect(duplicatePath).toHaveBeenCalledWith('/cours/chapitre1.json', '/cours/chapitre1 (copie).json', false)
-    await waitFor(() => expect(onOpenFile).toHaveBeenCalledWith('/cours/chapitre1 (copie).json'))
+    expect(duplicatePath).toHaveBeenCalledWith('/cours/chapitre1.json', '/cours/chapitre1 (copie).zmap', false)
+    await waitFor(() => expect(onOpenFile).toHaveBeenCalledWith('/cours/chapitre1 (copie).zmap'))
   })
 
   it('duplicates a folder without opening anything', async () => {
@@ -462,10 +462,10 @@ describe('FileTreeRow', () => {
     await user.clear(input)
     await user.type(input, 'chapitre2{Enter}')
 
-    expect(mindMapExists).toHaveBeenCalledWith('/cours/chapitre2.json')
+    expect(mindMapExists).toHaveBeenCalledWith('/cours/chapitre2.zmap')
     expect(duplicatePath).not.toHaveBeenCalled()
     await waitFor(() =>
-      expect(useWorkspaceStore.getState().workspaceError).toMatch(/chapitre2\.json[^]*existe déjà/)
+      expect(useWorkspaceStore.getState().workspaceError).toMatch(/chapitre2\.zmap[^]*existe déjà/)
     )
   })
 
@@ -579,7 +579,7 @@ describe('FileTreeRow', () => {
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/structure du fichier est invalide/))
   })
 
-  it('imports every sheet of a picked XMind file as its own .json in the folder, then refreshes it', async () => {
+  it('imports every sheet of a picked XMind file as its own .zmap in the folder, then refreshes it', async () => {
     const user = userEvent.setup()
     vi.mocked(pickXmindFile).mockResolvedValue('/downloads/vieux-cours.xmind')
     vi.mocked(readBinaryFile).mockResolvedValue(new Uint8Array([1]))
@@ -595,10 +595,10 @@ describe('FileTreeRow', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Importer XMind' }))
 
     await waitFor(() => expect(saveMindMap).toHaveBeenCalledTimes(2))
-    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 1.json', [
+    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 1.zmap', [
       { id: 'r1', level: 1, title: 'R1', parentId: null, order: 0 },
     ])
-    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 2.json', [
+    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 2.zmap', [
       { id: 'r2', level: 1, title: 'R2', parentId: null, order: 0 },
     ])
     expect(scanFolder).toHaveBeenCalledWith('/cours')

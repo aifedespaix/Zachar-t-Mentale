@@ -1,0 +1,52 @@
+name: build
+
+# Le bundle NSIS ne casse qu'au moment du `tauri build`, sur Windows : la v0.1.0
+# a compilé, échoué à l'étape installeur, et le tag n'a porté que les archives
+# source générées par GitHub. Ce workflow refait le même build hors release, pour
+# vérifier avant de poser un tag — et pour récupérer un .exe testable à tout
+# moment via « Run workflow ».
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: install frontend dependencies
+        run: bun install
+
+      - name: run tests
+        run: bun run test
+
+      - name: run Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+      # Pas de `createUpdaterArtifacts` ici : signer demanderait
+      # TAURI_SIGNING_PRIVATE_KEY, indisponible sur une PR venue d'un fork. Ce
+      # qu'on veut valider — que makensis produit bien l'installeur — n'en
+      # dépend pas.
+      - name: build the NSIS installer
+        shell: bash
+        run: bun tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

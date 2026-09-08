@@ -12,10 +12,9 @@ import {
   duplicatePath,
   freeMindMapPath,
   freeSiblingPath,
-  withJsonExtension,
 } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
-import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName } from '../../persistence/paths'
+import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, withMindMapExtension } from '../../persistence/paths'
 import { loadMindMap, saveMindMap, mindMapExists } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
@@ -196,10 +195,10 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
 
   async function submitCreateMindMap(name: string) {
     setNamingAction(null)
-    const destPath = `${node.path}${separatorOf(node.path)}${withJsonExtension(name)}`
+    const destPath = `${node.path}${separatorOf(node.path)}${withMindMapExtension(name)}`
     if (await mindMapExists(destPath)) {
       setWorkspaceError(
-        `Impossible de créer la carte mentale « ${name} » : un fichier « ${withJsonExtension(name)} » existe déjà.`
+        `Impossible de créer la carte mentale « ${name} » : un fichier « ${withMindMapExtension(name)} » existe déjà.`
       )
       return
     }
@@ -252,10 +251,10 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     const parentPath = parentDirOf(node.path)
     const separator = separatorOf(node.path)
     const isFolder = node.type === 'folder'
-    const destPath = `${parentPath}${separator}${isFolder ? name : withJsonExtension(name)}`
+    const destPath = `${parentPath}${separator}${isFolder ? name : withMindMapExtension(name)}`
     if (!isFolder && (await mindMapExists(destPath))) {
       setWorkspaceError(
-        `Impossible de dupliquer « ${node.name} » : un fichier « ${withJsonExtension(name)} » existe déjà.`
+        `Impossible de dupliquer « ${node.name} » : un fichier « ${withMindMapExtension(name)} » existe déjà.`
       )
       return
     }

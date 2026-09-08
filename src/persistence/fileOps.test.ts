@@ -21,12 +21,12 @@ import { mindMapExists } from './fileStore'
 describe('createMindMapFile', () => {
   beforeEach(() => vi.mocked(writeTextFile).mockReset())
 
-  it('writes a new .json file with a single default root card', async () => {
+  it('writes a new .zmap file with a single default root card', async () => {
     const path = await createMindMapFile('/cours', 'Chapitre 3')
-    expect(path).toBe('/cours/Chapitre 3.json')
+    expect(path).toBe('/cours/Chapitre 3.zmap')
 
     const [writtenPath, content] = vi.mocked(writeTextFile).mock.calls[0]
-    expect(writtenPath).toBe('/cours/Chapitre 3.json')
+    expect(writtenPath).toBe('/cours/Chapitre 3.zmap')
     const cards = JSON.parse(content as string)
     expect(cards).toEqual([
       expect.objectContaining({ level: 1, title: 'Nouveau chapitre', parentId: null, order: 0 }),
@@ -78,16 +78,16 @@ describe('freeMindMapPath', () => {
   it('returns the plain sanitized name when nothing collides', async () => {
     vi.mocked(mindMapExists).mockResolvedValue(false)
     const path = await freeMindMapPath('/cours', 'Vecteurs: Forces')
-    expect(path).toBe('/cours/Vecteurs Forces.json')
+    expect(path).toBe('/cours/Vecteurs Forces.zmap')
   })
 
   it('appends a numbered suffix until it finds a free name', async () => {
     vi.mocked(mindMapExists)
-      .mockResolvedValueOnce(true) // "Chapitre.json" taken
-      .mockResolvedValueOnce(true) // "Chapitre (2).json" taken
-      .mockResolvedValueOnce(false) // "Chapitre (3).json" free
+      .mockResolvedValueOnce(true) // "Chapitre.zmap" taken
+      .mockResolvedValueOnce(true) // "Chapitre (2).zmap" taken
+      .mockResolvedValueOnce(false) // "Chapitre (3).zmap" free
     const path = await freeMindMapPath('/cours', 'Chapitre')
-    expect(path).toBe('/cours/Chapitre (3).json')
+    expect(path).toBe('/cours/Chapitre (3).zmap')
   })
 })
 
@@ -140,10 +140,10 @@ describe('freeSiblingPath', () => {
     vi.mocked(exists).mockReset()
   })
 
-  it('returns the plain sanitized name for a file, appending .json', async () => {
+  it('returns the plain sanitized name for a file, appending the mind-map extension', async () => {
     vi.mocked(mindMapExists).mockResolvedValue(false)
     const path = await freeSiblingPath('/cours', 'Chapitre 3 (copie)', false)
-    expect(path).toBe('/cours/Chapitre 3 (copie).json')
+    expect(path).toBe('/cours/Chapitre 3 (copie).zmap')
   })
 
   it('returns the plain sanitized name for a folder, with no extension', async () => {
@@ -155,7 +155,7 @@ describe('freeSiblingPath', () => {
   it('appends a numbered suffix until it finds a free file name', async () => {
     vi.mocked(mindMapExists).mockResolvedValueOnce(true).mockResolvedValueOnce(false)
     const path = await freeSiblingPath('/cours', 'Chapitre', false)
-    expect(path).toBe('/cours/Chapitre (2).json')
+    expect(path).toBe('/cours/Chapitre (2).zmap')
   })
 
   it('appends a numbered suffix until it finds a free folder name', async () => {
