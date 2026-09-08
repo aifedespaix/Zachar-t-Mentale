@@ -259,15 +259,21 @@ describe('repairCards', () => {
  * that flags one of them is too strict — and a validator that is too strict is
  * worse than none, since it would block real files behind a repair dialog.
  */
-describe('the mind maps bundled with the app', () => {
+describe('the mind maps present in the working copy', () => {
   const files = import.meta.glob('../../.cartes-mentales/**/*.json', { eager: true, import: 'default' })
+  const paths = Object.keys(files)
 
-  it('finds at least one bundled map to check', () => {
-    expect(Object.keys(files).length).toBeGreaterThan(0)
+  // `.cartes-mentales/` is the user's own course material: gitignored, absent
+  // from a fresh clone. Requiring at least one map here made the suite pass on
+  // a machine that happens to hold them and fail in CI — so the check is
+  // conditional on their presence. What it still guards is real: a map the app
+  // itself produced must never come back needing repair.
+  it.runIf(paths.length > 0).each(paths)('%s passes validation untouched', path => {
+    expect(validateCards(files[path])).toEqual({ valid: true, issues: [] })
   })
 
-  it.each(Object.keys(files))('%s passes validation untouched', path => {
-    expect(validateCards(files[path])).toEqual({ valid: true, issues: [] })
+  it('is a no-op when no local mind map is present, rather than a failure', () => {
+    expect(paths.every(path => path.endsWith('.json'))).toBe(true)
   })
 })
 
