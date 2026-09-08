@@ -131,10 +131,15 @@ les dossiers et les noms `(copie)`.
 ## Gestion d'erreurs
 
 Même pattern que l'existant : `setWorkspaceError` avec un message
-utilisateur explicite (nom du fichier/dossier concerné + cause). Pour la
-duplication d'un dossier interrompue en cours de copie (erreur disque à
-mi-parcours), même style de message partiel que `handleImportXmind`
-aujourd'hui (« ... (N élément(s) déjà dupliqué(s) avant l'échec) »).
+utilisateur explicite (nom du fichier/dossier concerné + cause). Pas de
+suivi de progression partielle pour une duplication de dossier interrompue
+en cours de copie — contrairement à l'import XMind (qui écrit N fichiers
+indépendants et significatifs individuellement pour l'utilisateur, d'où
+l'intérêt de dire combien ont réussi), une duplication de dossier est une
+seule opération logique du point de vue de l'utilisateur : qu'elle échoue
+après 1 ou 10 fichiers copiés, la réponse est la même (supprimer le dossier
+dupliqué incomplet et réessayer), donc un message générique avec la cause
+suffit sans complexifier `duplicatePath` pour un cas limite.
 
 ## Tests
 
