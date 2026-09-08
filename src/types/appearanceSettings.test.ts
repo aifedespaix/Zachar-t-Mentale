@@ -55,4 +55,9 @@ describe('mergeAppearanceSettings', () => {
     expect(merged.fontFamily).toBe('Georgia, serif')
     expect(merged.themeMode).toBe('dark')
   })
+
+  it('falls back to the default themeMode when the file has an invalid value', () => {
+    const merged = mergeAppearanceSettings({ themeMode: 'not-a-real-mode' as never })
+    expect(merged.themeMode).toBe('system')
+  })
 })

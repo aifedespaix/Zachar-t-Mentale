@@ -15,6 +15,22 @@ interface AppearanceSettingsState extends AppearanceSettings {
 
 export type AppearanceSettingsStore = UseBoundStore<StoreApi<AppearanceSettingsState>>
 
+// Serializes persistence writes so overlapping setter calls (e.g. dragging an
+// OKLCH slider fires setLevelColor repeatedly) can never land out of order —
+// each write waits for the previous one to finish before starting, so the
+// last write to actually run always reflects the most recent in-memory state.
+let writeQueue: Promise<void> = Promise.resolve()
+
+function persist(settings: AppearanceSettings): Promise<void> {
+  writeQueue = writeQueue.then(() =>
+    saveAppearanceSettings(settings).catch(() => {
+      // Best-effort persistence: the in-memory value is already applied, and
+      // a failed write must not throw into the caller.
+    })
+  )
+  return writeQueue
+}
+
 export function createAppearanceSettingsStore(): AppearanceSettingsStore {
   return create<AppearanceSettingsState>((set, get) => ({
     ...DEFAULT_APPEARANCE_SETTINGS,
@@ -36,12 +52,7 @@ export function createAppearanceSettingsStore(): AppearanceSettingsStore {
         levels: { ...current.levels, [level]: { ...current.levels[level], label } },
       }
       set(next)
-      try {
-        await saveAppearanceSettings(next)
-      } catch {
-        // Best-effort persistence: the in-memory value is already applied, and
-        // a failed write must not throw into the input's change handler.
-      }
+      await persist(next)
     },
     setLevelColor: async (level, theme, patch) => {
       const current = get()
@@ -57,29 +68,17 @@ export function createAppearanceSettingsStore(): AppearanceSettingsStore {
         },
       }
       set(next)
-      try {
-        await saveAppearanceSettings(next)
-      } catch {
-        // Best-effort persistence; see `setLevelLabel`.
-      }
+      await persist(next)
     },
     setFontFamily: async fontFamily => {
       const next: AppearanceSettings = { ...get(), fontFamily }
       set(next)
-      try {
-        await saveAppearanceSettings(next)
-      } catch {
-        // Best-effort persistence; see `setLevelLabel`.
-      }
+      await persist(next)
     },
     setThemeMode: async themeMode => {
       const next: AppearanceSettings = { ...get(), themeMode }
       set(next)
-      try {
-        await saveAppearanceSettings(next)
-      } catch {
-        // Best-effort persistence; see `setLevelLabel`.
-      }
+      await persist(next)
     },
   }))
 }

@@ -56,6 +56,12 @@ interface PartialAppearanceSettings {
   themeMode?: ThemeMode
 }
 
+const VALID_THEME_MODES: readonly ThemeMode[] = ['light', 'dark', 'system']
+
+function validThemeMode(value: unknown): ThemeMode | undefined {
+  return VALID_THEME_MODES.includes(value as ThemeMode) ? (value as ThemeMode) : undefined
+}
+
 function mergeLevelColor(defaults: LevelColor, partial: Partial<LevelColor> | undefined): LevelColor {
   return { ...defaults, ...partial }
 }
@@ -87,6 +93,6 @@ export function mergeAppearanceSettings(partial: PartialAppearanceSettings | nul
   return {
     levels,
     fontFamily: partial.fontFamily ?? DEFAULT_APPEARANCE_SETTINGS.fontFamily,
-    themeMode: partial.themeMode ?? DEFAULT_APPEARANCE_SETTINGS.themeMode,
+    themeMode: validThemeMode(partial.themeMode) ?? DEFAULT_APPEARANCE_SETTINGS.themeMode,
   }
 }

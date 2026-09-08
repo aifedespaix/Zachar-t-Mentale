@@ -477,8 +477,9 @@ function MindMapCanvasInner() {
         onNodeDrag={handleNodeDrag}
         onNodeDragStop={handleNodeDragStop}
         fitView
+        colorMode={theme}
       >
-        <Background color="var(--border)" />
+        <Background />
         <Controls showInteractive={false} />
       </ReactFlow>
 

@@ -61,7 +61,7 @@ export function CorruptedMapDialog({
         {error && (
           <p
             role="alert"
-            style={{ display: 'flex', alignItems: 'flex-start', gap: 6, margin: 0, fontSize: 13, color: '#b45309' }}
+            style={{ display: 'flex', alignItems: 'flex-start', gap: 6, margin: 0, fontSize: 13, color: 'var(--warning-fg)' }}
           >
             <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>{error}</span>

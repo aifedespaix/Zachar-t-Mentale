@@ -207,7 +207,7 @@ function App() {
             {currentFileName ?? 'Aucun fichier ouvert'}
           </span>
           {saveFailed && (
-            <span role="status" style={{ color: '#b45309', fontSize: 13 }}>
+            <span role="status" style={{ color: 'var(--warning-fg)', fontSize: 13 }}>
               ⚠ Erreur de sauvegarde
             </span>
           )}

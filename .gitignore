@@ -4,6 +4,9 @@ graphify-out/
 # Superpowers subagent-driven-development scratch workspace
 .superpowers/
 
+# Vitest test report output
+.vitest/
+
 # Logs
 logs
 *.log

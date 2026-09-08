@@ -82,22 +82,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
         </div>
       </div>
       {workspaceError && (
-        <div
-          role="alert"
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 4,
-            margin: '0 8px 8px',
-            padding: 8,
-            border: '1px solid #f59e0b',
-            borderRadius: 4,
-            background: '#fef3c7',
-            color: '#92400e',
-            fontSize: 12,
-            lineHeight: 1.35,
-          }}
-        >
+        <div role="alert" className="status-banner">
           <span style={{ flex: 1 }}>{workspaceError}</span>
           <Button
             variant="ghost"

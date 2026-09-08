@@ -23,7 +23,7 @@ export function SaveFailedDialog({ message, continueLabel, onCancel, onContinue 
       <DialogContent role="alertdialog" className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertTriangle size={16} style={{ flexShrink: 0, color: '#b45309' }} />
+            <AlertTriangle size={16} style={{ flexShrink: 0, color: 'var(--warning-fg)' }} />
             {message}
           </DialogTitle>
           <DialogDescription>

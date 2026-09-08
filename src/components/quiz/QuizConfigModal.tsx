@@ -78,8 +78,8 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
                     fontSize: 12,
                     fontWeight: 700,
                     cursor: 'pointer',
-                    background: checked ? bg : '#eee',
-                    color: checked ? text : '#aaa',
+                    background: checked ? bg : 'var(--muted)',
+                    color: checked ? text : 'var(--muted-foreground)',
                   }}
                 >
                   <input
@@ -159,7 +159,7 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
               borderRadius: 11,
               flexShrink: 0,
               position: 'relative',
-              background: qcmMode ? toCss(levelAppearance[3].color[theme].border) : '#ccc',
+              background: qcmMode ? toCss(levelAppearance[3].color[theme].border) : 'var(--input)',
               transition: 'background 0.15s ease',
             }}
           >
@@ -171,7 +171,7 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
                 width: 17,
                 height: 17,
                 borderRadius: '50%',
-                background: '#fff',
+                background: 'var(--background)',
                 transition: 'left 0.15s ease',
               }}
             />

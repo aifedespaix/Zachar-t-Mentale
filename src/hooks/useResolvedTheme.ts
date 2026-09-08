@@ -16,12 +16,13 @@ export function useResolvedTheme(): 'light' | 'dark' {
   const [systemPrefersDark, setSystemPrefersDark] = useState(systemPrefersDarkNow)
 
   useEffect(() => {
+    if (themeMode !== 'system') return
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
     const mql = window.matchMedia('(prefers-color-scheme: dark)')
     const handleChange = (event: MediaQueryListEvent) => setSystemPrefersDark(event.matches)
     mql.addEventListener('change', handleChange)
     return () => mql.removeEventListener('change', handleChange)
-  }, [])
+  }, [themeMode])
 
   if (themeMode === 'system') return systemPrefersDark ? 'dark' : 'light'
   return themeMode
