@@ -478,7 +478,7 @@ function MindMapCanvasInner() {
         onNodeDragStop={handleNodeDragStop}
         fitView
       >
-        <Background />
+        <Background color="var(--border)" />
         <Controls showInteractive={false} />
       </ReactFlow>
 

@@ -203,21 +203,7 @@ function App() {
           )}
         </header>
         {loadError && (
-          <div
-            role="alert"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              margin: '0 8px 8px',
-              padding: '6px 8px',
-              border: '1px solid #f59e0b',
-              borderRadius: 4,
-              background: '#fef3c7',
-              color: '#92400e',
-              fontSize: 13,
-            }}
-          >
+          <div role="alert" className="status-banner">
             <span style={{ flex: 1 }}>⚠ {loadError}</span>
             <button
               type="button"
@@ -230,21 +216,7 @@ function App() {
           </div>
         )}
         {dropError && (
-          <div
-            role="alert"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              margin: '0 8px 8px',
-              padding: '6px 8px',
-              border: '1px solid #f59e0b',
-              borderRadius: 4,
-              background: '#fef3c7',
-              color: '#92400e',
-              fontSize: 13,
-            }}
-          >
+          <div role="alert" className="status-banner">
             <span style={{ flex: 1 }}>⚠ {dropError}</span>
           </div>
         )}

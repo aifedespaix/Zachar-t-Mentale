@@ -43,6 +43,9 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --warning-bg: oklch(0.94 0.06 85);
+  --warning-border: oklch(0.72 0.14 70);
+  --warning-fg: oklch(0.4 0.12 60);
 }
 
 @theme inline {
@@ -120,6 +123,9 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --warning-bg: oklch(0.28 0.05 75);
+  --warning-border: oklch(0.55 0.14 70);
+  --warning-fg: oklch(0.9 0.08 80);
 }
 
 @layer base {
@@ -241,4 +247,29 @@
   color: var(--muted-foreground);
   pointer-events: none;
   white-space: nowrap;
+}
+
+/* Shared style for the loadError/dropError banners in App.tsx — themed via
+   the warning tokens above so they repaint correctly in dark mode. */
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--warning-border);
+  border-radius: 4px;
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+  font-size: 13px;
+}
+
+/* The circular theme-toggle transition (see src/theme/circularReveal.ts)
+   animates `clip-path` itself — the View Transitions API's default
+   cross-fade between old/new snapshots would show through underneath and
+   spoil the effect. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
