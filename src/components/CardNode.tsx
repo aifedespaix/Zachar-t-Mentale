@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Plus, ArrowRight, GripVertical, AlignLeft, FlipHorizontal2, Unlink, Trash2, type LucideIcon } from 'lucide-react'
-import type { Card } from '../types/card'
+import type { Card, CardLevel } from '../types/card'
 import { isRootCard } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
@@ -10,7 +10,9 @@ import { useQuizStore } from '../state/useQuizStore'
 import { useQuizSettingsStore } from '../state/useQuizSettingsStore'
 import { computeTitleSimilarity, similarityColor } from '../utils/textSimilarity'
 import { buildLengthGuide } from '../utils/lengthGuide'
-import { detachedColors, levelColor } from '../colors/levelColors'
+import { detachedColors } from '../colors/levelColors'
+import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
+import { useResolvedTheme } from '../hooks/useResolvedTheme'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
@@ -159,8 +161,13 @@ export function CardNode({ data }: CardNodeProps) {
   // A floating card is painted grey whatever level it last had: its level is
   // vestigial once it leaves the hierarchy (see the `detached` field), so
   // colouring it by that stale value would read as "still a level-3 card".
-  const colors = isDetached ? detachedColors.light : levelColor(card.level, 'light')
-  const childColors = !isDetached && card.level < 4 ? levelColor(card.level + 1, 'light') : null
+  const theme = useResolvedTheme()
+  const levelAppearance = useAppearanceSettingsStore(s => s.levels[card.level])
+  const childLevelAppearance = useAppearanceSettingsStore(s =>
+    card.level < 4 ? s.levels[(card.level + 1) as CardLevel] : null
+  )
+  const colors = isDetached ? detachedColors[theme] : levelAppearance.color[theme]
+  const childColors = !isDetached && childLevelAppearance ? childLevelAppearance.color[theme] : null
 
   const isRoot = isRootCard(card)
   // Add-actions that cannot apply here are removed outright, not greyed: a
