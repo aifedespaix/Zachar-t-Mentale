@@ -122,14 +122,18 @@ bord à chaque résolution. `CardNode` et `QuizConfigModal` lisent
 
 L'app n'est aujourd'hui pas prête pour un thème sombre piloté :
 
-- `App.css` a des couleurs en dur (`#f6f6f6`, `#ffffff`, `#e8e8e8`, et les
-  bandeaux `#fef3c7` dans `App.tsx`) au lieu des tokens shadcn
-  (`--background`, `--card`, etc.) que `.dark` sait déjà redéfinir —
-  remplacés par les classes Tailwind correspondantes (`bg-background`,
-  `bg-card`, ...) pour que le toggle ait un effet réel sur tout le shell.
-- Le bloc `@media (prefers-color-scheme: dark)` résiduel du template Tauri
-  (`App.css`, un auto-dark non contrôlé par l'app) est supprimé — remplacé
-  entièrement par la classe `.dark` pilotée par `useResolvedTheme`.
+- `src/App.css` s'avère être du code mort (jamais importé nulle part — seul
+  `index.css` l'est, depuis `main.tsx`) : son bloc
+  `@media (prefers-color-scheme: dark)` ne s'applique donc à rien
+  aujourd'hui. Il est supprimé plutôt que « corrigé ». `index.css`, lui, a
+  déjà `body { @apply bg-background text-foreground }` et
+  `html { @apply font-sans }` — ces tokens répondent déjà correctement à la
+  classe `.dark` une fois `useResolvedTheme` branché.
+- Les bandeaux d'erreur (`App.tsx`, blocs `loadError`/`dropError`) ont eux
+  de vraies couleurs hex en dur (`#fef3c7`/`#f59e0b`/`#92400e`), dupliquées
+  entre les deux blocs — remplacées par une classe `.status-banner`
+  s'appuyant sur de nouveaux tokens `--warning-bg`/`--warning-border`/
+  `--warning-fg` (définis en light et dark dans `index.css`).
 - `<Background />` de React Flow (grille de points du canevas,
   `MindMapCanvas.tsx`) reçoit une couleur explicite dérivée du thème résolu
   plutôt que sa couleur par défaut (illisible en sombre).
