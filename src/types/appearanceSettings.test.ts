@@ -36,10 +36,11 @@ describe('mergeAppearanceSettings', () => {
     expect(merged.levels[4]).toEqual(DEFAULT_APPEARANCE_SETTINGS.levels[4])
   })
 
-  it('keeps the default dark color when a file only overrides the light color', () => {
-    const merged = mergeAppearanceSettings({ levels: { 1: { color: { light: { h: 10 } } } } })
-    expect(merged.levels[1].color.light.h).toBe(10)
-    expect(merged.levels[1].color.light.l).toBe(DEFAULT_APPEARANCE_SETTINGS.levels[1].color.light.l)
+  it('keeps the rest of the light color and the whole dark color when a file only overrides one field', () => {
+    const merged = mergeAppearanceSettings({ levels: { 1: { color: { light: { bg: { l: 0.5, c: 0.1, h: 10 } } } } } })
+    expect(merged.levels[1].color.light.bg).toEqual({ l: 0.5, c: 0.1, h: 10 })
+    expect(merged.levels[1].color.light.border).toEqual(DEFAULT_APPEARANCE_SETTINGS.levels[1].color.light.border)
+    expect(merged.levels[1].color.light.text).toEqual(DEFAULT_APPEARANCE_SETTINGS.levels[1].color.light.text)
     expect(merged.levels[1].color.dark).toEqual(DEFAULT_APPEARANCE_SETTINGS.levels[1].color.dark)
   })
 

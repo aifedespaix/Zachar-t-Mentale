@@ -44,7 +44,10 @@ export const FONT_OPTIONS: { label: string; value: string }[] = [
 
 interface PartialLevelAppearance {
   label?: string
-  color?: Partial<LevelColorPair>
+  color?: {
+    light?: Partial<LevelColor>
+    dark?: Partial<LevelColor>
+  }
 }
 
 interface PartialAppearanceSettings {
