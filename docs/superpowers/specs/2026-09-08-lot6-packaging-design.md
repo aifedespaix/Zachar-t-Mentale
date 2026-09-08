@@ -164,6 +164,26 @@ qui exige une élévation UAC à chaque mise à jour et peut s'installer en
 produit parallèle à côté d'une copie installée via NSIS. Un seul target
 lève l'ambiguïté et raccourcit le build CI.
 
+`productName` ne doit contenir aucune apostrophe ASCII (`'`). Tauri
+substitue ce nom tel quel dans les chemins de raccourcis NSIS, et
+plusieurs de ses macros d'installeur passent ces chemins dans une liste
+d'arguments COM entre apostrophes simples — par exemple
+`${IPersistFile::Load} $1 '("${shortcut}", ${STGM_READ})'`. Une
+apostrophe ASCII referme la chaîne trop tôt, makensis recompte alors les
+arguments de la macro et abandonne :
+
+```
+!insertmacro: macro "NSISCOMCALL" requires 4 parameter(s), passed 7!
+Error in macro IsShortcutTarget on macroline 11
+```
+
+C'est ce qui a fait échouer la release v0.1.0 : l'app compilait,
+l'installeur n'était jamais produit, et le tag ne portait que les
+archives source générées automatiquement par GitHub. Le nom est donc
+écrit avec l'apostrophe typographique `’` (U+2019) — la bonne apostrophe
+française, et pas un délimiteur de chaîne NSIS. `src/test/packaging.test.ts`
+verrouille l'invariant.
+
 ### Permissions — `src-tauri/capabilities/default.json`
 
 Ajout de `"updater:default"` à la liste de permissions existante (aux

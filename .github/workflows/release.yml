@@ -27,6 +27,9 @@ jobs:
       - name: install frontend dependencies
         run: bun install
 
+      - name: run tests
+        run: bun run test
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -34,7 +37,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
-          releaseName: 'Zachar''t Mentale v__VERSION__'
+          releaseName: 'Zachar’t Mentale v__VERSION__'
           releaseBody: 'Voir les fichiers attachés pour installer cette version.'
           releaseDraft: false
           prerelease: false
