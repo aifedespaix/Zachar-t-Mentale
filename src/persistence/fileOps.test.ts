@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createMindMapFile, createSubfolder, renamePath, deletePath, freeMindMapPath } from './fileOps'
+import { createMindMapFile, createSubfolder, renamePath, deletePath, freeMindMapPath, freeSiblingPath, duplicatePath } from './fileOps'
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
   mkdir: vi.fn(),
@@ -7,13 +7,15 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
   rename: vi.fn(),
   writeTextFile: vi.fn(),
   exists: vi.fn(),
+  readDir: vi.fn(),
+  copyFile: vi.fn(),
 }))
 vi.mock('@tauri-apps/api/path', () => ({
   join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
 }))
 vi.mock('./fileStore', () => ({ mindMapExists: vi.fn() }))
 
-import { mkdir, remove, rename, writeTextFile, exists } from '@tauri-apps/plugin-fs'
+import { mkdir, remove, rename, writeTextFile, exists, readDir, copyFile } from '@tauri-apps/plugin-fs'
 import { mindMapExists } from './fileStore'
 
 describe('createMindMapFile', () => {
@@ -129,5 +131,87 @@ describe('the asset sidecar travels with its mind map', () => {
   it('deletes a folder without hunting for a sidecar', async () => {
     await deletePath('/cours/maths', true)
     expect(vi.mocked(remove).mock.calls).toHaveLength(1)
+  })
+})
+
+describe('freeSiblingPath', () => {
+  beforeEach(() => {
+    vi.mocked(mindMapExists).mockReset()
+    vi.mocked(exists).mockReset()
+  })
+
+  it('returns the plain sanitized name for a file, appending .json', async () => {
+    vi.mocked(mindMapExists).mockResolvedValue(false)
+    const path = await freeSiblingPath('/cours', 'Chapitre 3 (copie)', false)
+    expect(path).toBe('/cours/Chapitre 3 (copie).json')
+  })
+
+  it('returns the plain sanitized name for a folder, with no extension', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    const path = await freeSiblingPath('/cours', 'Chimie (copie)', true)
+    expect(path).toBe('/cours/Chimie (copie)')
+  })
+
+  it('appends a numbered suffix until it finds a free file name', async () => {
+    vi.mocked(mindMapExists).mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    const path = await freeSiblingPath('/cours', 'Chapitre', false)
+    expect(path).toBe('/cours/Chapitre (2).json')
+  })
+
+  it('appends a numbered suffix until it finds a free folder name', async () => {
+    vi.mocked(exists).mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    const path = await freeSiblingPath('/cours', 'Chimie', true)
+    expect(path).toBe('/cours/Chimie (3)')
+  })
+})
+
+describe('duplicatePath', () => {
+  beforeEach(() => {
+    vi.mocked(copyFile).mockReset().mockResolvedValue(undefined)
+    vi.mocked(mkdir).mockReset().mockResolvedValue(undefined)
+    vi.mocked(readDir).mockReset()
+    vi.mocked(exists).mockReset().mockResolvedValue(false)
+  })
+
+  it('copies a single mind map file with no sidecar', async () => {
+    await duplicatePath('/cours/chapitre.json', '/cours/chapitre (copie).json', false)
+    expect(copyFile).toHaveBeenCalledWith('/cours/chapitre.json', '/cours/chapitre (copie).json')
+    expect(mkdir).not.toHaveBeenCalled()
+  })
+
+  it('copies the asset sidecar alongside a duplicated mind map', async () => {
+    vi.mocked(exists).mockResolvedValueOnce(true)
+    vi.mocked(readDir).mockResolvedValueOnce([
+      { name: 'schema.png', isDirectory: false, isFile: true, isSymlink: false },
+    ])
+    await duplicatePath('/cours/chapitre.json', '/cours/chapitre (copie).json', false)
+    expect(mkdir).toHaveBeenCalledWith('/cours/chapitre (copie).assets')
+    expect(copyFile).toHaveBeenCalledWith(
+      '/cours/chapitre.assets/schema.png',
+      '/cours/chapitre (copie).assets/schema.png'
+    )
+  })
+
+  it('leaves a map with no sidecar alone', async () => {
+    await duplicatePath('/cours/chapitre.json', '/cours/chapitre (copie).json', false)
+    expect(mkdir).not.toHaveBeenCalled()
+  })
+
+  it('recursively copies a folder and its contents', async () => {
+    vi.mocked(readDir)
+      .mockResolvedValueOnce([
+        { name: 'atomes.json', isDirectory: false, isFile: true, isSymlink: false },
+        { name: 'sous-dossier', isDirectory: true, isFile: false, isSymlink: false },
+      ])
+      .mockResolvedValueOnce([{ name: 'liaisons.json', isDirectory: false, isFile: true, isSymlink: false }])
+    await duplicatePath('/cours/chimie', '/cours/chimie (copie)', true)
+
+    expect(mkdir).toHaveBeenCalledWith('/cours/chimie (copie)')
+    expect(mkdir).toHaveBeenCalledWith('/cours/chimie (copie)/sous-dossier')
+    expect(copyFile).toHaveBeenCalledWith('/cours/chimie/atomes.json', '/cours/chimie (copie)/atomes.json')
+    expect(copyFile).toHaveBeenCalledWith(
+      '/cours/chimie/sous-dossier/liaisons.json',
+      '/cours/chimie (copie)/sous-dossier/liaisons.json'
+    )
   })
 })

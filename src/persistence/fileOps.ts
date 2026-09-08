@@ -1,4 +1,4 @@
-import { mkdir, remove, rename, writeTextFile, exists } from '@tauri-apps/plugin-fs'
+import { mkdir, remove, rename, writeTextFile, exists, readDir, copyFile } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
 import { createRootCard } from '../state/cardsReducer'
 import { serializeCards } from './serialization'
@@ -11,7 +11,7 @@ function isMindMapPath(path: string): boolean {
   return path.toLowerCase().endsWith('.json')
 }
 
-function withJsonExtension(name: string): string {
+export function withJsonExtension(name: string): string {
   return name.toLowerCase().endsWith('.json') ? name : `${name}.json`
 }
 
@@ -71,19 +71,70 @@ export async function deletePath(path: string, recursive: boolean): Promise<void
 }
 
 /**
- * A free `<folderPath>/<baseName>[ (n)].json` path: the plain sanitized name
- * if free, else the first numbered variant that doesn't collide. Used when
- * writing a file whose name comes from external data (an XMind sheet title)
- * that could coincidentally match something already in the folder.
+ * A free `<folderPath>/<baseName>[ (n)]` path, with a forced `.json`
+ * extension when `isFolder` is false: the plain sanitized name if free,
+ * else the first numbered variant that doesn't collide. Generalizes what
+ * `freeMindMapPath` used to do inline, to also cover folders and
+ * duplicate-name defaults.
  */
-export async function freeMindMapPath(folderPath: string, baseName: string): Promise<string> {
+export async function freeSiblingPath(folderPath: string, baseName: string, isFolder: boolean): Promise<string> {
   const safe = sanitizeFileName(baseName)
   const separator = folderPath.includes('\\') ? '\\' : '/'
-  let candidate = `${folderPath}${separator}${withJsonExtension(safe)}`
+  const nameOf = (candidateBase: string) => (isFolder ? candidateBase : withJsonExtension(candidateBase))
+  const isTaken = (candidatePath: string) => (isFolder ? exists(candidatePath) : mindMapExists(candidatePath))
+  let candidate = `${folderPath}${separator}${nameOf(safe)}`
   let attempt = 1
-  while (await mindMapExists(candidate)) {
+  while (await isTaken(candidate)) {
     attempt += 1
-    candidate = `${folderPath}${separator}${withJsonExtension(`${safe} (${attempt})`)}`
+    candidate = `${folderPath}${separator}${nameOf(`${safe} (${attempt})`)}`
   }
   return candidate
+}
+
+/**
+ * A free `<folderPath>/<baseName>[ (n)].json` path. Used when writing a
+ * file whose name comes from external data (an XMind sheet title) that
+ * could coincidentally match something already in the folder.
+ */
+export async function freeMindMapPath(folderPath: string, baseName: string): Promise<string> {
+  return freeSiblingPath(folderPath, baseName, false)
+}
+
+async function copyDirRecursive(sourceDir: string, destDir: string): Promise<void> {
+  await mkdir(destDir)
+  const entries = await readDir(sourceDir)
+  for (const entry of entries) {
+    const sourcePath = await join(sourceDir, entry.name)
+    const destPath = await join(destDir, entry.name)
+    if (entry.isDirectory) {
+      await copyDirRecursive(sourcePath, destPath)
+    } else {
+      await copyFile(sourcePath, destPath)
+    }
+  }
+}
+
+/**
+ * Duplicates a file or folder onto a new sibling path, carrying a mind
+ * map's asset sidecar with it.
+ *
+ * The sidecar copy is best-effort ON PURPOSE, same rationale as
+ * `renamePath`: the primary copy has already succeeded by then, and
+ * throwing here would report a failure for an operation that half-happened.
+ */
+export async function duplicatePath(sourcePath: string, destPath: string, isFolder: boolean): Promise<void> {
+  if (isFolder) {
+    await copyDirRecursive(sourcePath, destPath)
+    return
+  }
+  await copyFile(sourcePath, destPath)
+  if (!isMindMapPath(sourcePath)) return
+
+  try {
+    const sourceSidecar = sidecarDirOf(sourcePath)
+    if (!(await exists(sourceSidecar))) return
+    await copyDirRecursive(sourceSidecar, sidecarDirOf(destPath))
+  } catch {
+    // Best-effort, as in `renamePath`: the `.json` copy already succeeded.
+  }
 }
