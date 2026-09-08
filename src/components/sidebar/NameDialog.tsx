@@ -9,6 +9,13 @@ export interface NameDialogProps {
   confirmLabel: string
   onConfirm: (name: string) => void
   onCancel: () => void
+  /**
+   * Accessible name for the input. Defaults to `title` — but a caller whose
+   * `title` is itself a computed value (e.g. the collision-free default
+   * name) should pass a stable, descriptive label instead, so the input
+   * isn't announced as if labeled by its own content.
+   */
+  inputLabel?: string
 }
 
 /**
@@ -17,10 +24,14 @@ export interface NameDialogProps {
  * in the target folder (computed by the caller via `freeSiblingPath`), so
  * confirming without editing can never collide or overwrite anything.
  */
-export function NameDialog({ title, initialName, confirmLabel, onConfirm, onCancel }: NameDialogProps) {
+export function NameDialog({ title, initialName, confirmLabel, onConfirm, onCancel, inputLabel }: NameDialogProps) {
   const [name, setName] = useState(initialName)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Redundant with Radix Dialog's own default auto-focus-and-select behavior
+  // for the first tabbable descendant — kept anyway because it makes the
+  // selection assertion in this file's tests deterministic without relying
+  // on Radix's internal timing.
   useEffect(() => {
     inputRef.current?.select()
   }, [])
@@ -39,7 +50,7 @@ export function NameDialog({ title, initialName, confirmLabel, onConfirm, onCanc
         </DialogHeader>
         <input
           ref={inputRef}
-          aria-label={title}
+          aria-label={inputLabel ?? title}
           value={name}
           onChange={e => setName(e.target.value)}
           onKeyDown={e => {

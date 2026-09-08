@@ -80,6 +80,24 @@ describe('NameDialog', () => {
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
+  it('calls onCancel when Escape is pressed', async () => {
+    const user = userEvent.setup()
+    const onCancel = vi.fn()
+    render(
+      <NameDialog
+        title="Nouvelle carte mentale"
+        initialName="Nouvelle carte mentale"
+        confirmLabel="Créer"
+        onConfirm={() => {}}
+        onCancel={onCancel}
+      />
+    )
+
+    await user.keyboard('{Escape}')
+
+    expect(onCancel).toHaveBeenCalled()
+  })
+
   it('calls onCancel when the cancel button is clicked', async () => {
     const user = userEvent.setup()
     const onCancel = vi.fn()

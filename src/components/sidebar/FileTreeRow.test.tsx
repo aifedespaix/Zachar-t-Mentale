@@ -34,7 +34,7 @@ import {
   freeSiblingPath,
 } from '../../persistence/fileOps'
 import { scanFolder } from '../../persistence/fileTree'
-import { loadMindMap, saveMindMap } from '../../persistence/fileStore'
+import { loadMindMap, saveMindMap, mindMapExists } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
 
@@ -64,6 +64,7 @@ describe('FileTreeRow', () => {
     vi.mocked(scanFolder).mockReset()
     vi.mocked(loadMindMap).mockReset()
     vi.mocked(saveMindMap).mockReset()
+    vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
     vi.mocked(pickXmindFile).mockReset()
     vi.mocked(readBinaryFile).mockReset()
     vi.mocked(readXmindFile).mockReset()
@@ -141,6 +142,22 @@ describe('FileTreeRow', () => {
     await user.type(input, 'chapitre1-v2.json{Enter}')
 
     expect(renamePath).toHaveBeenCalledWith('/cours/chapitre1.json', '/cours/chapitre1-v2.json')
+  })
+
+  it('does not reopen the context menu on right-click while the rename input is active, and leaves it uncommitted', async () => {
+    const user = userEvent.setup()
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.dblClick(screen.getByRole('button', { name: 'chapitre1.json' }))
+    const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
+    await user.type(input, 'draft-en-cours')
+
+    fireEvent.contextMenu(input)
+
+    expect(screen.queryByRole('menuitem', { name: 'Renommer' })).not.toBeInTheDocument()
+    expect(renamePath).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: /renommer chapitre1.json/i })).toHaveValue('chapitre1.jsondraft-en-cours')
   })
 
   it('renames a non-root folder via double-click', async () => {
@@ -305,7 +322,7 @@ describe('FileTreeRow', () => {
 
     openMenu(/chimie/i)
     await user.click(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' }))
-    const input = await screen.findByRole('textbox', { name: 'Nouvelle carte mentale' })
+    const input = await screen.findByRole('textbox', { name: 'Nom de la nouvelle carte mentale' })
     await user.clear(input)
     await user.type(input, 'nouveau{Enter}')
 
@@ -323,7 +340,7 @@ describe('FileTreeRow', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' }))
 
     expect(freeSiblingPath).toHaveBeenCalledWith('/cours/chimie', 'Nouvelle carte mentale', false)
-    expect(await screen.findByRole('textbox', { name: 'Nouvelle carte mentale (2)' })).toHaveValue(
+    expect(await screen.findByRole('textbox', { name: 'Nom de la nouvelle carte mentale' })).toHaveValue(
       'Nouvelle carte mentale (2)'
     )
   })
@@ -337,7 +354,7 @@ describe('FileTreeRow', () => {
 
     openMenu(/chimie/i)
     await user.click(await screen.findByRole('menuitem', { name: 'Nouveau sous-dossier' }))
-    const input = await screen.findByRole('textbox', { name: 'Nouveau dossier' })
+    const input = await screen.findByRole('textbox', { name: 'Nom du nouveau dossier' })
     await user.clear(input)
     await user.type(input, 'atomes{Enter}')
 
@@ -352,10 +369,29 @@ describe('FileTreeRow', () => {
 
     openMenu(/chimie/i)
     await user.click(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' }))
-    const input = await screen.findByRole('textbox', { name: 'Nouvelle carte mentale' })
+    const input = await screen.findByRole('textbox', { name: 'Nom de la nouvelle carte mentale' })
     await user.type(input, '{Enter}')
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/lecture seule/))
+  })
+
+  it('refuses to create a mind map file that would overwrite an existing one, instead of silently overwriting it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mindMapExists).mockResolvedValue(true)
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' }))
+    const input = await screen.findByRole('textbox')
+    await user.clear(input)
+    await user.type(input, 'existant{Enter}')
+
+    expect(mindMapExists).toHaveBeenCalledWith('/cours/chimie/existant.json')
+    expect(createMindMapFile).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().workspaceError).toMatch(/existant\.json[^]*existe déjà/)
+    )
   })
 
   it('duplicates a mind map file and opens the copy', async () => {
@@ -411,6 +447,26 @@ describe('FileTreeRow', () => {
     await user.type(input, '{Enter}')
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/disque plein/))
+  })
+
+  it('refuses to duplicate a mind map file onto an existing one, instead of silently overwriting it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(freeSiblingPath).mockResolvedValue('/cours/chapitre1 (copie).json')
+    vi.mocked(mindMapExists).mockResolvedValue(true)
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu('chapitre1.json')
+    await user.click(await screen.findByRole('menuitem', { name: 'Dupliquer' }))
+    const input = await screen.findByRole('textbox')
+    await user.clear(input)
+    await user.type(input, 'chapitre2{Enter}')
+
+    expect(mindMapExists).toHaveBeenCalledWith('/cours/chapitre2.json')
+    expect(duplicatePath).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().workspaceError).toMatch(/chapitre2\.json[^]*existe déjà/)
+    )
   })
 
   it('reports a failed deletion instead of silently doing nothing', async () => {

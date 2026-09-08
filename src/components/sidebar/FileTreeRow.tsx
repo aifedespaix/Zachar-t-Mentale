@@ -1,5 +1,5 @@
 // src/components/sidebar/FileTreeRow.tsx
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Folder, FolderOpen, FolderPlus, FileJson, FilePlus, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, FileUp, Copy } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
@@ -16,7 +16,7 @@ import {
 } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
 import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName } from '../../persistence/paths'
-import { loadMindMap, saveMindMap } from '../../persistence/fileStore'
+import { loadMindMap, saveMindMap, mindMapExists } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
 import { validateCards } from '../../validation/cardsValidation'
@@ -39,6 +39,7 @@ interface NamingAction {
   initialName: string
   confirmLabel: string
   onConfirm: (name: string) => void
+  inputLabel?: string
 }
 
 function ConfirmDeleteDialog({
@@ -82,6 +83,11 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [exportCards, setExportCards] = useState<Card[] | null>(null)
   const [namingAction, setNamingAction] = useState<NamingAction | null>(null)
+  // Set right before the deferred `setRenaming(true)` below, and consumed by
+  // this row's `onCloseAutoFocus` handlers so the close-focus-restore
+  // suppression they need for the rename race doesn't also apply to every
+  // other menu close (Escape, another item, clicking outside).
+  const renamingViaMenuRef = useRef(false)
 
   const indent = { paddingLeft: 8 + depth * 16 }
 
@@ -92,9 +98,11 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
    * afterward steals focus right back from the just-mounted, `autoFocus`ed
    * rename `<input>` — firing its `onBlur` (which submits/cancels the
    * rename) before the user ever sees it. Deferring past that lets the menu
-   * finish closing first.
+   * finish closing first. In tests, this relies on `@testing-library/user-event`'s
+   * handling of pending timers to observe the rename input after the deferred call.
    */
   function startRenaming() {
+    renamingViaMenuRef.current = true
     setTimeout(() => setRenaming(true), 0)
   }
 
@@ -178,15 +186,23 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     const fullPath = await freeSiblingPath(node.path, 'Nouvelle carte mentale', false)
     const name = mindMapBaseName(fileNameOf(fullPath))
     setNamingAction({
-      title: name,
+      title: 'Nouvelle carte mentale',
       initialName: name,
       confirmLabel: 'Créer',
       onConfirm: submitCreateMindMap,
+      inputLabel: 'Nom de la nouvelle carte mentale',
     })
   }
 
   async function submitCreateMindMap(name: string) {
     setNamingAction(null)
+    const destPath = `${node.path}${separatorOf(node.path)}${withJsonExtension(name)}`
+    if (await mindMapExists(destPath)) {
+      setWorkspaceError(
+        `Impossible de créer la carte mentale « ${name} » : un fichier « ${withJsonExtension(name)} » existe déjà.`
+      )
+      return
+    }
     try {
       const path = await createMindMapFile(node.path, name)
       await refreshFolder(node.path)
@@ -200,10 +216,11 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     const fullPath = await freeSiblingPath(node.path, 'Nouveau dossier', true)
     const name = fileNameOf(fullPath)
     setNamingAction({
-      title: name,
+      title: 'Nouveau sous-dossier',
       initialName: name,
       confirmLabel: 'Créer',
       onConfirm: submitCreateFolder,
+      inputLabel: 'Nom du nouveau dossier',
     })
   }
 
@@ -236,6 +253,12 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     const separator = separatorOf(node.path)
     const isFolder = node.type === 'folder'
     const destPath = `${parentPath}${separator}${isFolder ? name : withJsonExtension(name)}`
+    if (!isFolder && (await mindMapExists(destPath))) {
+      setWorkspaceError(
+        `Impossible de dupliquer « ${node.name} » : un fichier « ${withJsonExtension(name)} » existe déjà.`
+      )
+      return
+    }
     try {
       await duplicatePath(node.path, destPath, isFolder)
       await refreshFolder(parentPath)
@@ -250,7 +273,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     return (
       <div>
         <ContextMenu>
-          <ContextMenuTrigger asChild>
+          <ContextMenuTrigger asChild disabled={renaming}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               {renaming ? (
                 <input
@@ -295,7 +318,14 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
               )}
             </div>
           </ContextMenuTrigger>
-          <ContextMenuContent onCloseAutoFocus={e => e.preventDefault()}>
+          <ContextMenuContent
+            onCloseAutoFocus={e => {
+              if (renamingViaMenuRef.current) {
+                e.preventDefault()
+                renamingViaMenuRef.current = false
+              }
+            }}
+          >
             <ContextMenuItem onSelect={openCreateMindMapDialog}>
               <FilePlus size={14} /> Nouvelle carte mentale
             </ContextMenuItem>
@@ -347,6 +377,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
             confirmLabel={namingAction.confirmLabel}
             onConfirm={namingAction.onConfirm}
             onCancel={() => setNamingAction(null)}
+            inputLabel={namingAction.inputLabel}
           />
         )}
 
@@ -361,7 +392,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
     return (
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <ContextMenu>
-          <ContextMenuTrigger asChild>
+          <ContextMenuTrigger asChild disabled={renaming}>
             <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
               {renaming ? (
                 <input
@@ -402,7 +433,14 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
               )}
             </div>
           </ContextMenuTrigger>
-          <ContextMenuContent onCloseAutoFocus={e => e.preventDefault()}>
+          <ContextMenuContent
+            onCloseAutoFocus={e => {
+              if (renamingViaMenuRef.current) {
+                e.preventDefault()
+                renamingViaMenuRef.current = false
+              }
+            }}
+          >
             <ContextMenuItem onSelect={openDuplicateDialog}>
               <Copy size={14} /> Dupliquer
             </ContextMenuItem>
@@ -434,6 +472,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
             confirmLabel={namingAction.confirmLabel}
             onConfirm={namingAction.onConfirm}
             onCancel={() => setNamingAction(null)}
+            inputLabel={namingAction.inputLabel}
           />
         )}
 
