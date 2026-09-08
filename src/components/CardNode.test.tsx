@@ -442,6 +442,93 @@ describe('CardNode drag handle', () => {
   })
 })
 
+describe('CardNode mnemonic icon', () => {
+  const cardWithIcon: Card = { ...testCard, icon: 'Brain' }
+
+  beforeEach(() => {
+    resetStore([testCard])
+    resetQuizStore()
+  })
+
+  it('offers an empty icon slot on a card that has none', () => {
+    renderCardNode(testCard)
+    expect(screen.getByRole('button', { name: 'Ajouter une icône' })).toBeInTheDocument()
+    expect(screen.getByTestId('card-icon-badge')).not.toHaveAttribute('data-icon')
+  })
+
+  it('shows the card’s icon, and offers to change it', () => {
+    renderCardNode(cardWithIcon)
+    expect(screen.getByTestId('card-icon-badge')).toHaveAttribute('data-icon', 'Brain')
+    expect(screen.getByRole('button', { name: 'Changer l’icône' })).toBeInTheDocument()
+  })
+
+  it('renders nothing at all for an icon name it does not know', () => {
+    // A card written by a later version of the app, or hand-edited: the name
+    // is unusable, the card still renders.
+    renderCardNode({ ...testCard, icon: 'PasUneIcone' })
+    expect(screen.getByTestId('card-icon-badge')).not.toHaveAttribute('data-icon')
+  })
+
+  it('picks an icon from the dialog and stores it on the card', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard)
+
+    await user.click(screen.getByRole('button', { name: 'Ajouter une icône' }))
+    await user.type(screen.getByRole('searchbox', { name: 'Rechercher une icône' }), 'cerveau')
+    await user.click(await screen.findByRole('option', { name: 'brain' }))
+
+    expect(useCardsStore.getState().history.present[0].icon).toBe('Brain')
+    // The choice closes the dialog: there is nothing else to do in it.
+    expect(screen.queryByText('Choisir une icône')).not.toBeInTheDocument()
+  })
+
+  it('removes the icon from the dialog, leaving no key behind', async () => {
+    const user = userEvent.setup()
+    resetStore([cardWithIcon])
+    renderCardNode(cardWithIcon)
+
+    await user.click(screen.getByRole('button', { name: 'Changer l’icône' }))
+    await user.click(screen.getByRole('button', { name: 'Retirer l’icône' }))
+
+    expect('icon' in useCardsStore.getState().history.present[0]).toBe(false)
+  })
+
+  it('offers nothing to remove on a card that has no icon', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard)
+
+    await user.click(screen.getByRole('button', { name: 'Ajouter une icône' }))
+
+    expect(screen.queryByRole('button', { name: 'Retirer l’icône' })).not.toBeInTheDocument()
+  })
+
+  it('keeps showing the icon on a locked map, but not as a button', () => {
+    resetStore([cardWithIcon])
+    useCardsStore.getState().toggleLock()
+    renderCardNode(cardWithIcon)
+
+    // The picture is the memory hook the card exists for — it stays. Changing
+    // it is an edit, and the map is locked.
+    expect(screen.getByTestId('card-icon-badge')).toHaveAttribute('data-icon', 'Brain')
+    expect(screen.queryByRole('button', { name: 'Changer l’icône' })).not.toBeInTheDocument()
+  })
+
+  it('drops the empty slot entirely on a locked map', () => {
+    useCardsStore.getState().toggleLock()
+    renderCardNode(testCard)
+    expect(screen.queryByTestId('card-icon-badge')).not.toBeInTheDocument()
+  })
+
+  it('keeps the icon during a quiz, without the button', () => {
+    resetStore([cardWithIcon])
+    useQuizStore.setState({ active: true })
+    renderCardNode(cardWithIcon)
+
+    expect(screen.getByTestId('card-icon-badge')).toHaveAttribute('data-icon', 'Brain')
+    expect(screen.queryByRole('button', { name: 'Changer l’icône' })).not.toBeInTheDocument()
+  })
+})
+
 describe('CardNode footer', () => {
   beforeEach(() => {
     resetStore([testCard])

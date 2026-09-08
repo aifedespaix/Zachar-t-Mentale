@@ -117,6 +117,29 @@ export function updateTitle(cards: Card[], cardId: string, title: string): Card[
 }
 
 /**
+ * Sets (or, with `undefined`, clears) a card's mnemonic icon.
+ *
+ * Clearing DELETES the key rather than writing `undefined`, so a card that
+ * lost its icon serializes exactly as it did before icons existed — the same
+ * contract `updateContent` follows for `definition`/`content`. A write that
+ * changes nothing returns the array by identity so the caller can skip
+ * spending an undo step on it.
+ */
+export function updateIcon(cards: Card[], cardId: string, icon: string | undefined): Card[] {
+  let changed = false
+  const next = cards.map(card => {
+    if (card.id !== cardId || card.icon === icon) return card
+    changed = true
+    if (icon === undefined) {
+      const { icon: _removed, ...rest } = card
+      return rest
+    }
+    return { ...card, icon }
+  })
+  return changed ? next : cards
+}
+
+/**
  * The ONE place `content` and `definition` are written, always together.
  *
  * `definition` is the plain-text mirror every other consumer reads — the
