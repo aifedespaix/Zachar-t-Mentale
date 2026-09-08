@@ -10,9 +10,15 @@ Only fall back to raw Read/Grep when the graph doesn't cover it (e.g. reading ex
 
 If files under `src/` or `src-tauri/` changed materially, the graph may be stale — run `graphify update .` (no LLM cost) rather than re-reading everything by hand.
 
-## Course source PDFs are opaque
+## Course source material is local-only, never committed
 
-`.cartes-mentales/**/*.pdf` are raw course sources (10-40MB each) feeding the `transformer-cours-en-carte-mentale` skill — they're gitignored and excluded from `rtk grep`/`rtk read`. Don't Read them directly unless the task is specifically converting that course; the generated `.json` mind maps next to them are the thing to inspect for content.
+`.cours/**` (raw course PDFs, 10-40MB each) and `.cartes-mentales/**` (the
+generated `.json` mind maps feeding/produced by the
+`transformer-cours-en-carte-mentale` skill) are both entirely gitignored —
+this is the user's real personal course content, not example/demo data, and
+the repo is open source. Don't Read the PDFs directly unless the task is
+specifically converting that course; the `.json` mind maps are the thing to
+inspect for content. Never `git add -f` anything under either directory.
 
 ## RTK is already active
 

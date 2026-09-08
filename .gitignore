@@ -39,5 +39,6 @@ src-tauri/gen/schemas
 # Isolated worktrees for subagent-driven-development
 .worktrees/
 
-# Raw course PDFs (source material for transformer-cours-en-carte-mentale, not versioned)
-.cartes-mentales/**/*.pdf
+# Personal course material (source PDFs + generated mind maps) — user data, not versioned
+.cours/
+.cartes-mentales/

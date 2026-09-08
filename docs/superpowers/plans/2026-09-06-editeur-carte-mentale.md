@@ -41,7 +41,7 @@ If the CLI's flags have changed by the time you run this, run `bunx create-tauri
 
 - [ ] **Step 2: Merge scaffolded files into the repo root**
 
-Move everything from `zachart-mentale-scaffold/` (except its `.git` if any) into the repo root `C:\Users\clape\Documents\dev\Zachar't-Mentale`. Do not overwrite the existing `.gitignore` / `.gitattributes` — merge the scaffold's `.gitignore` entries (e.g. `node_modules`, `dist`, `src-tauri/target`) into the existing file instead of replacing it. Delete the now-empty `zachart-mentale-scaffold/` folder. Set `"name": "zachart-mentale"` in the root `package.json` (the apostrophe in the folder name is not a valid npm package name).
+Move everything from `zachart-mentale-scaffold/` (except its `.git` if any) into the repo root. Do not overwrite the existing `.gitignore` / `.gitattributes` — merge the scaffold's `.gitignore` entries (e.g. `node_modules`, `dist`, `src-tauri/target`) into the existing file instead of replacing it. Delete the now-empty `zachart-mentale-scaffold/` folder. Set `"name": "zachart-mentale"` in the root `package.json` (the apostrophe in the folder name is not a valid npm package name).
 
 - [ ] **Step 3: Install dependencies**
 
