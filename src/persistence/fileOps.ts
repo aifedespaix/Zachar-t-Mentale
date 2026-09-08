@@ -44,9 +44,16 @@ export async function renamePath(oldPath: string, newPath: string): Promise<void
   await rename(oldPath, newPath)
   if (!isMindMapPath(oldPath)) return
 
-  const oldSidecar = sidecarDirOf(oldPath)
-  if (!(await exists(oldSidecar))) return
-  await rename(oldSidecar, sidecarDirOf(newPath))
+  try {
+    const oldSidecar = sidecarDirOf(oldPath)
+    if (!(await exists(oldSidecar))) return
+    await rename(oldSidecar, sidecarDirOf(newPath))
+  } catch {
+    // Genuinely best-effort, as the comment above promises: the `.json` rename
+    // has already succeeded, so rejecting here would report a failure for an
+    // operation that half-happened. A cross-device rename (EXDEV) is the
+    // realistic case.
+  }
 }
 
 /** Deletes a path, taking a mind map's asset sidecar with it rather than leaving it orphaned. */
@@ -54,8 +61,13 @@ export async function deletePath(path: string, recursive: boolean): Promise<void
   await remove(path, { recursive })
   if (!isMindMapPath(path)) return
 
-  const sidecar = sidecarDirOf(path)
-  if (await exists(sidecar)) await remove(sidecar, { recursive: true })
+  try {
+    const sidecar = sidecarDirOf(path)
+    if (await exists(sidecar)) await remove(sidecar, { recursive: true })
+  } catch {
+    // The map is already gone; failing the whole delete over its leftovers
+    // would be worse than leaving an orphaned folder behind.
+  }
 }
 
 /**

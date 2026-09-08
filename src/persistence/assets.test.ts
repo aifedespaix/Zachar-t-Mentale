@@ -35,10 +35,25 @@ describe('assetPathOf', () => {
 
   it('refuses an asset name that tries to escape the sidecar', () => {
     // Asset names come from a .json someone may have shared.
-    expect(() => assetPathOf('/cours/carte.json', '../../.ssh/id_rsa')).toThrow()
-    expect(() => assetPathOf('/cours/carte.json', 'sous/dossier.png')).toThrow()
-    expect(() => assetPathOf('/cours/carte.json', '..\\secrets.png')).toThrow()
-    expect(() => assetPathOf('/cours/carte.json', '/etc/passwd')).toThrow()
+    for (const hostile of [
+      '../../.ssh/id_rsa',
+      'sous/dossier.png',
+      '..\\secrets.png',
+      '/etc/passwd',
+      'C:\\Windows\\win.ini',
+      '....//etc/passwd',
+      '.',
+      '..',
+      '',
+    ]) {
+      expect(() => assetPathOf('/cours/carte.json', hostile), hostile).toThrow()
+    }
+  })
+
+  it('accepts an ordinary name that merely contains dots', () => {
+    // The guard used to be a substring test on '..', which rejected this.
+    expect(assetPathOf('/cours/carte.json', 'photo..png')).toBe('/cours/carte.assets/photo..png')
+    expect(assetPathOf('/cours/carte.json', 'v1.2.3.png')).toBe('/cours/carte.assets/v1.2.3.png')
   })
 })
 

@@ -35,7 +35,9 @@ export function sidecarDirOf(mindMapPath: string): string {
  * make the app read — and the export inline — a file anywhere on disk.
  */
 export function assetPathOf(mindMapPath: string, asset: string): string {
-  if (asset === '' || asset.includes('/') || asset.includes('\\') || asset.includes('..')) {
+  // `..` only as a whole path SEGMENT: a substring test also rejected the
+  // perfectly ordinary `photo..png`.
+  if (asset === '' || asset === '.' || asset === '..' || /[/\\]/.test(asset)) {
     throw new Error(`Nom de média invalide : « ${asset} »`)
   }
   return `${sidecarDirOf(mindMapPath)}${separatorOf(mindMapPath)}${asset}`
@@ -67,7 +69,9 @@ async function contentHash(bytes: Uint8Array): Promise<string> {
 export async function writeAsset(mindMapPath: string, bytes: Uint8Array, extension: string): Promise<string> {
   if (bytes.byteLength > MAX_ASSET_BYTES) {
     throw new Error(
-      `Image trop volumineuse (${Math.round(bytes.byteLength / 1024 / 1024)} Mo) : la limite est de ${MAX_ASSET_BYTES / 1024 / 1024} Mo.`
+      // One decimal: rounding made a 10 MB + 1 byte file report "10 Mo : la
+      // limite est de 10 Mo", which reads as a bug rather than a limit.
+      `Image trop volumineuse (${(bytes.byteLength / 1024 / 1024).toFixed(1)} Mo) : la limite est de ${MAX_ASSET_BYTES / 1024 / 1024} Mo.`
     )
   }
   const asset = `${await contentHash(bytes)}.${safeExtension(extension)}`
@@ -91,5 +95,14 @@ export async function readAssetBytes(mindMapPath: string, asset: string): Promis
  * cannot re-encode. The export path inlines assets as data URIs instead.
  */
 export function assetSrc(mindMapPath: string, asset: string): string {
-  return convertFileSrc(assetPathOf(mindMapPath, asset))
+  // Never throws: this is called from inside React's render, so a bad asset
+  // name in a shared `.json` would otherwise tear the canvas down through the
+  // error boundary and close the user's file. `''` is the "not available"
+  // signal `BlockView` already renders as a named placeholder — the right
+  // outcome for a data problem.
+  try {
+    return convertFileSrc(assetPathOf(mindMapPath, asset))
+  } catch {
+    return ''
+  }
 }

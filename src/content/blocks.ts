@@ -207,10 +207,16 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
  * This is the ONLY read adapter — `BlockView`, the export's `StaticCardView`
  * and the quiz all go through it — which is what lets the degradation live
  * here rather than at load time. That placement is deliberate: the load path
- * validates without transforming, and autosave rewrites the whole file, so
- * sanitizing on load would silently destroy a newer version's blocks the first
- * time the user touched the map. Degrading on READ leaves the file on disk
- * intact; the card is never mutated.
+ * validates without transforming, so merely OPENING a map written by a newer
+ * version leaves its unknown blocks untouched on disk. This function never
+ * mutates the card.
+ *
+ * It does not make them survive forever, and the distinction matters: the
+ * first `updateContent` on that card — including one triggered by something
+ * unrelated, like dropping an image into it — writes back the degraded list
+ * and the unknown KIND is gone for good (its text survives as a text block).
+ * Making that lossless would mean carrying opaque blocks through the editor,
+ * which is a larger design than this lot took on.
  */
 export function contentOf(card: Card): CardBlock[] {
   const blocks = sanitizeBlocks(card.content)
@@ -257,4 +263,30 @@ export function normalizeContent(blocks: CardBlock[]): { content?: CardBlock[]; 
 
   if (kept.every(block => block.kind === 'text')) return { definition }
   return { content: kept.map(cloneBlock), definition }
+}
+
+/**
+ * Re-derives every card's `definition` from its `content`.
+ *
+ * The invariant is enforced on the WRITE path (`updateContent` is the single
+ * writer), but nothing enforced it on the way IN — and a `.json` is not
+ * necessarily written by the app. The skill now hands both fields to an LLM to
+ * fill in, which makes a hand-computed projection the most likely source of a
+ * mismatch in the wild; a card could render a stacked fraction on screen while
+ * the quiz, the XMind note and the PDF all repeated a stale line of text.
+ *
+ * Reconciling at load makes the two agree everywhere, and only ever rewrites
+ * the DERIVED field — `content` is authoritative and untouched.
+ */
+export function reconcileCards(cards: Card[]): Card[] {
+  return cards.map(card => {
+    if (card.content === undefined) return card
+    const derived = blocksToPlainText(contentOf(card))
+    if (derived === (card.definition ?? '')) return card
+
+    const next: Card = { ...card }
+    if (derived === '') delete next.definition
+    else next.definition = derived
+    return next
+  })
 }

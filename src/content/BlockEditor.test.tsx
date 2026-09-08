@@ -52,6 +52,20 @@ describe('convertBlock', () => {
     expect(convertBlock(block, 'math')).toBe(block)
   })
 
+  it('refuses to convert an image away, rather than destroying the asset reference', () => {
+    // Règle 6 says switching mode never destroys content, and there is no mode
+    // that produces an image back — so converting one away is one-way loss.
+    const image: CardBlock = { kind: 'image', asset: 'a3f9.png', alt: 'Schéma', width: 10, height: 5 }
+    expect(convertBlock(image, 'text')).toBe(image)
+    expect(convertBlock(image, 'math')).toBe(image)
+    expect(convertBlock(image, 'table')).toBe(image)
+  })
+
+  it('carries a table’s header across a conversion, not just its rows', () => {
+    const table: CardBlock = { kind: 'table', header: ['FR', 'EN'], rows: [['chien', 'dog']] }
+    expect(convertBlock(table, 'text')).toEqual({ kind: 'text', text: 'FR\tEN\nchien\tdog' })
+  })
+
   it('turns an empty block into a usable table rather than an empty one', () => {
     expect(convertBlock({ kind: 'text', text: '' }, 'table')).toEqual({
       kind: 'table',
@@ -155,6 +169,18 @@ describe('the mode selector follows the right block', () => {
     const blocks = latest()!
     expect(blocks).toHaveLength(2)
     expect(blocks.filter(block => block.kind === 'math')).toHaveLength(1)
+  })
+
+  it('is inert on an image block instead of silently dropping the picture', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([
+      { kind: 'image', asset: 'a3f9.png', alt: 'Schéma', width: 10, height: 5 },
+    ])
+
+    await user.click(screen.getByRole('textbox', { name: /description de l’image/i }))
+    expect(screen.getByRole('button', { name: /^texte$/i })).toBeDisabled()
+
+    expect(latest()).toBeUndefined()
   })
 
   it('creates a block when the list is empty instead of doing nothing', async () => {

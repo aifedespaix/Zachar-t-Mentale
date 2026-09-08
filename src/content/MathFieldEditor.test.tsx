@@ -26,6 +26,10 @@ vi.mock('mathlive', () => {
 describe('MathFieldEditor', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  // The module-level `loaded` flag is set by the first test that mounts the
+  // component, so the "not yet loaded" case has to run FIRST and be the only
+  // one that relies on it. Anything asserting the loaded state waits for it
+  // explicitly rather than assuming a previous test warmed the flag.
   it('shows the fallback field until the editor has loaded', () => {
     render(
       <MathFieldEditor
@@ -65,19 +69,24 @@ describe('MathFieldEditor', () => {
   })
 
   it('never swaps the field while it is mounted, whenever the import resolves', async () => {
-    // Structural, not timing-dependent: replacing a focused element
-    // mid-sentence would destroy the caret and the keystroke in flight.
-    const { rerender } = render(
-      <MathFieldEditor latex="x" onChange={() => {}} ariaLabel="Formule" fallback={<textarea aria-label="Brut" />} />
-    )
-    const first = screen.queryByTestId('math-field')
+    // The previous version of this test compared the same query to itself at
+    // two moments, so it passed even with the regression it was meant to
+    // catch reintroduced. This one mounts BEFORE the import can resolve, and
+    // proves the fallback is still there afterwards — which is false the
+    // instant the component reacts to the load.
+    vi.resetModules()
+    const { MathFieldEditor: Fresh } = await import('./MathFieldEditor')
 
-    await new Promise(resolve => setTimeout(resolve, 20))
-    rerender(
-      <MathFieldEditor latex="y" onChange={() => {}} ariaLabel="Formule" fallback={<textarea aria-label="Brut" />} />
+    render(
+      <Fresh latex="x" onChange={() => {}} ariaLabel="Formule" fallback={<textarea aria-label="Brut" />} />
     )
+    expect(screen.getByRole('textbox', { name: /brut/i })).toBeInTheDocument()
 
-    expect(screen.queryByTestId('math-field') === null).toBe(first === null)
+    // Long enough for the dynamic import to have resolved several times over.
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    expect(screen.getByRole('textbox', { name: /brut/i })).toBeInTheDocument()
+    expect(screen.queryByTestId('math-field')).not.toBeInTheDocument()
   })
 
   it('pushes an external change in without rebuilding the element', async () => {

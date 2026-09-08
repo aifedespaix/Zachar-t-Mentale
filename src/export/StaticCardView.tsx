@@ -4,7 +4,7 @@ import { toCss } from '../colors/contrast'
 import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 import { contentOf } from '../content/blocks'
 import { BlockView } from '../content/BlockView'
-import { ROW_HEIGHT } from '../layout/columns'
+import { DETACHED_ROW_HEIGHT, ROW_HEIGHT } from '../layout/columns'
 
 export const EXPORT_CARD_WIDTH = 260
 export const EXPORT_CARD_HEIGHT = 120
@@ -13,9 +13,13 @@ export const EXPORT_CARD_HEIGHT = 120
  * The hard ceiling on an export card, and the reason the export needs no
  * height-aware pagination.
  *
- * `computeLayout` places rows on a fixed `ROW_HEIGHT` grid and measures
- * nothing, so a card that grows past that pitch silently covers the one below
- * it. Rich content — a tall picture, a long table — makes that easy. Capping
+ * `computeLayout` places rows on a fixed grid and measures nothing, so a card
+ * that grows past the pitch silently covers the one below it. The floating
+ * ("cartes volantes") zone uses a SHORTER pitch than the tree
+ * (`DETACHED_ROW_HEIGHT`, 85% of `ROW_HEIGHT`), so the cap has to clear the
+ * smaller of the two — sizing it off `ROW_HEIGHT` alone left detached cards
+ * overlapping by 9 px. Floored, because `DETACHED_ROW_HEIGHT` is fractional
+ * and a `max-height: 126.79999999999998px` has no business in a stylesheet. Rich content — a tall picture, a long table — makes that easy. Capping
  * here means overlap is impossible AND the existing leaf-count page budget
  * stays correct, so `computeLayout` and `paginateForExport` are untouched.
  *
@@ -24,7 +28,7 @@ export const EXPORT_CARD_HEIGHT = 120
  * belongs to the separate « fiche de révision » format, which deliberately
  * lets cards grow.
  */
-export const EXPORT_CARD_MAX_HEIGHT = ROW_HEIGHT - 16
+export const EXPORT_CARD_MAX_HEIGHT = Math.floor(Math.min(ROW_HEIGHT, DETACHED_ROW_HEIGHT)) - 16
 
 export interface StaticCardViewProps {
   card: Card

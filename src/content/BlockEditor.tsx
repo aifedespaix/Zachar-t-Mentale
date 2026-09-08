@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Type, Sigma, Table2, Plus, Trash2, ImagePlus } from 'lucide-react'
 import type { CardBlock, CardBlockKind } from '../types/cardBlock'
 import { renderMathToHtml } from './renderMath'
@@ -26,7 +26,12 @@ function sourceOf(block: CardBlock): string {
     case 'image':
       return block.alt
     case 'table':
-      return block.rows.map(row => row.join('\t')).join('\n')
+      // Header included: dropping it loses a row of the user's data, and a
+      // header is text like any other cell once flattened.
+      return [block.header, ...block.rows]
+        .filter(row => row.length > 0)
+        .map(row => row.join('\t'))
+        .join('\n')
   }
 }
 
@@ -40,6 +45,12 @@ function sourceOf(block: CardBlock): string {
  */
 export function convertBlock(block: CardBlock, kind: Exclude<CardBlockKind, 'image'>): CardBlock {
   if (block.kind === kind) return block
+  // An image cannot round-trip: there is no mode that produces one back, so
+  // converting it away would destroy the asset reference for good (the file
+  // itself would linger, orphaned). Refusing is the only behaviour consistent
+  // with "switching mode never destroys content" — the user deletes the block
+  // if they want it gone.
+  if (block.kind === 'image') return block
   const source = sourceOf(block)
   switch (kind) {
     case 'text':
@@ -89,9 +100,16 @@ export function BlockEditor({
     onChange(blocks.map((existing, i) => (i === index ? block : existing)))
   }
 
+  // Read at call time, never from the closure: the native picker can stay open
+  // for a minute while the user keeps typing, and appending to the block list
+  // as it was when the dialog opened would revert everything typed since.
+  const blocksRef = useRef(blocks)
+  blocksRef.current = blocks
+
   function append(block: CardBlock) {
-    onChange([...blocks, block])
-    setActiveIndex(blocks.length)
+    const current = blocksRef.current
+    onChange([...current, block])
+    setActiveIndex(current.length)
   }
 
   /** Shared by paste, drop and the picker: one place decides what a failure looks like. */
@@ -133,9 +151,12 @@ export function BlockEditor({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }} onPaste={handlePaste}>
-      {/* The selector sits in a row of its own, always present and always the
-          same height, so revealing or changing it never moves the content
-          below (règle anti-décalage 8). */}
+      {/* A row of its own, of fixed height, so CHANGING mode never moves the
+          content below it.
+          Note it is not what règle 8 asks for: that rule wants the selector in
+          the popover's existing « DÉFINITION » header, so that entering edit
+          mode adds nothing. Here it lives inside the editor, so switching to
+          edit does push the blocks down by one row. Worth moving. */}
       <div role="group" aria-label="Mode de saisie" style={{ display: 'flex', gap: 2 }}>
         {MODES.map(({ kind, icon: Icon, label }) => {
           const selected = active?.kind === kind
@@ -145,6 +166,9 @@ export function BlockEditor({
               type="button"
               aria-label={label}
               aria-pressed={selected}
+              // An image block has no text form to convert to, so the selector
+              // is inert on one rather than silently dropping the picture.
+              disabled={active?.kind === 'image'}
               onClick={() => {
                 if (blocks.length === 0) onChange([convertBlock({ kind: 'text', text: '' }, kind)])
                 else replace(activeIndex, convertBlock(blocks[activeIndex], kind))
@@ -160,6 +184,7 @@ export function BlockEditor({
                 border: '1px solid var(--border)',
                 background: selected ? 'var(--accent, rgba(0,0,0,0.08))' : 'transparent',
                 color: 'inherit',
+                opacity: active?.kind === 'image' ? 0.4 : 1,
               }}
             >
               <Icon size={12} />

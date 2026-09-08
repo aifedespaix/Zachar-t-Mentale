@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blocksToPlainText, latexToPlainText, normalizeContent, contentOf } from './blocks'
+import { blocksToPlainText, latexToPlainText, normalizeContent, contentOf, reconcileCards } from './blocks'
 import type { CardBlock } from '../types/cardBlock'
 import type { Card } from '../types/card'
 
@@ -242,5 +242,52 @@ describe('contentOf falls back rather than rendering blank', () => {
   it('uses the definition when every block was unreadable', () => {
     const card = { ...base, content: [{ kind: 'audio', duration: 30 }] as never, definition: '[audio]' }
     expect(contentOf(card)).toEqual([{ kind: 'text', text: '[audio]' }])
+  })
+})
+
+describe('reconcileCards', () => {
+  const base: Card = { id: 'a', level: 2, title: 'T', parentId: 'r', order: 0 }
+
+  it('re-derives a definition that contradicts its content', () => {
+    // The single-writer rule covers the app's own writes; a hand-written or
+    // LLM-generated .json is not one of them.
+    const [card] = reconcileCards([
+      { ...base, content: [{ kind: 'math', latex: 'x^2' }], definition: 'MENSONGE' },
+    ])
+    expect(card.definition).toBe('x²')
+    expect(card.definition).toBe(blocksToPlainText(contentOf(card)))
+  })
+
+  it('leaves a card whose fields already agree untouched, by identity', () => {
+    const ok: Card = { ...base, content: [{ kind: 'math', latex: 'x^2' }], definition: 'x²' }
+    expect(reconcileCards([ok])[0]).toBe(ok)
+  })
+
+  it('never touches a plain-text card', () => {
+    const plain: Card = { ...base, definition: 'Une règle' }
+    expect(reconcileCards([plain])[0]).toBe(plain)
+  })
+
+  it('keeps the definition when the content list is empty, since that IS the content', () => {
+    // `contentOf` falls back to the definition for an empty `content`, so the
+    // two already agree — reconciling must not "fix" them into disagreement.
+    const [card] = reconcileCards([{ ...base, content: [], definition: 'Une règle' }])
+    expect(card.definition).toBe('Une règle')
+    expect(card.definition).toBe(blocksToPlainText(contentOf(card)))
+  })
+
+  it('drops a definition that no surviving block can justify', () => {
+    // Every block unreadable AND no definition to fall back on.
+    const [card] = reconcileCards([
+      { ...base, content: [{ kind: 'image', asset: '' }] as never, definition: '   ' },
+    ])
+    expect('definition' in card).toBe(false)
+  })
+
+  it('does not mutate its input', () => {
+    const input: Card[] = [{ ...base, content: [{ kind: 'math', latex: 'x^2' }], definition: 'faux' }]
+    const before = structuredClone(input)
+    reconcileCards(input)
+    expect(input).toEqual(before)
   })
 })

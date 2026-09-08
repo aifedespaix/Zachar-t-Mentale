@@ -327,9 +327,17 @@ function salvage(entry: unknown): Card | null {
   // its mirror leaves the card invisible to everything that reads the mirror:
   // the quiz's question typing, the XMind note, the export.
   const salvaged = normalizeContent(sanitizeBlocks(entry.content))
-  const definition =
-    salvaged.definition ?? (typeof entry.definition === 'string' ? entry.definition : undefined)
   const content = salvaged.content
+  // When there are blocks, the mirror MUST be derived from them or the two
+  // disagree. With no blocks, the entry's own text is what is left to save —
+  // and it goes through the same normalization, so a whitespace-only
+  // definition is dropped rather than resurrected as a blank card.
+  const definition =
+    content !== undefined
+      ? salvaged.definition
+      : normalizeContent(
+          typeof entry.definition === 'string' ? [{ kind: 'text', text: entry.definition }] : []
+        ).definition
   if (title === '' && definition === undefined && content === undefined) return null
   const card: Card = {
     id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : crypto.randomUUID(),

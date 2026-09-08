@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { StaticCardView, EXPORT_CARD_MAX_HEIGHT } from './StaticCardView'
-import { ROW_HEIGHT } from '../layout/columns'
+import { DETACHED_ROW_HEIGHT, ROW_HEIGHT } from '../layout/columns'
 import type { Card } from '../types/card'
 
 describe('StaticCardView', () => {
@@ -81,12 +81,13 @@ describe('StaticCardView — rich content', () => {
 })
 
 describe('StaticCardView — the height cap that keeps the export grid valid', () => {
-  it('can never grow past the layout row pitch', () => {
-    // `computeLayout` places rows on a fixed ROW_HEIGHT grid and measures
-    // nothing, so a card taller than the pitch silently covers its neighbour.
-    // Capping here is also what lets the existing leaf-count pagination budget
-    // stay correct — see the plan's "simplification" section.
+  it('can never grow past EITHER layout pitch', () => {
+    // `computeLayout` measures nothing, so a card taller than its row pitch
+    // silently covers its neighbour. The floating zone uses a shorter pitch
+    // than the tree, and asserting only against ROW_HEIGHT checked the pitch
+    // that was never at risk.
     expect(EXPORT_CARD_MAX_HEIGHT).toBeLessThan(ROW_HEIGHT)
+    expect(EXPORT_CARD_MAX_HEIGHT).toBeLessThan(DETACHED_ROW_HEIGHT)
   })
 
   it('applies the cap and clips rather than overflowing', () => {

@@ -102,7 +102,12 @@ function App() {
       if (mapPath === null) return
       try {
         const source = { bytes: await readFile(path), mime: mimeForPath(path), name: fileNameOf(path) }
+        // Re-checked AFTER the read: a large file takes long enough for the
+        // user to switch maps, and writing into the old map's sidecar would
+        // leave an orphan file and drop the image on the floor in silence.
+        if (useWorkspaceStore.getState().currentFilePath !== mapPath) return
         const block = await imageBlockFrom(mapPath, source)
+        if (useWorkspaceStore.getState().currentFilePath !== mapPath) return
         const cards = useCardsStore.getState().history.present
         const card = cards.find(entry => entry.id === cardId)
         if (card === undefined) return

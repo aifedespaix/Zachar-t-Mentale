@@ -58,6 +58,37 @@ describe('DefinitionPopover', () => {
     expect(onCommit).not.toHaveBeenCalled()
   })
 
+  it('commits the draft when the popover is closed by clicking away', async () => {
+    // The path most people take. The block rewrite dropped the old field's
+    // commit-on-blur, so every draft was silently discarded unless the user
+    // found the « Terminer » link.
+    const user = userEvent.setup()
+    const onCommit = vi.fn()
+    render(<DefinitionPopover blocks={text('Avant')} locked={false} onCommit={onCommit} />)
+
+    await openPopover(user)
+    await user.click(screen.getByText('Avant'))
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
+    await user.clear(field)
+    await user.type(field, 'Un long paragraphe que je viens de taper')
+    await user.click(document.body)
+
+    expect(onCommit).toHaveBeenCalledWith([
+      { kind: 'text', text: 'Un long paragraphe que je viens de taper' },
+    ])
+  })
+
+  it('does not commit when the popover is closed without an edit in progress', async () => {
+    const user = userEvent.setup()
+    const onCommit = vi.fn()
+    render(<DefinitionPopover blocks={text('Intacte')} locked={false} onCommit={onCommit} />)
+
+    await openPopover(user)
+    await user.click(document.body)
+
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
   it('re-seeds the draft from the card on each edit, so a stale draft cannot be committed later', async () => {
     const user = userEvent.setup()
     const onCommit = vi.fn()

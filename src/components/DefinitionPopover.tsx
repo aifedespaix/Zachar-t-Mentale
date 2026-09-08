@@ -1,5 +1,5 @@
 // src/components/DefinitionPopover.tsx
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Popover as PopoverPrimitive } from 'radix-ui'
 import { AlignLeft } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
@@ -41,6 +41,11 @@ export function DefinitionPopover({
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<CardBlock[]>(blocks)
+  // Escape triggers `cancel()` and then Radix's own close in the same tick, so
+  // `onOpenChange` would still read the pre-Escape `editing` and commit the
+  // draft the user just abandoned. A ref sidesteps React's batching instead of
+  // racing it — the same guard `CardNode` uses for the title field.
+  const cancellingRef = useRef(false)
 
   function startEditing() {
     if (locked) return
@@ -57,6 +62,7 @@ export function DefinitionPopover({
   }
 
   function cancel() {
+    cancellingRef.current = true
     setDraft(blocks)
     setEditing(false)
   }
@@ -66,7 +72,24 @@ export function DefinitionPopover({
       open={open}
       onOpenChange={next => {
         setOpen(next)
-        if (!next) setEditing(false)
+        if (next) {
+          cancellingRef.current = false
+          return
+        }
+        if (cancellingRef.current) {
+          cancellingRef.current = false
+          setEditing(false)
+          return
+        }
+        // Closing the popover COMMITS. Clicking away is how most people leave
+        // an editor, and the block rewrite dropped the old field's
+        // commit-on-blur without replacing it — every draft was silently
+        // thrown away unless the user found the « Terminer » link.
+        //
+        // Escape still cancels: it runs `cancel()` first, which clears
+        // `editing`, so there is nothing left to commit by the time this runs.
+        if (editing) onCommit(draft)
+        setEditing(false)
       }}
     >
       <PopoverPrimitive.Trigger asChild>
@@ -78,11 +101,12 @@ export function DefinitionPopover({
         <PopoverPrimitive.Content
           side="bottom"
           sideOffset={8}
-          onKeyDown={event => {
-            if (event.key === 'Escape' && editing) {
-              event.preventDefault()
-              cancel()
-            }
+          // Radix's own hook, not a bubbling `onKeyDown`: the dismissable
+          // layer closes the popover before a handler on the content would
+          // run, and `onOpenChange` would then commit the draft Escape was
+          // meant to abandon.
+          onEscapeKeyDown={() => {
+            if (editing) cancel()
           }}
           style={{
             // Fixed, not max-content: a three-line formula and a 400px picture

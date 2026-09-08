@@ -1,6 +1,7 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type { Card } from '../types/card'
 import type { CardBlock } from '../types/cardBlock'
+import { reconcileCards } from '../content/blocks'
 import { createHistory, pushState, undo as undoHistory, redo as redoHistory, type History } from './history'
 import {
   createRootCard,
@@ -113,7 +114,10 @@ export function createCardsStore(): CardsStore {
     undo: () => set(state => ({ history: undoHistory(state.history) })),
     redo: () => set(state => ({ history: redoHistory(state.history) })),
     toggleLock: () => set(state => ({ locked: !state.locked })),
-    loadCards: cards => set({ history: createHistory(cards) }),
+    // Reconciled on the way in: `content` is authoritative and `definition` is
+    // its mirror, so a file whose two fields disagree is made consistent
+    // before anything reads it. See `reconcileCards`.
+    loadCards: cards => set({ history: createHistory(reconcileCards(cards)) }),
   }))
 }
 

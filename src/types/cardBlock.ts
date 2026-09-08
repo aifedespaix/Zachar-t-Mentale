@@ -27,5 +27,3 @@ export type CardBlock =
   | { kind: 'table'; header: string[]; rows: string[][] }
 
 export type CardBlockKind = CardBlock['kind']
-
-export const CARD_BLOCK_KINDS: CardBlockKind[] = ['text', 'math', 'image', 'table']

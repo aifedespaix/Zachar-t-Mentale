@@ -272,8 +272,20 @@ describe('the mind maps present in the working copy', () => {
     expect(validateCards(files[path])).toEqual({ valid: true, issues: [] })
   })
 
-  it('is a no-op when no local mind map is present, rather than a failure', () => {
-    expect(paths.every(path => path.endsWith('.json'))).toBe(true)
+  it('validates a map shaped like the ones the app writes, with or without local files', () => {
+    // The glob is gitignored user data, so in CI it is empty and the `it.each`
+    // above runs zero times. This keeps the guarantee it was there for — a map
+    // the app produced must never come back needing repair — on a fixture that
+    // always exists.
+    const produced = [
+      { id: 'r', level: 1, title: 'Chapitre', parentId: null, order: 0 },
+      { id: 'a', level: 2, title: 'Thème', parentId: 'r', order: 0, definition: 'Une règle' },
+      {
+        id: 'b', level: 3, title: 'Exemple', parentId: 'a', order: 0,
+        content: [{ kind: 'math', latex: '\\frac{20}{100}' }], definition: '20/100',
+      },
+    ]
+    expect(validateCards(produced)).toEqual({ valid: true, issues: [] })
   })
 })
 
