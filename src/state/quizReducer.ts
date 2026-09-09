@@ -9,6 +9,7 @@ import type {
   RecallProgress,
 } from '../types/quiz'
 import { contentOf, nonTextKinds } from '../content/blocks'
+import { stripHighlightMarkers } from '../content/highlight'
 
 const DIFFICULTY_SETTINGS: Record<QuizDifficulty, { sampleRatio: number }> = {
   facile: { sampleRatio: 0.2 },
@@ -16,7 +17,6 @@ const DIFFICULTY_SETTINGS: Record<QuizDifficulty, { sampleRatio: number }> = {
   difficile: { sampleRatio: 0.75 },
 }
 
-const HINT_TRUNCATE_RATIO = 0.5
 const MAX_DISTRACTORS = 3
 
 function shuffle<T>(items: T[], random: () => number): T[] {
@@ -94,6 +94,11 @@ function buildDistractorPoolFrom(
     for (const card of shuffle(scope, random)) {
       if (pool.length >= MAX_DISTRACTORS) break
       if (card.id === targetCard.id) continue
+      // A card sharing the target's title is not a wrong answer — its own
+      // definition would be just as valid an answer for that title, since
+      // nothing in the QCM heading disambiguates which branch is meant. See
+      // the duplicate-title bug found on real generated data (design spec).
+      if (card.title === targetCard.title) continue
       const value = pick(card)
       if (!value || seen.has(value)) continue
       seen.add(value)
@@ -122,20 +127,17 @@ export function buildTitleDistractorPool(
   return buildDistractorPoolFrom(cards, targetCard, difficulty, c => c.title, targetCard.title, random)
 }
 
-function truncateAtWordBoundary(text: string, ratio: number): string {
-  const targetLength = Math.max(1, Math.round(text.length * ratio))
-  if (targetLength >= text.length) return text
-  const cut = text.lastIndexOf(' ', targetLength)
-  const truncated = cut > 0 ? text.slice(0, cut) : text.slice(0, targetLength)
-  return `${truncated}…`
-}
-
-/** facile = full definition, moyen = truncated, difficile = no textual hint. */
+/**
+ * facile/moyen = full definition (never truncated — a partial hint used to
+ * cut mid-sentence, which the mission explicitly asked to stop doing);
+ * difficile = no textual hint, position in the tree only. Markers are always
+ * stripped: this string reaches `QcmDialog`'s plain-text hint prop, which has
+ * no rich rendering of its own.
+ */
 function buildHint(card: Card, difficulty: QuizDifficulty): string | undefined {
   if (!card.definition) return undefined
-  if (difficulty === 'facile') return card.definition
-  if (difficulty === 'moyen') return truncateAtWordBoundary(card.definition, HINT_TRUNCATE_RATIO)
-  return undefined
+  if (difficulty === 'difficile') return undefined
+  return stripHighlightMarkers(card.definition)
 }
 
 export function attachDistractors(

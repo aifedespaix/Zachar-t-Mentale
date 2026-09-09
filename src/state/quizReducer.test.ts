@@ -187,6 +187,13 @@ describe('buildDistractorPool', () => {
     expect(pool).not.toContain('Bonne définition')
     expect(pool).toEqual([])
   })
+
+  it('excludes a candidate whose TITLE matches the target — a cross-branch twin title must never supply a "wrong" distractor that would in fact be an equally valid answer', () => {
+    const twinTitleTarget: Card = { id: 'twin-1', level: 3, title: 'Avec calculatrice', definition: 'Méthode A', parentId: 'p1', order: 0 }
+    const twinTitleOther: Card = { id: 'twin-2', level: 3, title: 'Avec calculatrice', definition: 'Méthode B', parentId: 'p2', order: 0 }
+    const pool = buildDistractorPool([twinTitleTarget, twinTitleOther], twinTitleTarget, 'facile')
+    expect(pool).not.toContain('Méthode B')
+  })
 })
 
 describe('buildTitleDistractorPool', () => {
@@ -215,6 +222,16 @@ describe('buildTitleDistractorPool', () => {
     const pool = buildTitleDistractorPool([target], target, 'facile')
     expect(pool).toEqual([])
   })
+
+  it('excludes a candidate whose title matches the target even when its own definition/id differ from a plain string match', () => {
+    // buildTitleDistractorPool already excludes same-title candidates because
+    // the pool's identity IS the title — this test locks that behaviour in
+    // explicitly so a future refactor of the exclusion logic cannot drop it.
+    const twinA: Card = { id: 'twin-a', level: 3, title: 'Avec calculatrice', parentId: 'p1', order: 0 }
+    const twinB: Card = { id: 'twin-b', level: 3, title: 'Avec calculatrice', parentId: 'p2', order: 0 }
+    const pool = buildTitleDistractorPool([twinA, twinB], twinA, 'facile')
+    expect(pool).toEqual([])
+  })
 })
 
 describe('attachDistractors', () => {
@@ -238,13 +255,16 @@ describe('attachDistractors', () => {
     expect(questions).toEqual([{ cardId: 'a', type: 'qcm-title', distractorTitles: ['B'], hint: 'Def A' }])
   })
 
-  it('truncates the hint for "moyen" qcm-title', () => {
-    const longDef: Card = { ...cardWithDef, definition: 'Un long texte de définition pour vérifier la troncature' }
+  it('shows the FULL definition as the hint for "moyen" qcm-title — no more truncation', () => {
+    const longDef: Card = { ...cardWithDef, definition: 'Un long texte de définition pour vérifier qu\'il n\'est plus tronqué' }
     const questions = attachDistractors([longDef, otherWithDef], [{ cardId: 'a', type: 'qcm-title' }], 'moyen')
-    const [question] = questions
-    expect(question.type).toBe('qcm-title')
-    expect(question.hint).toMatch(/…$/)
-    expect(question.hint!.length).toBeLessThan(longDef.definition!.length)
+    expect(questions[0].hint).toBe(longDef.definition)
+  })
+
+  it('strips **keyword** markers from the qcm-title hint — the quiz never shows raw asterisks or colour', () => {
+    const marked: Card = { ...cardWithDef, definition: 'Le **signe** dépend de la distance à zéro.' }
+    const questions = attachDistractors([marked, otherWithDef], [{ cardId: 'a', type: 'qcm-title' }], 'facile')
+    expect(questions[0].hint).toBe('Le signe dépend de la distance à zéro.')
   })
 
   it('gives no hint for "difficile" qcm-title even when a definition exists', () => {
