@@ -89,6 +89,8 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
   // other menu close (Escape, another item, clicking outside).
   const renamingViaMenuRef = useRef(false)
 
+  const formatValid = useMindMapFormatValid(node.type === 'mindmap' ? node.path : null)
+
   const indent = { paddingLeft: 8 + depth * 16 }
 
   /**
@@ -389,7 +391,6 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
 
   if (node.type === 'mindmap') {
     const isActive = node.path === currentFilePath
-    const formatValid = useMindMapFormatValid(node.path)
     return (
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <ContextMenu>

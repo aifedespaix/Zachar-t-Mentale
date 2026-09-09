@@ -22,9 +22,9 @@ async function cacheFilePath(): Promise<string> {
  * cache file break startup.
  */
 export async function loadMindMapFormatCache(): Promise<MindMapFormatCache> {
-  const path = await cacheFilePath()
-  if (!(await exists(path))) return {}
   try {
+    const path = await cacheFilePath()
+    if (!(await exists(path))) return {}
     const json = await readTextFile(path)
     return JSON.parse(json) as MindMapFormatCache
   } catch {

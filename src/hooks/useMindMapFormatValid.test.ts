@@ -29,6 +29,12 @@ describe('useMindMapFormatValid', () => {
   })
   afterEach(() => vi.useRealTimers())
 
+  it('returns undefined and performs no IPC when path is null', () => {
+    const { result } = renderHook(() => useMindMapFormatValid(null))
+    expect(result.current).toBeUndefined()
+    expect(stat).not.toHaveBeenCalled()
+  })
+
   it('starts pending (undefined) before the check resolves', () => {
     vi.mocked(stat).mockReturnValue(new Promise(() => {}))
     const { result } = renderHook(() => useMindMapFormatValid('/cours/chapitre1.zmap'))

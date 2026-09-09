@@ -31,7 +31,7 @@ function scheduleSave() {
   if (saveTimeout) clearTimeout(saveTimeout)
   saveTimeout = setTimeout(() => {
     saveTimeout = undefined
-    if (cache !== null) void saveMindMapFormatCache(cache)
+    if (cache !== null) void saveMindMapFormatCache(cache).catch(() => {})
   }, SAVE_DEBOUNCE_MS)
 }
 
@@ -68,17 +68,26 @@ async function checkMindMapFormat(path: string): Promise<boolean> {
 /**
  * Whether `path` is a well-formed mind map — `undefined` while the check is
  * still pending, so a caller can show a neutral default and upgrade the
- * icon once this resolves, never blocking the row's first render.
+ * icon once this resolves, never blocking the row's first render. Pass
+ * `null` for a row that isn't a mind map (e.g. a folder) — this keeps the
+ * hook called unconditionally on every render while performing no IPC and
+ * always returning `undefined`.
  */
-export function useMindMapFormatValid(path: string): boolean | undefined {
+export function useMindMapFormatValid(path: string | null): boolean | undefined {
   const [valid, setValid] = useState<boolean | undefined>(undefined)
 
   useEffect(() => {
+    if (path === null) {
+      setValid(undefined)
+      return
+    }
     let cancelled = false
     setValid(undefined)
-    checkMindMapFormat(path).then(result => {
-      if (!cancelled) setValid(result)
-    })
+    checkMindMapFormat(path)
+      .catch(() => false)
+      .then(result => {
+        if (!cancelled) setValid(result)
+      })
     return () => {
       cancelled = true
     }

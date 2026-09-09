@@ -42,6 +42,12 @@ describe('loadMindMapFormatCache', () => {
     const cache = await loadMindMapFormatCache()
     expect(cache).toEqual({})
   })
+
+  it('returns an empty cache instead of throwing when the app config dir cannot be resolved', async () => {
+    vi.mocked(exists).mockRejectedValue(new Error('permission denied'))
+    const cache = await loadMindMapFormatCache()
+    expect(cache).toEqual({})
+  })
 })
 
 describe('saveMindMapFormatCache', () => {
