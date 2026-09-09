@@ -37,6 +37,7 @@ vi.mock('./persistence/sessionState', () => ({
   loadSessionState: vi.fn(),
   saveSessionState: vi.fn(),
 }))
+vi.mock('./hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
 
 import { loadMindMap, saveMindMap, mindMapExists } from './persistence/fileStore'
 import { CORRUPTED_MAP_MESSAGE } from './components/CorruptedMapDialog'

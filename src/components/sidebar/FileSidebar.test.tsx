@@ -19,6 +19,7 @@ vi.mock('../../persistence/sessionState', () => ({
   loadSessionState: vi.fn(),
   saveSessionState: vi.fn(),
 }))
+vi.mock('../../hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
 
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../../persistence/workspaceConfig'
 import { scanFolder } from '../../persistence/fileTree'
