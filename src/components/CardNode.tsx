@@ -239,8 +239,7 @@ export function CardNode({ data }: CardNodeProps) {
 
   // The shape of the answer, drawn on the card itself: same letters as the
   // answer dialog will show, so the card is a genuine preview of the question
-  // rather than a separate riddle. Only for typed answers — on a multiple
-  // choice it would narrow the four options down for free.
+  // rather than a separate riddle.
   // Same aid on recall, qcm-title AND qcm-media-title — the mission asked
   // for the letter-count hint to stay systematic across every Sens A
   // variant, not just recall. QCM questions have no retries, so
@@ -828,9 +827,7 @@ export function CardNode({ data }: CardNodeProps) {
       */}
       {!quizActive && (
       <TooltipProvider>
-        <span style={{ position: 'relative' }}>
-          <FicheBadge card={card} locked={locked} active={ficheOpen} borderColor={toCss(colors.border)} onActivate={openDescription} />
-        </span>
+        <FicheBadge card={card} locked={locked} active={ficheOpen} borderColor={toCss(colors.border)} onActivate={openDescription} />
 
         {/* `margin-top: auto` in the card's flex column keeps this pinned to
             the bottom of the card regardless of title length. */}
@@ -896,6 +893,13 @@ export function CardNode({ data }: CardNodeProps) {
           }
           hint={quiz.type === 'qcm-title' ? quiz.hint : undefined}
           hintNode={
+            // `quiz.hint !== undefined` is a proxy for "difficulty allows a hint",
+            // since `buildHint` returns undefined exactly on difficulty
+            // "difficile" or when the card has no definition at all. A media
+            // card whose plain-text mirror happens to be empty (e.g. a table
+            // with no header/rows) also gets `hint === undefined` and loses its
+            // media hint even at "facile"/"moyen" — a rare, degenerate case not
+            // worth a separate flag.
             quiz.type === 'qcm-media-title' && quiz.hint !== undefined ? (
               <BlockView blocks={contentOf(card)} resolveAsset={resolveAsset} highlightKeywords={false} />
             ) : undefined

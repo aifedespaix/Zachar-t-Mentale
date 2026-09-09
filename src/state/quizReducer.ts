@@ -1,4 +1,4 @@
-import type { Card } from '../types/card'
+import type { Card, CardKind } from '../types/card'
 import type {
   QuizConfig,
   QuizDifficulty,
@@ -37,6 +37,11 @@ function shuffle<T>(items: T[], random: () => number): T[] {
  */
 function isMediaCard(card: Card): boolean {
   return card.kind === 'media' && nonTextKinds(contentOf(card)).length > 0
+}
+
+/** Coarse content-shape bucket for distractor scoping — see `buildDistractorPoolFrom`. */
+function kindOf(card: Card): CardKind {
+  return card.kind === 'media' ? 'media' : 'definition'
 }
 
 export function selectQuizQuestions(
@@ -79,33 +84,57 @@ function distractorScopes(cards: Card[], targetCard: Card, difficulty: QuizDiffi
   return scopesByDifficulty[difficulty]
 }
 
-/** Shared branch->level->whole-map degradation, parameterized over which text field to pool. */
+/**
+ * Shared branch->level->whole-map degradation, parameterized over which text
+ * field to pool. `preferKind`, when given, runs the scope-iteration loop
+ * twice: first restricted to cards whose `kindOf` matches the target's (so a
+ * `qcm-media` question never mixes in a plain-text definition card as a
+ * distractor, and vice versa), then — only if that pass didn't fill the pool
+ * — unrestricted, still respecting the same exclusions (self, same-title,
+ * already-seen value) and never re-adding a value the first pass already
+ * used. Without this, options end up distinguishable by SHAPE alone (a
+ * typeset table/formula among plain paragraphs) rather than by content — the
+ * exact "emballage" failure this feature exists to eliminate (see the design
+ * spec's duplicate-title investigation and the `**keyword**`-stripping rule).
+ * `buildTitleDistractorPool` passes no `preferKind`: title pools are an
+ * identity key, not content-shaped, so they are not affected by this bug.
+ */
 function buildDistractorPoolFrom(
   cards: Card[],
   targetCard: Card,
   difficulty: QuizDifficulty,
   pick: (card: Card) => string | undefined,
   exclude: string,
-  random: () => number
+  random: () => number,
+  preferKind?: CardKind
 ): string[] {
   const seen = new Set<string>([exclude])
   const pool: string[] = []
-  for (const scope of distractorScopes(cards, targetCard, difficulty)) {
-    for (const card of shuffle(scope, random)) {
+  const scopes = distractorScopes(cards, targetCard, difficulty)
+
+  function runPass(kindFilter: CardKind | undefined) {
+    for (const scope of scopes) {
+      for (const card of shuffle(scope, random)) {
+        if (pool.length >= MAX_DISTRACTORS) break
+        if (card.id === targetCard.id) continue
+        // A card sharing the target's title is not a wrong answer — its own
+        // definition would be just as valid an answer for that title, since
+        // nothing in the QCM heading disambiguates which branch is meant. See
+        // the duplicate-title bug found on real generated data (design spec).
+        if (card.title === targetCard.title) continue
+        if (kindFilter !== undefined && kindOf(card) !== kindFilter) continue
+        const value = pick(card)
+        if (!value || seen.has(value)) continue
+        seen.add(value)
+        pool.push(value)
+      }
       if (pool.length >= MAX_DISTRACTORS) break
-      if (card.id === targetCard.id) continue
-      // A card sharing the target's title is not a wrong answer — its own
-      // definition would be just as valid an answer for that title, since
-      // nothing in the QCM heading disambiguates which branch is meant. See
-      // the duplicate-title bug found on real generated data (design spec).
-      if (card.title === targetCard.title) continue
-      const value = pick(card)
-      if (!value || seen.has(value)) continue
-      seen.add(value)
-      pool.push(value)
     }
-    if (pool.length >= MAX_DISTRACTORS) break
   }
+
+  if (preferKind !== undefined) runPass(preferKind)
+  if (pool.length < MAX_DISTRACTORS) runPass(undefined)
+
   return pool
 }
 
@@ -115,7 +144,15 @@ export function buildDistractorPool(
   difficulty: QuizDifficulty,
   random: () => number = Math.random
 ): string[] {
-  return buildDistractorPoolFrom(cards, targetCard, difficulty, c => c.definition, targetCard.definition ?? '', random)
+  return buildDistractorPoolFrom(
+    cards,
+    targetCard,
+    difficulty,
+    c => c.definition,
+    targetCard.definition ?? '',
+    random,
+    kindOf(targetCard)
+  )
 }
 
 export function buildTitleDistractorPool(

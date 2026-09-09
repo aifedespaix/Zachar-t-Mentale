@@ -196,7 +196,7 @@ Chaque card devient une question. Une carte mentale bien structurée mais
 écrite sans y penser produit un quiz incohérent — c'est la principale cause
 de quiz inutilisables, et ça ne se voit qu'à l'usage.
 
-L'app pose trois types de questions, et chacune impose une contrainte
+L'app pose cinq types de questions, et chacune impose une contrainte
 différente sur ce qui est écrit :
 
 | Question | Ce que l'app montre | Ce que l'utilisateur fournit | Déclenchée quand |

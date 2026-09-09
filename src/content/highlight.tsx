@@ -26,7 +26,10 @@ export function renderHighlighted(text: string): ReactNode[] {
     nodes.push(
       <mark
         key={key++}
-        style={{ background: 'transparent', color: 'oklch(0.55 0.18 40)', fontWeight: 600 }}
+        // `--highlight-color` carries a light/dark pair (src/index.css) —
+        // the light-mode value alone read as dull, low-contrast rust
+        // against a dark canvas.
+        style={{ background: 'transparent', color: 'var(--highlight-color)', fontWeight: 600 }}
       >
         {match[1]}
       </mark>

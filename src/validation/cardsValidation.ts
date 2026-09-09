@@ -80,6 +80,11 @@ function isUsableCardRecord(value: unknown): value is Card {
   if (value.detached !== undefined && typeof value.detached !== 'boolean') return false
   if (value.definition !== undefined && typeof value.definition !== 'string') return false
   if (value.icon !== undefined && typeof value.icon !== 'string') return false
+  // Deliberately no check for `kind`: an unknown/malformed value is not a
+  // structural problem, it degrades gracefully to `'definition'`-style quiz
+  // routing at question-selection time (see `quizReducer.ts`'s `isMediaCard`),
+  // the same way an unrecognised block kind degrades elsewhere in this file —
+  // no new category belongs in this validator for that.
   // Only the shape of the container is checked here. Per-block problems are
   // NOT fatal: `contentOf` degrades an unknown kind to text and drops a
   // malformed payload at render time, so a card carrying one block written by

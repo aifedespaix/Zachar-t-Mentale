@@ -194,6 +194,30 @@ describe('buildDistractorPool', () => {
     const pool = buildDistractorPool([twinTitleTarget, twinTitleOther], twinTitleTarget, 'facile')
     expect(pool).not.toContain('Méthode B')
   })
+
+  it('prefers same-kind (media) candidates for a media target, excluding a plain-text definition card once the same-kind pool alone fills to the max — a mixed pool would be distinguishable by SHAPE (typeset vs plain) rather than content', () => {
+    const mediaTarget: Card = { id: 'target', level: 3, title: 'Cible média', kind: 'media', definition: 'Def média cible', parentId: 'p1', order: 0 }
+    const mediaCandidates: Card[] = Array.from({ length: 3 }, (_, i) => ({
+      id: `media-${i}`,
+      level: 3,
+      title: `Média ${i}`,
+      kind: 'media',
+      definition: `Def média ${i}`,
+      parentId: 'p1',
+      order: i + 1,
+    }))
+    const textCandidate: Card = { id: 'text', level: 3, title: 'Texte', definition: 'Def texte', parentId: 'p1', order: 10 }
+    const pool = buildDistractorPool([mediaTarget, ...mediaCandidates, textCandidate], mediaTarget, 'facile')
+    expect(pool.sort()).toEqual(['Def média 0', 'Def média 1', 'Def média 2'].sort())
+    expect(pool).not.toContain('Def texte')
+  })
+
+  it('falls back to the mixed pool (rather than coming back empty) when only cross-kind candidates exist', () => {
+    const mediaTarget: Card = { id: 'target', level: 3, title: 'Cible média', kind: 'media', definition: 'Def média cible', parentId: 'p1', order: 0 }
+    const textCandidate: Card = { id: 'text', level: 3, title: 'Texte', definition: 'Def texte', parentId: 'p1', order: 1 }
+    const pool = buildDistractorPool([mediaTarget, textCandidate], mediaTarget, 'facile')
+    expect(pool).toEqual(['Def texte'])
+  })
 })
 
 describe('buildTitleDistractorPool', () => {

@@ -1084,4 +1084,35 @@ describe('CardNode — rich QCM options', () => {
     expect(within(screen.getByRole('dialog')).getByText('Bonne définition')).toBeInTheDocument()
     expect(document.querySelector('.katex')).toBeNull()
   })
+
+  it('never shows a QCM option with raw **marker** asterisks or a coloured <mark> — both the plain-string fallback and the rich BlockView branch strip highlight markup', async () => {
+    const user = userEvent.setup()
+    const target: Card = { ...testCard, definition: 'Le **mot** clé.' }
+    const richDistractor: Card = {
+      id: 'rich',
+      level: 2,
+      title: 'Distracteur riche',
+      parentId: testCard.parentId,
+      order: 1,
+      content: [{ kind: 'text', text: 'Une **valeur** typique.' }],
+      definition: 'Une **valeur** typique.',
+    }
+    resetStore([target, richDistractor])
+    renderCardNode(target, false, false, {
+      type: 'qcm-definition',
+      result: 'unanswered',
+      distractorDefinitions: ['Une **valeur** typique.'],
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+
+    const dialogElement = screen.getByRole('dialog')
+    const dialog = within(dialogElement)
+    // Plain-string fallback branch (target has no `content`).
+    expect(dialog.getByText('Le mot clé.')).toBeInTheDocument()
+    // Rich BlockView branch (distractor has `content`).
+    expect(dialog.getByText('Une valeur typique.')).toBeInTheDocument()
+    expect(dialogElement.querySelector('mark')).toBeNull()
+    expect(dialogElement.textContent).not.toContain('*')
+  })
 })

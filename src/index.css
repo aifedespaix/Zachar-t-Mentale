@@ -73,6 +73,8 @@
   --scrollbar-thumb: oklch(0.8 0 0);
   --scrollbar-thumb-hover: oklch(0.65 0 0);
   --scrollbar-track: transparent;
+  /* `**keyword**` highlight in a card's definition (src/content/highlight.tsx). */
+  --highlight-color: oklch(0.55 0.18 40);
 }
 
 @theme inline {
@@ -168,6 +170,9 @@
   --scrollbar-thumb: oklch(0.38 0 0);
   --scrollbar-thumb-hover: oklch(0.52 0 0);
   --scrollbar-track: transparent;
+  /* Lighter + slightly less saturated than the light-mode value: the same
+     oklch(0.55 ...) reads as dull, low-contrast rust against a dark canvas. */
+  --highlight-color: oklch(0.75 0.15 40);
 }
 
 @layer base {

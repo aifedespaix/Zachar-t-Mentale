@@ -1,5 +1,6 @@
 import JSZip from 'jszip'
 import type { Card } from '../types/card'
+import { stripHighlightMarkers } from '../content/highlight'
 
 interface XmindTopicOut {
   id: string
@@ -12,7 +13,9 @@ interface XmindTopicOut {
 function toTopic(cards: Card[], card: Card): XmindTopicOut {
   const children = cards.filter(c => c.parentId === card.id && !c.detached).sort((a, b) => a.order - b.order)
   const topic: XmindTopicOut = { id: card.id, class: 'topic', title: card.title }
-  if (card.definition) topic.notes = { plain: { content: card.definition } }
+  // XMind has no way to render the colour a `**word**` marker signals in-app,
+  // so a raw marker would leak as literal asterisks into the exported note.
+  if (card.definition) topic.notes = { plain: { content: stripHighlightMarkers(card.definition) } }
   if (children.length > 0) topic.children = { attached: children.map(child => toTopic(cards, child)) }
   return topic
 }
