@@ -26,11 +26,18 @@ vi.mock('@xyflow/react', async importOriginal => {
   }
 })
 
-vi.mock('../export/exportMindMap', () => ({
-  exportToPdfBytes: vi.fn(async () => new Uint8Array([1])),
-  exportToImageDataUrls: vi.fn(async () => ['data:image/png;base64,AA==']),
-}))
-vi.mock('../xmind/exportXmind', () => ({ writeXmindFile: vi.fn(async () => new Uint8Array([2])) }))
+vi.mock('../export/exportMindMap', async importOriginal => {
+  const actual = await importOriginal<typeof import('../export/exportMindMap')>()
+  return {
+    ...actual,
+    exportToPdfBytes: vi.fn(async () => new Uint8Array([1])),
+    exportToImageDataUrls: vi.fn(async () => ['data:image/png;base64,AA==']),
+  }
+})
+vi.mock('../xmind/exportXmind', async importOriginal => {
+  const actual = await importOriginal<typeof import('../xmind/exportXmind')>()
+  return { ...actual, writeXmindFile: vi.fn(async () => new Uint8Array([2])) }
+})
 vi.mock('../persistence/exportIO', async importOriginal => {
   const actual = await importOriginal<typeof import('../persistence/exportIO')>()
   return { ...actual, saveBytesAs: vi.fn(async () => '/out/carte-mentale.pdf') }
@@ -401,6 +408,15 @@ describe('MindMapCanvas — context menu', () => {
     expect(await screen.findByRole('menuitem', { name: /créer une carte volante/i })).toBeInTheDocument()
   })
 
+  it('opens on right-click on a card too, not just the canvas background', async () => {
+    render(<MindMapCanvas />)
+    // The card's own outer element, not its (always-mounted) title textarea —
+    // that textarea stops this event from propagating (see CardNode.tsx), so
+    // this proves the fix didn't also kill the app's own menu on cards.
+    fireEvent.contextMenu(screen.getByTestId('card-child'))
+    expect(await screen.findByRole('menuitem', { name: /créer une carte volante/i })).toBeInTheDocument()
+  })
+
   it('creates a floating card', async () => {
     const user = userEvent.setup()
     const { container } = render(<MindMapCanvas />)
@@ -466,6 +482,27 @@ describe('MindMapCanvas — context menu', () => {
     await waitFor(() =>
       expect(saveBytesAs).toHaveBeenCalledWith(new Uint8Array([1]), 'chapitre1.pdf', [
         { name: 'PDF', extensions: ['pdf'] },
+      ])
+    )
+  })
+
+  it('exports to Image via the submenu, using the workspace file name', async () => {
+    const user = userEvent.setup()
+    useWorkspaceStore.setState({ currentFilePath: '/cours/chapitre1.zmap' })
+    const { container } = render(<MindMapCanvas />)
+    openMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: /exporter/i }))
+    // See the PDF export test above for why this is `fireEvent.click`.
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Image' }))
+    expect(exportToImageDataUrls).toHaveBeenCalledWith(useCardsStore.getState().history.present, {
+      showDefinitions: true,
+      includeDetached: true,
+      mindMapPath: '/cours/chapitre1.zmap',
+    })
+    // The mocked data URL 'data:image/png;base64,AA==' decodes to one byte, 0.
+    await waitFor(() =>
+      expect(saveBytesAs).toHaveBeenCalledWith(new Uint8Array([0]), 'chapitre1.png', [
+        { name: 'Image PNG', extensions: ['png'] },
       ])
     )
   })

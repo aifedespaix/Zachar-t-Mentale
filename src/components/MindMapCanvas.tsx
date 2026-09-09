@@ -584,7 +584,11 @@ function MindMapCanvasInner() {
       </ContextMenu>
 
       {exportError && (
-        <div role="alert" className="status-banner">
+        <div
+          role="alert"
+          className="status-banner"
+          style={{ position: 'absolute', top: 8, left: 8, right: 8, bottom: 'auto', zIndex: 5 }}
+        >
           <span style={{ flex: 1 }}>{exportError}</span>
           <Button
             variant="ghost"

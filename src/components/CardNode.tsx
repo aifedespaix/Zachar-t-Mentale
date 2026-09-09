@@ -551,6 +551,11 @@ export function CardNode({ data }: CardNodeProps) {
               onFocus={handleTitleFocus}
               onChange={e => setDraftTitle(e.target.value)}
               onBlur={commitTitle}
+              // Stops the right-click from reaching the canvas's context menu
+              // (MindMapCanvas.tsx wraps the whole ReactFlow surface in one),
+              // so a right-click here still opens the WebView's native
+              // Cut/Copy/Paste menu instead of "Créer une carte volante".
+              onContextMenu={e => e.stopPropagation()}
               onKeyDown={e => {
                 // The title has no manual line breaks — it wraps by width alone,
                 // same as the export's plain block text — so Enter still commits
@@ -841,6 +846,9 @@ export function CardNode({ data }: CardNodeProps) {
           value={draftDefinition}
           onChange={e => setDraftDefinition(e.target.value)}
           onBlur={commitDefinition}
+          // See the title textarea above: keeps the native Cut/Copy/Paste menu
+          // available here too, instead of the canvas's context menu.
+          onContextMenu={e => e.stopPropagation()}
           onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
