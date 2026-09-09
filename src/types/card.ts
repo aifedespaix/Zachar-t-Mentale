@@ -2,6 +2,8 @@ import type { CardBlock } from './cardBlock'
 
 export type CardLevel = 1 | 2 | 3 | 4
 
+export type CardKind = 'definition' | 'media'
+
 export interface Card {
   id: string
   level: CardLevel
@@ -41,6 +43,13 @@ export interface Card {
    * at all rather than breaking the card. See `src/content/icons.ts`.
    */
   icon?: string
+  /**
+   * Absent means `'definition'` — every card written before this field
+   * existed keeps behaving exactly as it does today, no migration needed.
+   * `'media'` tells the quiz not to treat this card's `definition` mirror as
+   * a real definition to recognise from its title (see `quizReducer.ts`).
+   */
+  kind?: CardKind
 }
 
 /**

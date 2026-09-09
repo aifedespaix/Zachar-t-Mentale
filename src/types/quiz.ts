@@ -11,16 +11,16 @@ export interface QuizConfig {
   qcmMode: boolean
 }
 
-export type QuizQuestionType = 'recall' | 'qcm-definition' | 'qcm-title'
+export type QuizQuestionType = 'recall' | 'qcm-definition' | 'qcm-title' | 'qcm-media' | 'qcm-media-title'
 
 export interface QuizQuestion {
   cardId: string
   type: QuizQuestionType
-  /** qcm-definition only. */
+  /** qcm-definition / qcm-media only. */
   distractorDefinitions?: string[]
-  /** qcm-title only. */
+  /** qcm-title / qcm-media-title only. */
   distractorTitles?: string[]
-  /** qcm-title only; absent means "no textual hint, context of the graph only". */
+  /** qcm-title / qcm-media-title only; absent means "no textual hint, context of the graph only". */
   hint?: string
 }
 

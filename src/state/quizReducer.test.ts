@@ -90,6 +90,53 @@ describe('selectQuizQuestions', () => {
     const questions = selectQuizQuestions([root, ...makeLevel2(2)], baseConfig({ levels: [3], difficulty: 'facile' }))
     expect(questions).toEqual([])
   })
+
+  it('types a media card as "qcm-media" in normal mode', () => {
+    const media: Card = {
+      id: 'm',
+      level: 1,
+      title: 'Tableau des unités',
+      parentId: null,
+      order: 0,
+      kind: 'media',
+      content: [{ kind: 'table', header: ['Unité'], rows: [['m']] }],
+      definition: 'Unité\nm',
+    }
+    const questions = selectQuizQuestions([media], baseConfig({ levels: [1], difficulty: 'difficile' }))
+    expect(questions).toEqual([{ cardId: 'm', type: 'qcm-media' }])
+  })
+
+  it('types a media card as "qcm-media-title" when qcmMode is on', () => {
+    const media: Card = {
+      id: 'm',
+      level: 1,
+      title: 'Tableau des unités',
+      parentId: null,
+      order: 0,
+      kind: 'media',
+      content: [{ kind: 'table', header: ['Unité'], rows: [['m']] }],
+      definition: 'Unité\nm',
+    }
+    const questions = selectQuizQuestions(
+      [media],
+      baseConfig({ levels: [1], difficulty: 'difficile', qcmMode: true })
+    )
+    expect(questions).toEqual([{ cardId: 'm', type: 'qcm-media-title' }])
+  })
+
+  it('degrades a "media" card with no non-text block back to normal definition/recall routing', () => {
+    const fakeMedia: Card = {
+      id: 'm',
+      level: 1,
+      title: 'Pas vraiment un média',
+      parentId: null,
+      order: 0,
+      kind: 'media',
+      definition: 'Juste du texte, aucun bloc table/math/image.',
+    }
+    const questions = selectQuizQuestions([fakeMedia], baseConfig({ levels: [1], difficulty: 'difficile' }))
+    expect(questions).toEqual([{ cardId: 'm', type: 'qcm-definition' }])
+  })
 })
 
 describe('buildDistractorPool', () => {

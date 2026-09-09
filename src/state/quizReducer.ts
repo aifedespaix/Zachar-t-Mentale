@@ -8,6 +8,7 @@ import type {
   QuizScore,
   RecallProgress,
 } from '../types/quiz'
+import { contentOf, nonTextKinds } from '../content/blocks'
 
 const DIFFICULTY_SETTINGS: Record<QuizDifficulty, { sampleRatio: number }> = {
   facile: { sampleRatio: 0.2 },
@@ -25,6 +26,17 @@ function shuffle<T>(items: T[], random: () => number): T[] {
     ;[copy[i], copy[j]] = [copy[j], copy[i]]
   }
   return copy
+}
+
+/**
+ * A card only gets media-flavoured questions when it actually has media —
+ * `kind: 'media'` on a card with no non-text block degrades back to the
+ * normal definition/recall routing rather than blocking anything, the same
+ * way an unknown icon name or a malformed block degrades elsewhere in this
+ * codebase instead of failing.
+ */
+function isMediaCard(card: Card): boolean {
+  return card.kind === 'media' && nonTextKinds(contentOf(card)).length > 0
 }
 
 export function selectQuizQuestions(
@@ -46,6 +58,9 @@ export function selectQuizQuestions(
   }
 
   return drawn.map(card => {
+    if (isMediaCard(card)) {
+      return { cardId: card.id, type: (config.qcmMode ? 'qcm-media-title' : 'qcm-media') as QuizQuestionType }
+    }
     if (config.qcmMode) return { cardId: card.id, type: 'qcm-title' as QuizQuestionType }
     const type: QuizQuestionType = card.definition ? 'qcm-definition' : 'recall'
     return { cardId: card.id, type }
