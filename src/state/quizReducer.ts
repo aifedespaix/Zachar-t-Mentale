@@ -152,13 +152,13 @@ export function attachDistractors(
     // recall rather than returning the original, unmodified question.
     if (!card) return { cardId: question.cardId, type: 'recall' }
 
-    if (question.type === 'qcm-definition') {
+    if (question.type === 'qcm-definition' || question.type === 'qcm-media') {
       const pool = buildDistractorPool(cards, card, difficulty, random)
       if (pool.length === 0) return { cardId: question.cardId, type: 'recall' }
       return { ...question, distractorDefinitions: pool }
     }
 
-    if (question.type === 'qcm-title') {
+    if (question.type === 'qcm-title' || question.type === 'qcm-media-title') {
       const pool = buildTitleDistractorPool(cards, card, difficulty, random)
       if (pool.length === 0) return { cardId: question.cardId, type: 'recall' }
       return { ...question, distractorTitles: pool, hint: buildHint(card, difficulty) }

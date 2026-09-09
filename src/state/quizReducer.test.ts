@@ -240,6 +240,33 @@ describe('attachDistractors', () => {
   const cardNoDef: Card = { id: 'c', level: 1, title: 'C', parentId: null, order: 0 }
   const otherNoDef: Card = { id: 'd', level: 2, title: 'D', parentId: 'c', order: 0 }
 
+  it('fills distractorDefinitions for a qcm-media question, same pool logic as qcm-definition', () => {
+    const mediaA: Card = { id: 'a', level: 1, title: 'A', kind: 'media', definition: 'Def média A', parentId: null, order: 0 }
+    const mediaB: Card = { id: 'b', level: 2, title: 'B', kind: 'media', definition: 'Def média B', parentId: 'a', order: 0 }
+    const questions = attachDistractors([mediaA, mediaB], [{ cardId: 'a', type: 'qcm-media' }], 'facile')
+    expect(questions).toEqual([{ cardId: 'a', type: 'qcm-media', distractorDefinitions: ['Def média B'] }])
+  })
+
+  it('falls back to "recall" when a qcm-media question has no possible distractor', () => {
+    const mediaA: Card = { id: 'a', level: 1, title: 'A', kind: 'media', definition: 'Def média A', parentId: null, order: 0 }
+    const questions = attachDistractors([mediaA], [{ cardId: 'a', type: 'qcm-media' }], 'facile')
+    expect(questions).toEqual([{ cardId: 'a', type: 'recall' }])
+  })
+
+  it('fills distractorTitles and a full hint for qcm-media-title, same pool logic as qcm-title', () => {
+    const mediaA: Card = { id: 'a', level: 1, title: 'A', kind: 'media', definition: 'Def média A', parentId: null, order: 0 }
+    const mediaB: Card = { id: 'b', level: 2, title: 'B', kind: 'media', definition: 'Def média B', parentId: 'a', order: 0 }
+    const questions = attachDistractors([mediaA, mediaB], [{ cardId: 'a', type: 'qcm-media-title' }], 'facile')
+    expect(questions).toEqual([{ cardId: 'a', type: 'qcm-media-title', distractorTitles: ['B'], hint: 'Def média A' }])
+  })
+
+  it('gives no hint for "difficile" qcm-media-title, same as qcm-title', () => {
+    const mediaA: Card = { id: 'a', level: 1, title: 'A', kind: 'media', definition: 'Def média A', parentId: null, order: 0 }
+    const mediaB: Card = { id: 'b', level: 2, title: 'B', kind: 'media', definition: 'Def média B', parentId: 'a', order: 0 }
+    const questions = attachDistractors([mediaA, mediaB], [{ cardId: 'a', type: 'qcm-media-title' }], 'difficile')
+    expect(questions[0].hint).toBeUndefined()
+  })
+
   it('fills distractorDefinitions for a qcm-definition question when distractors exist', () => {
     const questions = attachDistractors([cardWithDef, otherWithDef], [{ cardId: 'a', type: 'qcm-definition' }], 'facile')
     expect(questions).toEqual([{ cardId: 'a', type: 'qcm-definition', distractorDefinitions: ['Def B'] }])
