@@ -603,15 +603,26 @@ describe('CardNode footer', () => {
     expect(screen.getByTestId('quiz-title')).toHaveTextContent('T____ _______')
   })
 
-  it('gives no length hint for a qcm-title question — it would narrow the four options', () => {
+  it('gives the same letter-count hint on a qcm-title question as on recall — the visual aid stays systematic across Sens A variants', () => {
     renderCardNode(testCard, false, false, {
       type: 'qcm-title',
       result: 'unanswered',
       distractorTitles: ['Autre titre'],
     })
 
-    expect(screen.getByTestId('quiz-title')).toHaveTextContent('? ? ?')
-    expect(screen.getByTestId('quiz-title')).not.toHaveTextContent('_')
+    // "Titre initial", first letter conceded by the default ("moyen") difficulty.
+    expect(screen.getByTestId('quiz-title')).toHaveTextContent('T____ _______')
+  })
+
+  it('gives the same letter-count hint on a qcm-media-title question as on recall', () => {
+    const mediaCard: Card = { ...testCard, kind: 'media', content: [{ kind: 'table', header: ['A'], rows: [['1']] }] }
+    renderCardNode(mediaCard, false, false, {
+      type: 'qcm-media-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+    })
+
+    expect(screen.getByTestId('quiz-title')).toHaveTextContent('T____ _______')
   })
 
   it('shows the real title for a qcm-definition question, since the title IS the question', () => {
@@ -919,6 +930,72 @@ describe('CardNode footer', () => {
     vi.advanceTimersByTime(700)
 
     expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
+    vi.useRealTimers()
+  })
+
+  it('opens the multiple-choice dialog for a qcm-media question, titled by the card title, options as media', async () => {
+    const user = userEvent.setup()
+    const mediaCard: Card = {
+      ...cardWithDefinition,
+      kind: 'media',
+      content: [{ kind: 'table', header: ['Unité'], rows: [['m']] }],
+      definition: 'Unité\nm',
+    }
+    resetStore([mediaCard])
+    renderCardNode(mediaCard, false, false, {
+      type: 'qcm-media',
+      result: 'unanswered',
+      distractorDefinitions: ['Autre projection'],
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+
+    expect(screen.getByRole('heading', { name: 'Titre initial' })).toBeInTheDocument()
+  })
+
+  it('opens the multiple-choice dialog for a qcm-media-title question with a table-specific heading and a rich hint', async () => {
+    const user = userEvent.setup()
+    const mediaCard: Card = {
+      ...cardWithDefinition,
+      kind: 'media',
+      content: [{ kind: 'table', header: ['Unité'], rows: [['m']] }],
+      definition: 'Unité\nm',
+    }
+    resetStore([mediaCard])
+    renderCardNode(mediaCard, false, false, {
+      type: 'qcm-media-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+      hint: 'Unité\nm',
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+
+    expect(screen.getByRole('heading', { name: /à quel titre correspond ce tableau/i })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Unité' })).toBeInTheDocument()
+  })
+
+  it('records the qcm-media answer in the quiz store once a choice is made', async () => {
+    vi.useFakeTimers()
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const mediaCard: Card = {
+      ...cardWithDefinition,
+      kind: 'media',
+      content: [{ kind: 'table', header: ['Unité'], rows: [['m']] }],
+      definition: 'Unité\nm',
+    }
+    resetStore([mediaCard])
+    renderCardNode(mediaCard, false, false, {
+      type: 'qcm-media',
+      result: 'unanswered',
+      distractorDefinitions: ['Fausse projection'],
+    })
+
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+    await user.click(screen.getByText('Fausse projection'))
+    vi.advanceTimersByTime(700)
+
+    expect(useQuizStore.getState().results[mediaCard.id]).toBe('incorrect')
     vi.useRealTimers()
   })
 })

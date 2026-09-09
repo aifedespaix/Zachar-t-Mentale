@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { Card, CardLevel } from '../types/card'
-import type { CardBlock } from '../types/cardBlock'
+import type { CardBlock, CardBlockKind } from '../types/cardBlock'
 import { isRootCard } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { EMPTY_RECALL_PROGRESS } from '../types/quiz'
@@ -38,8 +38,9 @@ import { RecallDialog } from './quiz/RecallDialog'
 import { FlipCard } from './FlipCard'
 import { useCardDetailStore } from '../state/useCardDetailStore'
 import { ContentKindBadges } from '../content/ContentKindBadges'
-import { contentOf, blocksToPlainText } from '../content/blocks'
+import { contentOf, blocksToPlainText, nonTextKinds } from '../content/blocks'
 import { BlockView } from '../content/BlockView'
+import { stripHighlightMarkers } from '../content/highlight'
 import { assetSrc } from '../persistence/assets'
 import { useWorkspaceStore } from '../state/useWorkspaceStore'
 
@@ -216,6 +217,17 @@ function DescriptionButton({
   )
 }
 
+const MEDIA_TITLE_HEADINGS: Record<Exclude<CardBlockKind, 'text'>, string> = {
+  table: 'À quel titre correspond ce tableau ?',
+  math: 'À quel titre correspond cette formule ?',
+  image: 'À quel titre correspond cette image ?',
+}
+
+function headingForMediaTitle(blocks: CardBlock[]): string {
+  const [dominant] = nonTextKinds(blocks)
+  return dominant ? MEDIA_TITLE_HEADINGS[dominant] : 'À quel titre correspond ce contenu ?'
+}
+
 export function CardNode({ data }: CardNodeProps) {
   const { card, autoEdit = false, isReparentTarget = false, quiz } = data
   const similarityThreshold = useQuizSettingsStore(s => s.similarityThreshold)
@@ -238,19 +250,31 @@ export function CardNode({ data }: CardNodeProps) {
   // action, the masked title — hangs off this one flag.
   const isPending = quiz !== undefined && quiz.result === 'unanswered'
   const isRecallPending = quiz?.type === 'recall' && isPending
-  const isQcmPending = (quiz?.type === 'qcm-definition' || quiz?.type === 'qcm-title') && isPending
-  // `qcm-title` asks the user to pick the title out of four options, so showing
-  // it on the card would hand them the answer; `qcm-definition` shows its title
-  // (that IS the question) and hides nothing.
-  const displayMasked = isPending && (quiz?.type === 'recall' || quiz?.type === 'qcm-title')
+  const isQcmPending =
+    (quiz?.type === 'qcm-definition' ||
+      quiz?.type === 'qcm-title' ||
+      quiz?.type === 'qcm-media' ||
+      quiz?.type === 'qcm-media-title') &&
+    isPending
+  // `qcm-title`/`qcm-media-title` ask the user to pick the title out of four
+  // options, so showing it on the card would hand them the answer;
+  // `qcm-definition`/`qcm-media` show the title (that IS the question) and
+  // hide nothing.
+  const displayMasked =
+    isPending && (quiz?.type === 'recall' || quiz?.type === 'qcm-title' || quiz?.type === 'qcm-media-title')
   const resultBorderColor = quiz?.result === 'correct' ? '#16a34a' : quiz?.result === 'incorrect' ? '#dc2626' : undefined
 
   // The shape of the answer, drawn on the card itself: same letters as the
   // answer dialog will show, so the card is a genuine preview of the question
   // rather than a separate riddle. Only for typed answers — on a multiple
   // choice it would narrow the four options down for free.
+  // Same aid on recall, qcm-title AND qcm-media-title — the mission asked
+  // for the letter-count hint to stay systematic across every Sens A
+  // variant, not just recall. QCM questions have no retries, so
+  // `recallProgress` naturally stays absent for them and `extraReveals`
+  // falls back to 0 — the base difficulty count, never growing.
   const blankPreview =
-    isRecallPending && lengthGuideEnabled
+    displayMasked && lengthGuideEnabled
       ? (() => {
           const revealed = revealedSet(card.title, quizDifficulty, recallProgress?.extraReveals ?? 0)
           return slotsOf(card.title)
@@ -901,33 +925,56 @@ export function CardNode({ data }: CardNodeProps) {
       {isQcmPending && (
         <QcmDialog
           open={answerOpen}
-          heading={quiz.type === 'qcm-definition' ? card.title : 'Quel est le titre de cette carte ?'}
-          hint={quiz.type === 'qcm-title' ? quiz.hint : undefined}
-          noHintNote={
-            quiz.type === 'qcm-title' && !quiz.hint ? 'Aide-toi de la position de la carte dans l’arbre.' : undefined
+          heading={
+            quiz.type === 'qcm-definition' || quiz.type === 'qcm-media'
+              ? card.title
+              : quiz.type === 'qcm-media-title'
+                ? headingForMediaTitle(contentOf(card))
+                : 'Quel est le titre de cette carte ?'
           }
-          correctOption={quiz.type === 'qcm-definition' ? (card.definition ?? '') : card.title}
-          distractors={quiz.type === 'qcm-definition' ? (quiz.distractorDefinitions ?? []) : (quiz.distractorTitles ?? [])}
-          // Definition options are cards' plain-text mirrors, so a formula
-          // question would otherwise offer « 20/100 × 425 » while the card
-          // itself shows a stacked fraction. The string stays the identity —
-          // grading and pool dedupe still compare it — and only the display is
-          // resolved back to the source blocks. Titles are plain by design
-          // (they are the quiz's comparison key), so they get no resolver.
+          hint={quiz.type === 'qcm-title' ? quiz.hint : undefined}
+          hintNode={
+            quiz.type === 'qcm-media-title' && quiz.hint !== undefined ? (
+              <BlockView blocks={contentOf(card)} resolveAsset={resolveAsset} highlightKeywords={false} />
+            ) : undefined
+          }
+          noHintNote={
+            (quiz.type === 'qcm-title' || quiz.type === 'qcm-media-title') && !quiz.hint
+              ? 'Aide-toi de la position de la carte dans l’arbre.'
+              : undefined
+          }
+          correctOption={
+            quiz.type === 'qcm-definition' || quiz.type === 'qcm-media' ? (card.definition ?? '') : card.title
+          }
+          distractors={
+            quiz.type === 'qcm-definition' || quiz.type === 'qcm-media'
+              ? (quiz.distractorDefinitions ?? [])
+              : (quiz.distractorTitles ?? [])
+          }
+          // Definition/media options are cards' plain-text mirrors, so a
+          // formula question would otherwise offer « 20/100 × 425 » while the
+          // card itself shows a stacked fraction, and a table question would
+          // offer a flattened string instead of an actual table. The string
+          // stays the identity — grading and pool dedupe still compare it —
+          // and only the display is resolved back to the source blocks.
+          // `highlightKeywords={false}`/`stripHighlightMarkers`: no option is
+          // ever visually richer than another because of **markup** rather
+          // than content — see the design spec. Titles get no resolver, they
+          // are the quiz's comparison key and never carry markers.
           renderOption={
-            quiz.type === 'qcm-definition'
+            quiz.type === 'qcm-definition' || quiz.type === 'qcm-media'
               ? option => {
                   const source = allCards.find(c => c.definition === option)
                   return source && source.content !== undefined ? (
-                    <BlockView blocks={contentOf(source)} resolveAsset={resolveAsset} />
+                    <BlockView blocks={contentOf(source)} resolveAsset={resolveAsset} highlightKeywords={false} />
                   ) : (
-                    option
+                    stripHighlightMarkers(option)
                   )
                 }
               : undefined
           }
           onAnswer={chosen => {
-            if (quiz.type === 'qcm-definition') answerQcmDefinition(card.id, chosen)
+            if (quiz.type === 'qcm-definition' || quiz.type === 'qcm-media') answerQcmDefinition(card.id, chosen)
             else answerQcmTitle(card.id, chosen)
             setAnswerOpen(false)
           }}
