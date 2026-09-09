@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
+import { Trash2 } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
 import { BlockEditor, type BlockEditorProps } from './BlockEditor'
 import { BlockView } from './BlockView'
@@ -75,11 +76,17 @@ export function DescriptionDialog({
   const initial = useRef(seedFrom(blocks))
   const [draft, setDraft] = useState<CardBlock[]>(initial.current)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const dirty = blocksDiffer(draft, initial.current)
 
   function save() {
     onSave(draft)
+    onClose()
+  }
+
+  function deleteDescription() {
+    onSave([])
     onClose()
   }
 
@@ -127,6 +134,10 @@ export function DescriptionDialog({
         // one keystroke that loses work.
         if (confirmingDiscard) {
           setConfirmingDiscard(false)
+          return
+        }
+        if (confirmingDelete) {
+          setConfirmingDelete(false)
           return
         }
         requestClose()
@@ -222,6 +233,12 @@ export function DescriptionDialog({
               borderTop: '1px solid var(--border)',
             }}
           >
+            {blocks.length > 0 && (
+              <Button variant="destructive" onClick={() => setConfirmingDelete(true)}>
+                <Trash2 />
+                Supprimer
+              </Button>
+            )}
             <span style={{ marginRight: 'auto', fontSize: 12, opacity: 0.55 }}>
               Ctrl + Entrée pour enregistrer
             </span>
@@ -232,47 +249,91 @@ export function DescriptionDialog({
           </footer>
 
           {confirmingDiscard && (
-            <div
-              role="alertdialog"
-              aria-label="Abandonner les modifications ?"
-              style={{
-                position: 'absolute',
-                inset: 0,
-                zIndex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'color-mix(in oklch, var(--popover), transparent 12%)',
-                borderRadius: 12,
-              }}
-            >
-              <div
-                style={{
-                  maxWidth: 380,
-                  padding: 20,
-                  borderRadius: 10,
-                  border: '1px solid var(--border)',
-                  background: 'var(--popover)',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
-                }}
-              >
-                <p style={{ margin: '0 0 14px', fontSize: 14 }}>
-                  Cette description a été modifiée. Fermer sans enregistrer perdra les changements.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                  <Button variant="outline" onClick={() => setConfirmingDiscard(false)}>
-                    Continuer l’édition
-                  </Button>
-                  <Button variant="destructive" onClick={onClose}>
-                    Fermer sans enregistrer
-                  </Button>
-                  <Button onClick={save}>Enregistrer</Button>
-                </div>
-              </div>
-            </div>
+            <ConfirmOverlay
+              label="Abandonner les modifications ?"
+              message="Cette description a été modifiée. Fermer sans enregistrer perdra les changements."
+              onCancel={() => setConfirmingDiscard(false)}
+              cancelLabel="Continuer l’édition"
+              confirmLabel="Fermer sans enregistrer"
+              onConfirm={onClose}
+              extra={<Button onClick={save}>Enregistrer</Button>}
+            />
+          )}
+
+          {confirmingDelete && (
+            <ConfirmOverlay
+              label="Supprimer cette description ?"
+              message="Le contenu de cette fiche sera définitivement supprimé."
+              onCancel={() => setConfirmingDelete(false)}
+              cancelLabel="Annuler"
+              confirmLabel="Supprimer"
+              onConfirm={deleteDescription}
+            />
           )}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
+  )
+}
+
+/**
+ * The "are you sure?" overlay shared by the discard-changes and
+ * delete-description prompts — same modal-within-a-modal treatment so a
+ * second nested Radix dialog isn't needed for either.
+ */
+function ConfirmOverlay({
+  label,
+  message,
+  cancelLabel,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+  extra,
+}: {
+  label: string
+  message: string
+  cancelLabel: string
+  confirmLabel: string
+  onCancel: () => void
+  onConfirm: () => void
+  extra?: ReactNode
+}) {
+  return (
+    <div
+      role="alertdialog"
+      aria-label={label}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'color-mix(in oklch, var(--popover), transparent 12%)',
+        borderRadius: 12,
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 380,
+          padding: 20,
+          borderRadius: 10,
+          border: '1px solid var(--border)',
+          background: 'var(--popover)',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
+        }}
+      >
+        <p style={{ margin: '0 0 14px', fontSize: 14 }}>{message}</p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button variant="outline" onClick={onCancel}>
+            {cancelLabel}
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+          {extra}
+        </div>
+      </div>
+    </div>
   )
 }

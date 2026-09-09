@@ -89,38 +89,45 @@ interface EdgeButtonProps {
  */
 function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }: EdgeButtonProps) {
   return (
-    <motion.button
-      aria-label={label}
-      aria-disabled={disabled}
-      onClick={() => {
-        // Defence in depth: `pointerEvents: none` already blocks real clicks,
-        // but the store action must never run for an inapplicable button.
-        if (disabled) return
-        onActivate()
-      }}
-      whileHover={disabled ? undefined : { scale: 1.15 }}
-      whileTap={disabled ? undefined : { scale: 0.85 }}
-      transition={{ type: 'spring', stiffness: 500, damping: 25 }}
-      style={{
-        position: 'absolute',
-        ...position,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: EDGE_BUTTON_SIZE,
-        height: EDGE_BUTTON_SIZE,
-        borderRadius: '9999px',
-        color: disabled ? DISABLED_GREY : color,
-        pointerEvents: disabled ? 'none' : 'auto',
-        cursor: disabled ? 'default' : 'pointer',
-        background: 'var(--background)',
-        border: `1.5px solid ${disabled ? DISABLED_GREY : color}`,
-        boxShadow: disabled ? 'none' : '0 1px 3px rgba(0, 0, 0, 0.15)',
-        padding: 0,
-      }}
-    >
-      <Icon size={14} strokeWidth={2.5} />
-    </motion.button>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <motion.button
+            aria-label={label}
+            aria-disabled={disabled}
+            onClick={() => {
+              // Defence in depth: `pointerEvents: none` already blocks real clicks,
+              // but the store action must never run for an inapplicable button.
+              if (disabled) return
+              onActivate()
+            }}
+            whileHover={disabled ? undefined : { scale: 1.15 }}
+            whileTap={disabled ? undefined : { scale: 0.85 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+            style={{
+              position: 'absolute',
+              ...position,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: EDGE_BUTTON_SIZE,
+              height: EDGE_BUTTON_SIZE,
+              borderRadius: '9999px',
+              color: disabled ? DISABLED_GREY : color,
+              pointerEvents: disabled ? 'none' : 'auto',
+              cursor: disabled ? 'default' : 'pointer',
+              background: 'var(--background)',
+              border: `1.5px solid ${disabled ? DISABLED_GREY : color}`,
+              boxShadow: disabled ? 'none' : '0 1px 3px rgba(0, 0, 0, 0.15)',
+              padding: 0,
+            }}
+          >
+            <Icon size={14} strokeWidth={2.5} />
+          </motion.button>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
@@ -148,8 +155,18 @@ function FicheBadge({
 }) {
   const blocks = contentOf(card)
   const hasContent = blocks.length > 0
-  const dominant = card.kind === 'media' ? nonTextKinds(blocks)[0] : undefined
-  const Icon = dominant ? CONTENT_KIND_ICONS[dominant].icon : BookOpen
+  // Not gated on `card.kind === 'media'`: a plain definition can still lead
+  // with a formula, table or image block, and the badge should say so the
+  // same way a media card does — `nonTextKinds` already reads the actual
+  // blocks, independent of the card's own kind field.
+  const dominant = nonTextKinds(blocks)[0]
+  // Two different verbs need two different glyphs: a card with nothing yet
+  // is an invitation to WRITE (pen), one that already has content is an
+  // invitation to READ it (its content-kind icon, or an open book for plain
+  // text). Sharing one icon between "add" and "view" — as this used to —
+  // left opacity as the only distinguishing cue, which broke the moment the
+  // badge needed an opaque background (see below).
+  const Icon = dominant ? CONTENT_KIND_ICONS[dominant].icon : hasContent ? BookOpen : PenLine
   const label = !hasContent ? 'Ajouter une description' : card.kind === 'media' ? 'Afficher le média' : 'Afficher la définition'
 
   return (
@@ -175,14 +192,19 @@ function FicheBadge({
             alignItems: 'center',
             justifyContent: 'center',
             border: `1.5px solid ${borderColor}`,
+            // Always fully opaque: this badge straddles the card's own
+            // border (bottom/right: -9), so a translucent background (the
+            // old `opacity: hasContent ? 1 : 0.55` applied to the whole
+            // button) let that border show through underneath it. The
+            // "not filled in yet" cue now lives in the icon choice and the
+            // dimmer icon below, not in the badge's own transparency.
             background: 'var(--background)',
             color: borderColor,
             boxShadow: hasContent ? '0 1px 3px rgba(0, 0, 0, 0.15)' : 'none',
-            opacity: hasContent ? 1 : 0.55,
             cursor: locked && !hasContent ? 'default' : 'pointer',
           }}
         >
-          <Icon size={13} strokeWidth={2.3} />
+          <Icon size={13} strokeWidth={2.3} style={{ opacity: hasContent ? 1 : 0.6 }} />
         </button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

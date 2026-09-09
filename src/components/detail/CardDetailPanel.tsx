@@ -5,7 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { ChevronDown, ChevronRight, Pencil, Pin, PinOff, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Pencil, Pin, PinOff, Plus, Trash2, X } from 'lucide-react'
 import type { Card } from '../../types/card'
 import { useCardsStore } from '../../state/useCardsStore'
 import { useCardDetailStore } from '../../state/useCardDetailStore'
@@ -30,6 +30,7 @@ import {
   MIN_CARD_DETAIL_WIDTH,
 } from '../../persistence/cardDetailWidth'
 import { Button } from '../ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 
 /** How far one arrow-key press moves the border, matching the file sidebar. */
 const KEYBOARD_RESIZE_STEP = 16
@@ -205,6 +206,7 @@ function CardFiche({
   onEdit: () => void
 }) {
   const locked = useCardsStore(s => s.locked)
+  const updateContent = useCardsStore(s => s.updateContent)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const theme = useResolvedTheme()
   const level = clampCardLevel(card.level)
@@ -213,6 +215,7 @@ function CardFiche({
 
   const blocks = contentOf(card)
   const breadcrumb = ancestorTitles(cards, card.id)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
 
   return (
     <section
@@ -319,14 +322,45 @@ function CardFiche({
           )}
 
           {!locked && (
-            <div style={{ marginTop: 10 }}>
+            <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
               <Button variant="outline" size="sm" onClick={onEdit}>
                 {blocks.length > 0 ? <Pencil /> : <Plus />}
                 {blocks.length > 0 ? 'Modifier' : 'Ajouter une description'}
               </Button>
+              {blocks.length > 0 && (
+                <Button variant="destructive" size="sm" onClick={() => setConfirmDeleteOpen(true)}>
+                  <Trash2 />
+                  Supprimer
+                </Button>
+              )}
             </div>
           )}
         </div>
+      )}
+
+      {confirmDeleteOpen && (
+        <Dialog open onOpenChange={setConfirmDeleteOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Supprimer la description de « {card.title} » ?</DialogTitle>
+            </DialogHeader>
+            <p style={{ margin: 0, fontSize: 14 }}>Le contenu de cette fiche sera définitivement supprimé.</p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmDeleteOpen(false)}>
+                Annuler
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  updateContent(card.id, [])
+                  setConfirmDeleteOpen(false)
+                }}
+              >
+                Supprimer
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </section>
   )
