@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import type { CardBlock } from '../types/cardBlock'
 import { renderMathToHtml } from './renderMath'
+import { renderHighlighted, stripHighlightMarkers } from './highlight'
 
 /**
  * Dimensions good enough to reserve a box with.
@@ -28,6 +29,12 @@ export interface BlockViewProps {
    * Returning `''` means "not available", and renders a named placeholder.
    */
   resolveAsset: (asset: string) => string
+  /**
+   * Whether a `**mot-clé**` marker renders as a coloured `<mark>` (the
+   * reading panel) or is silently stripped to plain text (every quiz-facing
+   * render — see `highlight.tsx`). Defaults to `true`.
+   */
+  highlightKeywords?: boolean
 }
 
 /**
@@ -39,7 +46,7 @@ export interface BlockViewProps {
  * a style the other did not, and the drift would only ever be discovered by a
  * user printing a revision sheet the night before a test.
  */
-export function BlockView({ blocks, resolveAsset }: BlockViewProps) {
+export function BlockView({ blocks, resolveAsset, highlightKeywords = true }: BlockViewProps) {
   if (blocks.length === 0) return null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
@@ -53,7 +60,7 @@ export function BlockView({ blocks, resolveAsset }: BlockViewProps) {
         // the popover's fixed width apart. Fixing it only on one side is the
         // screen/PDF drift this component exists to prevent.
         <div key={index} style={{ maxWidth: '100%', overflowX: 'auto' }}>
-          <BlockItem block={block} resolveAsset={resolveAsset} />
+          <BlockItem block={block} resolveAsset={resolveAsset} highlightKeywords={highlightKeywords} />
         </div>
       ))}
     </div>
@@ -63,15 +70,21 @@ export function BlockView({ blocks, resolveAsset }: BlockViewProps) {
 const BlockItem = memo(function BlockItem({
   block,
   resolveAsset,
+  highlightKeywords,
 }: {
   block: CardBlock
   resolveAsset: (asset: string) => string
+  highlightKeywords: boolean
 }) {
   switch (block.kind) {
     case 'text':
       // `pre-wrap`, not a set of <p>: a definition's line breaks are the
       // user's own, and collapsing them would change what they wrote.
-      return <div style={{ whiteSpace: 'pre-wrap' }}>{block.text}</div>
+      return (
+        <div style={{ whiteSpace: 'pre-wrap' }}>
+          {highlightKeywords ? renderHighlighted(block.text) : stripHighlightMarkers(block.text)}
+        </div>
+      )
 
     case 'math': {
       const html = renderMathToHtml(block.latex, block.display === true)

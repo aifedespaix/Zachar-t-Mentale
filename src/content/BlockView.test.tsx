@@ -89,6 +89,23 @@ describe('BlockView', () => {
     const { container } = render(<BlockView blocks={[]} resolveAsset={resolve} />)
     expect(container).toBeEmptyDOMElement()
   })
+
+  it('renders **marked** words as a coloured <mark> by default', () => {
+    render(<BlockView blocks={[{ kind: 'text', text: 'Le **noyau** contrôle la cellule.' }]} resolveAsset={resolve} />)
+    expect(screen.getByText('noyau').tagName).toBe('MARK')
+  })
+
+  it('renders plain text with the markers stripped when highlightKeywords is false', () => {
+    render(
+      <BlockView
+        blocks={[{ kind: 'text', text: 'Le **noyau** contrôle la cellule.' }]}
+        resolveAsset={resolve}
+        highlightKeywords={false}
+      />
+    )
+    expect(screen.queryByText('noyau')).toBeNull()
+    expect(screen.getByText(/Le noyau contrôle la cellule\./)).toBeInTheDocument()
+  })
 })
 
 describe('BlockView — degenerate data from a shared file', () => {
