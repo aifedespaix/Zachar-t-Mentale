@@ -21,7 +21,8 @@ import { useUnsavedChangesGuard } from './useUnsavedChangesGuard'
 
 describe('useUnsavedChangesGuard', () => {
   beforeEach(() => {
-    destroy.mockClear()
+    destroy.mockReset()
+    destroy.mockResolvedValue(undefined)
     onCloseRequested.mockClear()
     getCurrentWindowThrows = false
   })
@@ -58,7 +59,7 @@ describe('useUnsavedChangesGuard', () => {
       act(() => result.current.requestOpenFile('/cours/b.json'))
       await waitFor(() => expect(result.current.prompt).not.toBeNull())
 
-      act(() => result.current.prompt?.onContinue())
+      act(() => result.current.prompt?.onContinue?.())
 
       expect(setCurrentFile).toHaveBeenCalledWith('/cours/b.json')
       expect(result.current.prompt).toBeNull()
@@ -110,9 +111,43 @@ describe('useUnsavedChangesGuard', () => {
       await act(async () => closeHandler({ preventDefault: vi.fn() }))
       await waitFor(() => expect(result.current.prompt).not.toBeNull())
 
-      act(() => result.current.prompt?.onContinue())
+      act(() => result.current.prompt?.onContinue?.())
 
       expect(destroy).toHaveBeenCalled()
+    })
+
+    it('blames the close, not the save, when the window refuses to be destroyed', async () => {
+      // The real case this comes from: `core:window:allow-destroy` missing from
+      // the Tauri capability. The save had in fact succeeded, and the dialog
+      // still announced « La sauvegarde a échoué ».
+      destroy.mockRejectedValueOnce(new Error('window.destroy not allowed'))
+      const flush = vi.fn().mockResolvedValue(undefined)
+      const { result } = renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
+      await waitFor(() => expect(onCloseRequested).toHaveBeenCalled())
+
+      await act(async () => closeHandler({ preventDefault: vi.fn() }))
+
+      expect(result.current.prompt?.message).toMatch(/Impossible de fermer la fenêtre/)
+      expect(result.current.prompt?.message).not.toMatch(/sauvegarde/)
+      // Nothing left to continue TO: the window is staying open either way, so
+      // the dialog must not offer a « Quitter quand même » that cannot quit.
+      expect(result.current.prompt?.continueLabel).toBeNull()
+      expect(result.current.prompt?.onContinue).toBeNull()
+    })
+
+    it('reports the failure when "Quitter quand même" cannot close the window either', async () => {
+      // The bug as the user hit it: confirming the prompt dismissed the dialog
+      // and nothing else happened — the app just stayed there.
+      destroy.mockRejectedValue(new Error('window.destroy not allowed'))
+      const flush = vi.fn().mockRejectedValue(new Error('disque plein'))
+      const { result } = renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
+      await waitFor(() => expect(onCloseRequested).toHaveBeenCalled())
+      await act(async () => closeHandler({ preventDefault: vi.fn() }))
+      await waitFor(() => expect(result.current.prompt).not.toBeNull())
+
+      await act(async () => result.current.prompt?.onContinue?.())
+
+      await waitFor(() => expect(result.current.prompt?.message).toMatch(/Impossible de fermer la fenêtre/))
     })
 
     it('does not crash and never prompts outside a Tauri window', () => {

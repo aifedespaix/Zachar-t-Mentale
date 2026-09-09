@@ -26,6 +26,8 @@ import { imageBlockFrom } from './content/imageBlock'
 import { mimeForPath } from './content/pickImage'
 import { contentOf } from './content/blocks'
 import { readFile } from '@tauri-apps/plugin-fs'
+import { NewMindMapButton } from './components/NewMindMapButton'
+import { ExportMapButton } from './components/ExportMapButton'
 import { ThemeToggleButton } from './components/ThemeToggleButton'
 import { SettingsButton } from './components/settings/SettingsButton'
 import { useAppearanceSettingsStore } from './state/useAppearanceSettingsStore'
@@ -253,6 +255,9 @@ function App() {
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
         <header style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
           {!quizActive && <LockToggle />}
+          {!quizActive && <NewMindMapButton onOpenFile={requestOpenFile} />}
+          {/* The cards in memory, not the file on disk — see ExportMapButton. */}
+          {!quizActive && <ExportMapButton filePath={loadedPath} cards={cards} />}
           {!quizActive && <QuizButton />}
           {!quizActive && <SettingsButton />}
           {!quizActive && <ThemeToggleButton />}
@@ -348,6 +353,7 @@ function App() {
       {prompt && (
         <SaveFailedDialog
           message={prompt.message}
+          detail={prompt.detail}
           continueLabel={prompt.continueLabel}
           onCancel={dismissPrompt}
           onContinue={prompt.onContinue}

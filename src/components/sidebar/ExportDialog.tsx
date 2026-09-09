@@ -37,10 +37,15 @@ export function ExportDialog({ fileName, filePath, cards, open, onClose, onError
   const [showDefinitions, setShowDefinitions] = useState(true)
   const [includeDetached, setIncludeDetached] = useState(false)
   const [exporting, setExporting] = useState(false)
+  // Also shown here, not only through `onError`: the dialog stays open on a
+  // failure, and its own overlay covers the sidebar banner that reports it —
+  // which, with the sidebar collapsed, is not on screen at all.
+  const [error, setError] = useState<string | null>(null)
   const baseName = mindMapBaseName(fileName)
 
   async function handleExport() {
     setExporting(true)
+    setError(null)
     try {
       const options = { showDefinitions, includeDetached, mindMapPath: filePath ?? null }
       let saved = false
@@ -73,8 +78,10 @@ export function ExportDialog({ fileName, filePath, cards, open, onClose, onError
       // contract) — leave the dialog open with no message, as if nothing
       // happened, rather than closing it as though the export succeeded.
       if (saved) onClose()
-    } catch (error) {
-      onError(`Échec de l’export : ${describeExportError(error)}`)
+    } catch (caught) {
+      const message = `Échec de l’export : ${describeExportError(caught)}`
+      setError(message)
+      onError(message)
     } finally {
       setExporting(false)
     }
@@ -113,6 +120,11 @@ export function ExportDialog({ fileName, filePath, cards, open, onClose, onError
           <input type="checkbox" checked={includeDetached} onChange={e => setIncludeDetached(e.target.checked)} />
           Inclure les cartes volantes
         </label>
+        {error && (
+          <p role="alert" style={{ margin: 0, color: 'var(--warning-fg)' }}>
+            {error}
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={exporting}>
             Annuler
