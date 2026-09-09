@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { editableIndices, matchesTarget, slotsOf } from '../../quiz/blanks'
+import { editableIndices, matchesTarget, resolveTypedInsert, slotsOf } from '../../quiz/blanks'
 
 const CORRECT_COLOR = '#16a34a'
 const WRONG_COLOR = '#dc2626'
@@ -14,8 +14,13 @@ interface BlankFillFieldProps {
   onTypedChange: (next: string[]) => void
   /** Colour letters as they are typed rather than only once submitted. */
   liveFeedback?: boolean
-  /** Set after a submission: every typed letter is coloured right/wrong. */
-  graded?: boolean
+  /**
+   * The `typed` array exactly as it stood at the last submission. A box is
+   * coloured right/wrong only while its current letter still matches what was
+   * graded there — edit that one box and it reverts to unmarked, but the rest
+   * keep their colour. `null`/`undefined` before any submission.
+   */
+  gradedSnapshot?: readonly string[] | null
   disabled?: boolean
   onSubmit?: () => void
   label?: string
@@ -46,7 +51,7 @@ export function BlankFillField({
   typed,
   onTypedChange,
   liveFeedback = false,
-  graded = false,
+  gradedSnapshot = null,
   disabled = false,
   onSubmit,
   label = 'Réponse',
@@ -56,6 +61,10 @@ export function BlankFillField({
   const editable = editableIndices(target, revealed)
   const value = typed.join('')
   const slots = slotsOf(target)
+  // Tracks where the NEXT keystroke lands — normally the end of what's typed,
+  // but a click on an already-answered box moves it there instead, so typing
+  // corrects that one letter without retyping everything after it.
+  const [cursorPosition, setCursorPosition] = useState(value.length)
 
   return (
     <div
@@ -77,6 +86,12 @@ export function BlankFillField({
           fontSize: 24,
           lineHeight: 1.3,
           fontWeight: 700,
+          // Positioned above the real (invisible, absolutely-stretched) input
+          // below, so a click actually lands on the box the user is looking
+          // at instead of always hitting the input underneath — that's what
+          // lets a click teleport the caret to the right box at all.
+          position: 'relative',
+          zIndex: 1,
         }}
       >
         {slots.map(slot => {
@@ -114,13 +129,25 @@ export function BlankFillField({
 
           const position = editable.indexOf(slot.index)
           const char = typed[position] ?? ''
-          const showVerdict = char !== '' && (graded || liveFeedback)
+          const gradedChar = gradedSnapshot?.[position]
+          const stillGraded = gradedChar !== undefined && gradedChar !== '' && char === gradedChar
+          const showVerdict = char !== '' && (liveFeedback || stillGraded)
           const right = showVerdict && matchesTarget(char, slot.char)
-          const caret = focused && !disabled && position === value.length
+          const caret = focused && !disabled && position === cursorPosition
 
           return (
             <span
               key={slot.index}
+              onClick={
+                disabled
+                  ? undefined
+                  : () => {
+                      const pos = Math.min(position, value.length)
+                      inputRef.current?.focus()
+                      inputRef.current?.setSelectionRange(pos, pos)
+                      setCursorPosition(pos)
+                    }
+              }
               style={{
                 minWidth: 22,
                 textAlign: 'center',
@@ -148,7 +175,19 @@ export function BlankFillField({
         disabled={disabled}
         value={value}
         maxLength={editable.length}
-        onChange={event => onTypedChange(Array.from(event.target.value).slice(0, editable.length))}
+        onChange={event => {
+          const raw = Array.from(event.target.value).slice(0, editable.length)
+          const resolved = resolveTypedInsert(target, revealed, typed, raw)
+          onTypedChange(resolved)
+
+          const nativeCursor = event.target.selectionStart ?? resolved.length
+          // A swallowed keystroke (resolved is shorter than what the browser
+          // actually produced) must not leave the caret past the letter that
+          // got dropped — it belongs right back where it was.
+          const swallowed = resolved.length !== raw.length
+          setCursorPosition(swallowed ? Math.max(0, nativeCursor - 1) : nativeCursor)
+        }}
+        onSelect={event => setCursorPosition(event.currentTarget.selectionStart ?? value.length)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onKeyDown={event => {

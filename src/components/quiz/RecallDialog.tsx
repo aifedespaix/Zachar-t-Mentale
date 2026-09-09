@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { PartyPopper, Lightbulb, CornerDownLeft, Eye, Network } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
@@ -53,14 +53,33 @@ export function RecallDialog({
   onGiveUp,
   onClose,
 }: RecallDialogProps) {
-  // The reveal set is held locally rather than derived from `progress` on every
-  // render: submitting a wrong answer bumps `extraReveals` in the store
-  // immediately, and re-deriving would pop the new letter in underneath the
-  // red/green feedback the user has not read yet. It advances on "Réessayer".
-  const [revealed, setRevealed] = useState(() => revealedSet(title, difficulty, progress.extraReveals))
   const [typed, setTyped] = useState<string[]>([])
   const [phase, setPhase] = useState<Phase>('typing')
   const [similarity, setSimilarity] = useState<number | null>(null)
+  // The `typed` array exactly as it stood at the last submission — lets
+  // BlankFillField keep colouring a box red/green only until THAT box is
+  // edited, rather than clearing every colour the instant one letter changes.
+  const [gradedSnapshot, setGradedSnapshot] = useState<string[] | null>(null)
+
+  // "Voir la réponse" reveals everything regardless of the store; otherwise
+  // the field follows `progress.extraReveals` directly — a miss no longer
+  // waits on a "Réessayer" click to hand over the letter it just bought.
+  const revealed =
+    phase === 'revealed' ? revealedSet(title, difficulty, Number.MAX_SAFE_INTEGER) : revealedSet(title, difficulty, progress.extraReveals)
+
+  // Every time the store grants a new letter, the box it occupied vanishes
+  // from the field — so what was typed (and its graded snapshot) must be
+  // re-anchored to the smaller set of boxes that remain, exactly what
+  // `handleRetry` used to do by hand on a button click.
+  const previousExtraReveals = useRef(progress.extraReveals)
+  useEffect(() => {
+    if (progress.extraReveals === previousExtraReveals.current) return
+    const previousRevealed = revealedSet(title, difficulty, previousExtraReveals.current)
+    const nextRevealed = revealedSet(title, difficulty, progress.extraReveals)
+    setTyped(current => remapTyped(title, previousRevealed, current, nextRevealed))
+    setGradedSnapshot(current => (current ? remapTyped(title, previousRevealed, current, nextRevealed) : null))
+    previousExtraReveals.current = progress.extraReveals
+  }, [progress.extraReveals, title, difficulty])
 
   useEffect(() => {
     if (phase !== 'correct') return
@@ -70,31 +89,26 @@ export function RecallDialog({
 
   const answer = assembleAnswer(title, revealed, typed)
   const complete = typed.filter(Boolean).length > 0
-  // What "Réessayer" is about to show, not what is on screen now: the note
-  // after a miss promises another letter, and must not promise one when the
-  // store has already handed over the last of them.
-  const exhausted = isFullyRevealed(title, revealedSet(title, difficulty, progress.extraReveals))
+  const exhausted = isFullyRevealed(title, revealed)
 
   function handleSubmit() {
     if (phase !== 'typing' || !complete) return
     const outcome = onSubmit(answer)
     setSimilarity(outcome.similarity)
+    setGradedSnapshot([...typed])
     setPhase(outcome.correct ? 'correct' : 'wrong')
   }
 
-  /** Take the letter the miss just earned, keeping what was already written. */
-  function handleRetry() {
-    const next = revealedSet(title, difficulty, progress.extraReveals)
-    setTyped(current => remapTyped(title, revealed, current, next))
-    setRevealed(next)
-    setSimilarity(null)
-    setPhase('typing')
+  /** Any edit after a miss resumes typing on its own — no button needed. */
+  function handleTypedChange(next: string[]) {
+    setTyped(next)
+    if (phase === 'wrong') setPhase('typing')
   }
 
   function handleGiveUp() {
     onGiveUp()
-    setRevealed(revealedSet(title, difficulty, Number.MAX_SAFE_INTEGER))
     setTyped([])
+    setGradedSnapshot(null)
     setPhase('revealed')
   }
 
@@ -140,10 +154,10 @@ export function RecallDialog({
           target={title}
           revealed={revealed}
           typed={typed}
-          onTypedChange={setTyped}
+          onTypedChange={handleTypedChange}
           liveFeedback={liveFeedback}
-          graded={phase !== 'typing'}
-          disabled={phase !== 'typing'}
+          gradedSnapshot={gradedSnapshot}
+          disabled={phase === 'correct' || phase === 'revealed'}
           onSubmit={handleSubmit}
         />
 
@@ -207,18 +221,17 @@ export function RecallDialog({
         )}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
-          {phase === 'typing' && (
-            <>
-              <Button variant="ghost" onClick={handleGiveUp}>
-                <Eye />
-                Voir la réponse
-              </Button>
-              <Button onClick={handleSubmit} disabled={!complete}>
-                Valider
-              </Button>
-            </>
+          {(phase === 'typing' || phase === 'wrong') && (
+            <Button variant="ghost" onClick={handleGiveUp}>
+              <Eye />
+              Voir la réponse
+            </Button>
           )}
-          {phase === 'wrong' && <Button onClick={handleRetry}>Réessayer</Button>}
+          {phase === 'typing' && (
+            <Button onClick={handleSubmit} disabled={!complete}>
+              Valider
+            </Button>
+          )}
           {phase === 'revealed' && (
             <Button variant="outline" onClick={onClose}>
               Fermer

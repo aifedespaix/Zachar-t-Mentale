@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { BlankFillField } from './BlankFillField'
@@ -23,7 +23,7 @@ function Harness({
   target: string
   extraReveals?: number
   liveFeedback?: boolean
-  graded?: boolean
+  gradedSnapshot?: readonly string[] | null
   onSubmit?: () => void
 }) {
   const [typed, setTyped] = useState<string[]>([])
@@ -103,16 +103,75 @@ describe('BlankFillField', () => {
     expect(letterColors(container).slice(1)).toEqual([GREEN, GREEN, RED, GREEN, RED, GREEN])
   })
 
-  it('colours right and wrong letters once the answer is graded', async () => {
+  it('colours right and wrong letters against a graded snapshot', async () => {
     const user = userEvent.setup()
     const { container, rerender } = render(<Harness target="Bonsoir" />)
 
     await user.type(screen.getByLabelText('Réponse'), 'onjour')
     expect(letterColors(container)).not.toContain(RED)
 
-    rerender(<Harness target="Bonsoir" graded />)
+    rerender(<Harness target="Bonsoir" gradedSnapshot={['o', 'n', 'j', 'o', 'u', 'r']} />)
 
     expect(letterColors(container).slice(1)).toEqual([GREEN, GREEN, RED, GREEN, RED, GREEN])
+  })
+
+  it('reverts a box to uncoloured once its letter is edited after grading, but leaves the others alone', async () => {
+    const user = userEvent.setup()
+    const { container, rerender } = render(<Harness target="Bonsoir" />)
+
+    await user.type(screen.getByLabelText('Réponse'), 'onjour')
+    rerender(<Harness target="Bonsoir" gradedSnapshot={['o', 'n', 'j', 'o', 'u', 'r']} />)
+
+    // Fix the wrong "j" (third editable box, index 2) without touching the rest.
+    const input = screen.getByLabelText('Réponse') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'onsour', selectionStart: 3 } })
+
+    const colors = letterColors(container).slice(1)
+    expect(colors[2]).not.toBe(RED)
+    expect(colors[2]).not.toBe(GREEN)
+    expect([colors[0], colors[1], colors[3], colors[4], colors[5]]).toEqual([GREEN, GREEN, GREEN, RED, GREEN])
+  })
+
+  it('positions the input cursor where an already-answered box is clicked', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<Harness target="Bonsoir" />)
+    const input = screen.getByLabelText('Réponse') as HTMLInputElement
+
+    await user.type(input, 'ons')
+    const boxes = container.querySelectorAll('[aria-hidden] > span')
+    await user.click(boxes[2]) // the "n" box — editable position 1
+
+    expect(input.selectionStart).toBe(1)
+  })
+
+  it('clamps a click on a box further ahead than what is typed to the end of the typed text', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<Harness target="Bonsoir" />)
+    const input = screen.getByLabelText('Réponse') as HTMLInputElement
+
+    await user.type(input, 'on')
+    const boxes = container.querySelectorAll('[aria-hidden] > span')
+    await user.click(boxes[6]) // the "r" box — editable position 5, well beyond what's typed
+
+    expect(input.selectionStart).toBe(2)
+  })
+
+  it('absorbs a keystroke that only repeats a letter the field just skipped', async () => {
+    function BarbeHarness() {
+      const [typed, setTyped] = useState<string[]>([])
+      return (
+        <BlankFillField target="barbe" revealed={new Set([2])} typed={typed} onTypedChange={setTyped} />
+      )
+    }
+    const user = userEvent.setup()
+    render(<BarbeHarness />)
+    const input = screen.getByLabelText('Réponse') as HTMLInputElement
+
+    // "barbe": b-a-r-b-e, "r" (index 2) revealed. Typing "b","a" then "r" out
+    // of habit must not land in the box that wants the second "b".
+    await user.type(input, 'bar')
+
+    expect(input).toHaveValue('ba')
   })
 
   it('leaves an empty box uncoloured rather than marking it wrong', async () => {

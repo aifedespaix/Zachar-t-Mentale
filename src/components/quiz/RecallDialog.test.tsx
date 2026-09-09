@@ -66,42 +66,62 @@ describe('RecallDialog', () => {
     expect(screen.queryByText('Bonsoir')).not.toBeInTheDocument()
   })
 
-  it('offers another go after a miss instead of ending the question', async () => {
+  it('lets the user go on typing right after a miss — no separate retry step, and no card left disabled', async () => {
     const user = userEvent.setup()
     renderDialog()
 
     await user.type(screen.getByLabelText('Réponse'), 'onjour')
     await user.click(screen.getByRole('button', { name: 'Valider' }))
 
-    expect(screen.getByRole('button', { name: 'Réessayer' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Valider' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Réponse')).not.toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).not.toBeInTheDocument()
   })
 
-  it('holds the new letter back until the feedback has been read', async () => {
+  it('resumes the typing phase — and the Valider button — the moment the answer is edited', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.type(screen.getByLabelText('Réponse'), 'onjour')
+    await user.click(screen.getByRole('button', { name: 'Valider' }))
+    expect(screen.queryByRole('button', { name: 'Valider' })).not.toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Réponse'), '{Backspace}s')
+
+    expect(screen.getByRole('button', { name: 'Valider' })).toBeInTheDocument()
+  })
+
+  it('colours the graded answer red/green, so the mistake is visible', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.type(screen.getByLabelText('Réponse'), 'onjour')
+    await user.click(screen.getByRole('button', { name: 'Valider' }))
+
+    // Rendered through a Radix portal, outside the render() container.
+    const colors = [...document.body.querySelectorAll('[aria-hidden] > span')].map(el => getComputedStyle(el).color)
+    expect(colors).toContain('rgb(220, 38, 38)')
+  })
+
+  it('reveals the extra letter the moment the store grants it — no button to press for it', async () => {
     const user = userEvent.setup()
     const { withProgress } = renderDialog()
 
     await user.type(screen.getByLabelText('Réponse'), 'onjour')
     await user.click(screen.getByRole('button', { name: 'Valider' }))
-    // The store grants the extra letter the moment the answer is graded.
+    // The store grants the extra letter the moment the answer is graded, and
+    // the field must follow immediately — there is no "Réessayer" gate left.
     withProgress({ ...EMPTY_RECALL_PROGRESS, attempts: 1, extraReveals: 1 })
-
-    // Still six boxes: the field must not shift under the red/green feedback.
-    expect(screen.getByLabelText('Réponse')).toHaveAttribute('maxLength', '6')
-
-    await user.click(screen.getByRole('button', { name: 'Réessayer' }))
 
     expect(screen.getByLabelText('Réponse')).toHaveAttribute('maxLength', '5')
   })
 
-  it('carries the typed letters across the retry so a near miss is not retyped', async () => {
+  it('carries the typed letters across that reveal so a near miss is not retyped', async () => {
     const user = userEvent.setup()
     const { withProgress } = renderDialog()
 
     await user.type(screen.getByLabelText('Réponse'), 'onjour')
     await user.click(screen.getByRole('button', { name: 'Valider' }))
     withProgress({ ...EMPTY_RECALL_PROGRESS, attempts: 1, extraReveals: 1 })
-    await user.click(screen.getByRole('button', { name: 'Réessayer' }))
 
     // The final "r" is now given, so it leaves the field; the rest stays put.
     expect(screen.getByLabelText('Réponse')).toHaveValue('onjou')

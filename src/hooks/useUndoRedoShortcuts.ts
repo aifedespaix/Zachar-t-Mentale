@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useCardsStore } from '../state/useCardsStore'
+import { useQuizStore } from '../state/useQuizStore'
 
 // Ctrl+Z inside a text field must undo the TEXT, not the card structure —
 // hijacking it there silently reverts a structural action while the editor
@@ -15,6 +16,9 @@ export function useUndoRedoShortcuts(): void {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (isEditableTarget(event.target)) return
+      // Undoing/redoing card structure mid-quiz could move or remove the very
+      // card being asked about — no card may change under a quiz in progress.
+      if (useQuizStore.getState().active) return
 
       const isUndoCombo = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey
       const isRedoCombo =

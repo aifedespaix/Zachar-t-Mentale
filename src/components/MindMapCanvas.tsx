@@ -311,6 +311,7 @@ function MindMapCanvasInner() {
   const [exportError, setExportError] = useState<string | null>(null)
   const quizQuestions = useQuizStore(s => s.questions)
   const quizResults = useQuizStore(s => s.results)
+  const quizActive = useQuizStore(s => s.active)
   const theme = useResolvedTheme()
   const levelAppearance = useAppearanceSettingsStore(s => s.levels)
   const { setCenter, getZoom, flowToScreenPosition } = useReactFlow()
@@ -595,6 +596,12 @@ function MindMapCanvasInner() {
               onNodeDragStart={handleNodeDragStart}
               onNodeDrag={handleNodeDrag}
               onNodeDragStop={handleNodeDragStop}
+              // Opening a quiz question selects its card like any other click
+              // would. React Flow's default Backspace/Delete shortcut would
+              // then remove that still-selected card from the canvas the
+              // instant focus leaves an input — e.g. when a wrong answer
+              // disables the field. No card may ever disappear during a quiz.
+              deleteKeyCode={quizActive ? null : 'Backspace'}
               fitView
               colorMode={theme}
             >

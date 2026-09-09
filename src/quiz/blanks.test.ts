@@ -10,6 +10,7 @@ import {
   assembleAnswer,
   matchesTarget,
   remapTyped,
+  resolveTypedInsert,
 } from './blanks'
 
 /** Renders a target the way the field draws it, for readable assertions. */
@@ -207,5 +208,48 @@ describe('remapTyped', () => {
 
   it('returns nothing when the answer is now fully revealed', () => {
     expect(remapTyped(target, before, ['o', 'n', 's'], revealedSet(target, 'difficile', 99))).toEqual([])
+  })
+})
+
+describe('resolveTypedInsert', () => {
+  it('fills the box normally when the typed letter is not the one just skipped', () => {
+    const revealed = new Set<number>()
+    expect(resolveTypedInsert('chat', revealed, ['c'], ['c', 'h'])).toEqual(['c', 'h'])
+  })
+
+  it('swallows a keystroke that just repeats the letter that was skipped, when it does not answer the current box', () => {
+    // "barbe": b-a-r-b-e, with the "r" (index 2) already revealed. Having
+    // typed "b", "a", the next box wants the second "b" — but the user,
+    // spelling the word including the letter they can already see, types "r".
+    const revealed = new Set([2])
+    expect(resolveTypedInsert('barbe', revealed, ['b', 'a'], ['b', 'a', 'r'])).toEqual(['b', 'a'])
+  })
+
+  it('does NOT swallow when the skipped letter also happens to be the right answer for the current box', () => {
+    // "année": a-n-n-é-e, with the first "n" (index 1) revealed. The next
+    // editable box also wants an "n" (the second one) — typing "n" must fill
+    // it, not be mistaken for an echo of the revealed letter.
+    const revealed = new Set([1])
+    expect(resolveTypedInsert('année', revealed, ['a'], ['a', 'n'])).toEqual(['a', 'n'])
+  })
+
+  it('applies the same forgiveness right at the start of the word, for a revealed first letter', () => {
+    const revealed = new Set([0])
+    expect(resolveTypedInsert('abc', revealed, [], ['a'])).toEqual([])
+  })
+
+  it('does not swallow a genuinely wrong letter that has nothing to do with what was skipped', () => {
+    const revealed = new Set([0])
+    expect(resolveTypedInsert('abc', revealed, [], ['z'])).toEqual(['z'])
+  })
+
+  it('leaves a deletion untouched — the forgiveness rule only concerns forward typing', () => {
+    const revealed = new Set<number>()
+    expect(resolveTypedInsert('chat', revealed, ['c', 'h'], ['c'])).toEqual(['c'])
+  })
+
+  it('leaves a multi-character change (e.g. a paste) untouched', () => {
+    const revealed = new Set<number>()
+    expect(resolveTypedInsert('chat', revealed, ['c'], ['c', 'h', 'a'])).toEqual(['c', 'h', 'a'])
   })
 })

@@ -145,6 +145,46 @@ export function matchesTarget(typedChar: string, targetChar: string): boolean {
 }
 
 /**
+ * Absorbs a keystroke that only repeats the letter the field just skipped.
+ *
+ * Structure and revealed letters are never typed — they are shown for free
+ * and the next editable box comes right after them. But a user spelling the
+ * word naturally still "says" that letter as they go, and if it lands in the
+ * box meant for something else, it would be graded as a wrong guess for the
+ * wrong reason. So: when the newly typed letter matches the one just skipped
+ * AND does not answer the current box, the keystroke is dropped rather than
+ * filed as a mistake. It must NOT fire when the skipped letter and the
+ * current box's answer happen to be the same letter (e.g. a double letter
+ * around a reveal) — there, the keystroke genuinely answers the box.
+ *
+ * Only handles the common case of one character typed forward (`nextTyped`
+ * one longer than `previousTyped`); a deletion, a paste, or an in-place
+ * replacement passes through untouched.
+ */
+export function resolveTypedInsert(
+  target: string,
+  revealed: ReadonlySet<number>,
+  previousTyped: readonly string[],
+  nextTyped: readonly string[]
+): string[] {
+  if (nextTyped.length !== previousTyped.length + 1) return [...nextTyped]
+
+  let position = 0
+  while (position < previousTyped.length && previousTyped[position] === nextTyped[position]) position++
+  const insertedChar = nextTyped[position]
+
+  const editable = editableIndices(target, revealed)
+  const targetIndex = editable[position]
+  const previousTargetIndex = position > 0 ? editable[position - 1] : -1
+  const justSkipped = targetIndex - previousTargetIndex > 1 ? target[targetIndex - 1] : null
+
+  if (justSkipped !== null && matchesTarget(insertedChar, justSkipped) && !matchesTarget(insertedChar, target[targetIndex])) {
+    return [...previousTyped]
+  }
+  return [...nextTyped]
+}
+
+/**
  * Carry a half-typed answer across a change in what is revealed.
  *
  * A failed attempt hands over one more letter, which removes a box from the

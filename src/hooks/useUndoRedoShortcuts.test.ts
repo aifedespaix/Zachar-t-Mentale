@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useUndoRedoShortcuts } from './useUndoRedoShortcuts'
 import { useCardsStore, createCardsStore } from '../state/useCardsStore'
+import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 
 describe('useUndoRedoShortcuts', () => {
   beforeEach(() => {
@@ -78,5 +79,16 @@ describe('useUndoRedoShortcuts', () => {
     expect(useCardsStore.getState().history.present).toHaveLength(2)
 
     editable.remove()
+  })
+
+  it('ignores Ctrl+Z while a quiz is active, even when focus is outside any input', async () => {
+    const user = userEvent.setup()
+    renderHook(() => useUndoRedoShortcuts())
+    useQuizStore.setState({ active: true })
+
+    await user.keyboard('{Control>}z{/Control}')
+    expect(useCardsStore.getState().history.present).toHaveLength(2)
+
+    useQuizStore.setState(createQuizStore().getState())
   })
 })

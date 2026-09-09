@@ -351,6 +351,27 @@ describe('MindMapCanvas quiz mode', () => {
     expect(within(screen.getByTestId('card-child')).getByTestId('answer-button')).toBeInTheDocument()
     expect(within(screen.getByTestId('card-root')).queryByTestId('answer-button')).toBeNull()
   })
+
+  it('never lets Backspace remove a card from the canvas while a quiz is active', async () => {
+    const user = userEvent.setup()
+    render(<MindMapCanvas />)
+
+    // Clicking the card body (not the "Répondre" button, which stops
+    // propagation) both opens the dialog AND selects the underlying React
+    // Flow node, exactly like any other click on the canvas would.
+    await user.click(screen.getByTestId('card-child'))
+
+    // A wrong submission disables the answer field, which blurs it — focus
+    // lands on the dialog shell, not on any input. That's when React Flow's
+    // own default Backspace/Delete shortcut, still armed, would otherwise
+    // remove the still-selected node from the canvas.
+    await user.keyboard('zzzzzzzzzz')
+    await user.click(screen.getByRole('button', { name: /valider/i }))
+
+    await user.keyboard('{Backspace}')
+
+    expect(screen.getByTestId('card-child')).toBeInTheDocument()
+  })
 })
 
 describe('findNewlyCreatedCardId', () => {
