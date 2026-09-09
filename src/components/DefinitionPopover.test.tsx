@@ -5,6 +5,11 @@ import { describe, it, expect, vi } from 'vitest'
 import { DefinitionPopover } from './DefinitionPopover'
 import type { CardBlock } from '../types/cardBlock'
 
+// The editing contract these tests used to cover moved to the description
+// dialog along with the behaviour itself — see `DescriptionDialog.test.tsx`.
+// What is left here is what the popover still owns: showing a definition
+// without letting its content move the box.
+
 const text = (value: string): CardBlock[] => [{ kind: 'text', text: value }]
 
 async function openPopover(user: ReturnType<typeof userEvent.setup>) {
@@ -14,101 +19,34 @@ async function openPopover(user: ReturnType<typeof userEvent.setup>) {
 describe('DefinitionPopover', () => {
   it('shows the definition text once opened', async () => {
     const user = userEvent.setup()
-    render(<DefinitionPopover blocks={text('Une définition')} locked={false} onCommit={() => {}} />)
+    render(<DefinitionPopover blocks={text('Une définition')} locked={false} onEdit={() => {}} />)
 
     expect(screen.queryByText('Une définition')).not.toBeInTheDocument()
     await openPopover(user)
     expect(screen.getByText('Une définition')).toBeInTheDocument()
   })
 
-  it('opens an editable field when the definition is clicked, and commits it', async () => {
+  it('opens the editor rather than editing in place', async () => {
     const user = userEvent.setup()
-    const onCommit = vi.fn()
-    render(<DefinitionPopover blocks={text('Une définition')} locked={false} onCommit={onCommit} />)
+    const onEdit = vi.fn()
+    render(<DefinitionPopover blocks={text('Une définition')} locked={false} onEdit={onEdit} />)
 
     await openPopover(user)
-    await user.click(screen.getByText('Une définition'))
-    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
-    await user.clear(field)
-    await user.type(field, 'Nouvelle définition')
-    await user.click(screen.getByRole('button', { name: /terminer/i }))
+    await user.click(screen.getByRole('button', { name: /modifier la définition/i }))
 
-    expect(onCommit).toHaveBeenCalledWith([{ kind: 'text', text: 'Nouvelle définition' }])
+    expect(onEdit).toHaveBeenCalledTimes(1)
+    // The popover is a reading surface now: nothing in it is a field.
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
 
-  it('does not open the definition for editing when the mind map is locked', async () => {
+  it('offers no way to edit when the mind map is locked', async () => {
     const user = userEvent.setup()
-    render(<DefinitionPopover blocks={text('Une définition')} locked onCommit={() => {}} />)
+    render(<DefinitionPopover blocks={text('Une définition')} locked onEdit={() => {}} />)
 
     await openPopover(user)
-    await user.click(screen.getByText('Une définition'))
 
-    expect(screen.queryByRole('textbox', { name: /texte du bloc 1/i })).not.toBeInTheDocument()
-  })
-
-  it('cancels the edit on Escape without calling onCommit', async () => {
-    const user = userEvent.setup()
-    const onCommit = vi.fn()
-    render(<DefinitionPopover blocks={text('Une définition')} locked={false} onCommit={onCommit} />)
-
-    await openPopover(user)
-    await user.click(screen.getByText('Une définition'))
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' annulé{Escape}')
-
-    expect(onCommit).not.toHaveBeenCalled()
-  })
-
-  it('commits the draft when the popover is closed by clicking away', async () => {
-    // The path most people take. The block rewrite dropped the old field's
-    // commit-on-blur, so every draft was silently discarded unless the user
-    // found the « Terminer » link.
-    const user = userEvent.setup()
-    const onCommit = vi.fn()
-    render(<DefinitionPopover blocks={text('Avant')} locked={false} onCommit={onCommit} />)
-
-    await openPopover(user)
-    await user.click(screen.getByText('Avant'))
-    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
-    await user.clear(field)
-    await user.type(field, 'Un long paragraphe que je viens de taper')
-    await user.click(document.body)
-
-    expect(onCommit).toHaveBeenCalledWith([
-      { kind: 'text', text: 'Un long paragraphe que je viens de taper' },
-    ])
-  })
-
-  it('does not commit when the popover is closed without an edit in progress', async () => {
-    const user = userEvent.setup()
-    const onCommit = vi.fn()
-    render(<DefinitionPopover blocks={text('Intacte')} locked={false} onCommit={onCommit} />)
-
-    await openPopover(user)
-    await user.click(document.body)
-
-    expect(onCommit).not.toHaveBeenCalled()
-  })
-
-  it('re-seeds the draft from the card on each edit, so a stale draft cannot be committed later', async () => {
-    const user = userEvent.setup()
-    const onCommit = vi.fn()
-    const { rerender } = render(
-      <DefinitionPopover blocks={text('Version 1')} locked={false} onCommit={onCommit} />
-    )
-
-    await openPopover(user)
-    await user.click(screen.getByText('Version 1'))
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' modifiée{Escape}')
-
-    // Escape cancels the edit AND closes the popover (Radix's own behaviour),
-    // so the next edit starts from a reopen — which is exactly the path where
-    // a stale draft would leak if the component kept one.
-    rerender(<DefinitionPopover blocks={text('Version 2')} locked={false} onCommit={onCommit} />)
-    await openPopover(user)
-    await user.click(screen.getByText('Version 2'))
-    await user.click(screen.getByRole('button', { name: /terminer/i }))
-
-    expect(onCommit).toHaveBeenCalledWith([{ kind: 'text', text: 'Version 2' }])
+    expect(screen.getByText('Une définition')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /modifier la définition/i })).not.toBeInTheDocument()
   })
 
   it('keeps one fixed width whatever the content holds', async () => {
@@ -116,7 +54,7 @@ describe('DefinitionPopover', () => {
     // the same box, or opening two different cards moves the popover under the
     // pointer.
     const user = userEvent.setup()
-    const { rerender } = render(<DefinitionPopover blocks={text('Court')} locked={false} onCommit={() => {}} />)
+    const { rerender } = render(<DefinitionPopover blocks={text('Court')} locked={false} onEdit={() => {}} />)
     await openPopover(user)
     const width = () => (screen.getByText(/définition/i).closest('[style*="width"]') as HTMLElement).style.width
 
@@ -125,7 +63,7 @@ describe('DefinitionPopover', () => {
       <DefinitionPopover
         blocks={[{ kind: 'table', header: ['a', 'b', 'c'], rows: [['1', '2', '3']] }]}
         locked={false}
-        onCommit={() => {}}
+        onEdit={() => {}}
       />
     )
     expect(width()).toBe(short)
@@ -133,88 +71,23 @@ describe('DefinitionPopover', () => {
 
   it('renders a formula as typeset markup rather than its LaTeX source', async () => {
     const user = userEvent.setup()
-    render(
-      <DefinitionPopover blocks={[{ kind: 'math', latex: '\\frac{1}{2}' }]} locked={false} onCommit={() => {}} />
-    )
+    render(<DefinitionPopover blocks={[{ kind: 'math', latex: '\\frac{1}{2}' }]} locked={false} onEdit={() => {}} />)
     await openPopover(user)
     expect(document.querySelector('.katex')).not.toBeNull()
   })
 
-  describe('the input-mode selector', () => {
-    it('switches the active block to a formula, keeping what was typed', async () => {
-      // Règle 6: reversible, so the selector is safe to explore.
-      const user = userEvent.setup()
-      const onCommit = vi.fn()
-      render(<DefinitionPopover blocks={text('x^2')} locked={false} onCommit={onCommit} />)
+  it('renders an image through the resolver it is given', async () => {
+    const user = userEvent.setup()
+    render(
+      <DefinitionPopover
+        blocks={[{ kind: 'image', asset: 'a1.png', alt: 'Schéma', width: 320, height: 240 }]}
+        locked={false}
+        onEdit={() => {}}
+        resolveAsset={asset => `asset://localhost/${asset}`}
+      />
+    )
+    await openPopover(user)
 
-      await openPopover(user)
-      await user.click(screen.getByText('x^2'))
-      await user.click(screen.getByRole('button', { name: /^formule$/i }))
-      await user.click(screen.getByRole('button', { name: /terminer/i }))
-
-      expect(onCommit).toHaveBeenCalledWith([{ kind: 'math', latex: 'x^2' }])
-    })
-
-    it('switches back to text without losing the formula source', async () => {
-      const user = userEvent.setup()
-      const onCommit = vi.fn()
-      render(<DefinitionPopover blocks={[{ kind: 'math', latex: 'x^2' }]} locked={false} onCommit={onCommit} />)
-
-      await openPopover(user)
-      await user.click(screen.getByTestId('definition-body'))
-      await user.click(screen.getByRole('button', { name: /^texte$/i }))
-      await user.click(screen.getByRole('button', { name: /terminer/i }))
-
-      expect(onCommit).toHaveBeenCalledWith([{ kind: 'text', text: 'x^2' }])
-    })
-
-    it('converts a text block to a formula in place when the user types $$', async () => {
-      const user = userEvent.setup()
-      const onCommit = vi.fn()
-      render(<DefinitionPopover blocks={text('')} locked={false} onCommit={onCommit} />)
-
-      await openPopover(user)
-      await user.click(screen.getByTestId('definition-body'))
-      await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), 'a+b$$')
-      await user.click(screen.getByRole('button', { name: /terminer/i }))
-
-      expect(onCommit).toHaveBeenCalledWith([{ kind: 'math', latex: 'a+b' }])
-    })
-
-    it('adds a second block through the permanent gutter, keeping the first', async () => {
-      const user = userEvent.setup()
-      const onCommit = vi.fn()
-      render(<DefinitionPopover blocks={text('La règle')} locked={false} onCommit={onCommit} />)
-
-      await openPopover(user)
-      await user.click(screen.getByText('La règle'))
-      await user.click(screen.getByRole('button', { name: /ajouter un bloc/i }))
-      await user.type(screen.getByRole('textbox', { name: /texte du bloc 2/i }), 'Un exemple')
-      await user.click(screen.getByRole('button', { name: /terminer/i }))
-
-      expect(onCommit).toHaveBeenCalledWith([
-        { kind: 'text', text: 'La règle' },
-        { kind: 'text', text: 'Un exemple' },
-      ])
-    })
-
-    it('removes a block', async () => {
-      const user = userEvent.setup()
-      const onCommit = vi.fn()
-      render(
-        <DefinitionPopover
-          blocks={[{ kind: 'text', text: 'garder' }, { kind: 'text', text: 'jeter' }]}
-          locked={false}
-          onCommit={onCommit}
-        />
-      )
-
-      await openPopover(user)
-      await user.click(screen.getByText('garder'))
-      await user.click(screen.getByRole('button', { name: /supprimer le bloc 2/i }))
-      await user.click(screen.getByRole('button', { name: /terminer/i }))
-
-      expect(onCommit).toHaveBeenCalledWith([{ kind: 'text', text: 'garder' }])
-    })
+    expect(screen.getByRole('img', { name: 'Schéma' })).toHaveAttribute('src', 'asset://localhost/a1.png')
   })
 })

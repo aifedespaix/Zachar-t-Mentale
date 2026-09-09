@@ -21,6 +21,7 @@ import { isRootCard } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { EMPTY_RECALL_PROGRESS } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
+import { ancestorTitles } from '../state/cardsReducer'
 import { useQuizStore } from '../state/useQuizStore'
 import { useQuizSettingsStore } from '../state/useQuizSettingsStore'
 import { revealedSet, slotsOf } from '../quiz/blanks'
@@ -37,6 +38,7 @@ import { QcmDialog } from './quiz/QcmDialog'
 import { RecallDialog } from './quiz/RecallDialog'
 import { FlipCard } from './FlipCard'
 import { DefinitionPopover } from './DefinitionPopover'
+import { DescriptionDialog } from '../content/DescriptionDialog'
 import { contentOf } from '../content/blocks'
 import { BlockView } from '../content/BlockView'
 import { imageBlockFrom } from '../content/imageBlock'
@@ -174,7 +176,6 @@ export function CardNode({ data }: CardNodeProps) {
   }, [quiz])
 
   const updateTitle = useCardsStore(s => s.updateTitle)
-  const updateDefinition = useCardsStore(s => s.updateDefinition)
   const updateContent = useCardsStore(s => s.updateContent)
   const updateIcon = useCardsStore(s => s.updateIcon)
   const allCards = useCardsStore(s => s.history.present)
@@ -207,9 +208,8 @@ export function CardNode({ data }: CardNodeProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmDetachOpen, setConfirmDetachOpen] = useState(false)
   const [flipped, setFlipped] = useState(false)
-  const [editingDefinition, setEditingDefinition] = useState(false)
+  const [descriptionOpen, setDescriptionOpen] = useState(false)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
-  const [draftDefinition, setDraftDefinition] = useState(card.definition ?? '')
   const isDetached = card.detached === true
   // A floating card is painted grey whatever level it last had: its level is
   // vestigial once it leaves the hierarchy (see the `detached` field), so
@@ -256,10 +256,9 @@ export function CardNode({ data }: CardNodeProps) {
     titleInputRef.current?.focus()
   }, [autoEdit])
 
-  function startEditingDefinition() {
+  function openDescription() {
     if (locked) return
-    setDraftDefinition(card.definition ?? '')
-    setEditingDefinition(true)
+    setDescriptionOpen(true)
   }
 
   function handleTitleFocus() {
@@ -305,16 +304,6 @@ export function CardNode({ data }: CardNodeProps) {
     cancellingTitleRef.current = true
     setDraftTitle(card.title)
     titleInputRef.current?.blur()
-  }
-
-  function commitDefinition() {
-    if (draftDefinition !== (card.definition ?? '')) updateDefinition(card.id, draftDefinition)
-    setEditingDefinition(false)
-  }
-
-  function cancelDefinition() {
-    setDraftDefinition(card.definition ?? '')
-    setEditingDefinition(false)
   }
 
   // Detaching a leaf is a one-click, reversible (undo) change of status, so it
@@ -749,23 +738,8 @@ export function CardNode({ data }: CardNodeProps) {
             <DefinitionPopover
               blocks={contentOf(card)}
               locked={locked}
-              onCommit={blocks => updateContent(card.id, blocks)}
+              onEdit={openDescription}
               resolveAsset={resolveAsset}
-              // The write capabilities stay gated on there being a file: with
-              // nowhere to store an asset the affordances are hidden rather
-              // than failing on click.
-              onInsertImage={
-                currentFilePath ? source => imageBlockFrom(currentFilePath, source) : undefined
-              }
-              onPickImage={
-                currentFilePath
-                  ? async () => {
-                      const source = await pickImageFile()
-                      return source === null ? undefined : imageBlockFrom(currentFilePath, source)
-                    }
-                  : undefined
-              }
-              onError={setWorkspaceError}
             />
           ) : (
             <Tooltip>
@@ -775,7 +749,7 @@ export function CardNode({ data }: CardNodeProps) {
                   size="icon-sm"
                   aria-label="Ajouter une définition"
                   disabled={locked}
-                  onClick={startEditingDefinition}
+                  onClick={openDescription}
                 >
                   <span style={{ position: 'relative', display: 'inline-flex' }}>
                     <AlignLeft />
@@ -846,20 +820,31 @@ export function CardNode({ data }: CardNodeProps) {
       </TooltipProvider>
       )}
 
-      {editingDefinition && (
-        <textarea
-          autoFocus
-          aria-label="Définition"
-          value={draftDefinition}
-          onChange={e => setDraftDefinition(e.target.value)}
-          onBlur={commitDefinition}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              commitDefinition()
-            }
-            if (e.key === 'Escape') cancelDefinition()
-          }}
+      {/* Mounted only while open, like the delete and detach dialogs above:
+          that is what makes each visit start from the card as it is now
+          instead of resuming a draft left from a previous one. */}
+      {descriptionOpen && (
+        <DescriptionDialog
+          breadcrumb={ancestorTitles(allCards, card.id)}
+          cardTitle={card.title}
+          blocks={contentOf(card)}
+          onSave={blocks => updateContent(card.id, blocks)}
+          onClose={() => setDescriptionOpen(false)}
+          resolveAsset={resolveAsset}
+          // Image capabilities are gated on there being an open file: assets
+          // live in a sidecar named after it, so with none there is nowhere to
+          // store one and the affordances stay hidden rather than failing on
+          // click.
+          onInsertImage={currentFilePath ? source => imageBlockFrom(currentFilePath, source) : undefined}
+          onPickImage={
+            currentFilePath
+              ? async () => {
+                  const source = await pickImageFile()
+                  return source === null ? undefined : imageBlockFrom(currentFilePath, source)
+                }
+              : undefined
+          }
+          onError={setWorkspaceError}
         />
       )}
 

@@ -732,38 +732,44 @@ describe('CardNode footer', () => {
     expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
   })
 
-  it('opens an editable field when "add definition" is clicked and commits the typed text on Enter', async () => {
+  it('opens the description editor when "add definition" is clicked, and saves what was typed', async () => {
+    // The whole point of routing creation through the editor: a card with no
+    // definition used to get a plain textarea that could hold nothing but
+    // text, so a formula needed three round trips to get in.
     const user = userEvent.setup()
     renderCardNode(testCard)
 
     await user.click(screen.getByRole('button', { name: /ajouter une définition/i }))
-    const field = screen.getByRole('textbox', { name: /définition/i })
-    await user.type(field, 'Nouvelle définition{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), 'Nouvelle définition')
+    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
 
     expect(useCardsStore.getState().history.present.find(c => c.id === testCard.id)?.definition).toBe(
       'Nouvelle définition'
     )
   })
 
-  it('cancels the definition edit on Escape without calling updateDefinition', async () => {
+  it('leaves the card untouched when the editor is closed without saving', async () => {
     const user = userEvent.setup()
     renderCardNode(testCard)
 
     await user.click(screen.getByRole('button', { name: /ajouter une définition/i }))
-    const field = screen.getByRole('textbox', { name: /définition/i })
-    await user.type(field, 'Texte annulé{Escape}')
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), 'Texte abandonné')
+    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
+    // Discarding real work asks first — that confirmation is the difference
+    // from the popover, which committed silently on click-away.
+    await user.click(screen.getByRole('button', { name: /fermer sans enregistrer/i }))
 
-    expect(screen.queryByRole('textbox', { name: /définition/i })).not.toBeInTheDocument()
     expect(useCardsStore.getState().history.present.find(c => c.id === testCard.id)?.definition).toBeUndefined()
   })
 
-  it('does not push a history entry when the definition editor is closed unchanged', async () => {
+  it('does not push a history entry when the editor is closed unchanged', async () => {
     const user = userEvent.setup()
     renderCardNode(testCard)
     await user.click(screen.getByRole('button', { name: /ajouter une définition/i }))
     const before = useCardsStore.getState().history
 
-    await user.keyboard('{Enter}')
+    // Nothing typed, so no confirmation to clear: it just closes.
+    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
 
     expect(useCardsStore.getState().history).toBe(before)
   })
@@ -808,17 +814,17 @@ describe('CardNode footer', () => {
     expect(screen.getByTestId(`card-${testCard.id}`)).toHaveStyle({ borderColor: '#dc2626' })
   })
 
-  it('wires the definition popover to the store when a new value is committed', async () => {
+  it('wires the definition editor to the store when a new value is saved', async () => {
     const user = userEvent.setup()
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
 
     await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
-    await user.click(screen.getByText('Définition existante'))
+    await user.click(screen.getByRole('button', { name: /modifier la définition/i }))
     const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
     await user.clear(field)
     await user.type(field, 'Définition modifiée')
-    await user.click(screen.getByRole('button', { name: /terminer/i }))
+    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
 
     const card = useCardsStore.getState().history.present.find(c => c.id === cardWithDefinition.id)
     expect(card?.definition).toBe('Définition modifiée')
@@ -833,13 +839,13 @@ describe('CardNode footer', () => {
     renderCardNode(cardWithDefinition)
 
     await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
-    await user.click(screen.getByText('Définition existante'))
+    await user.click(screen.getByRole('button', { name: /modifier la définition/i }))
     const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
     await user.clear(field)
     // No braces in the typed string: userEvent reads `{...}` as key-descriptor
     // syntax, which would swallow them before they reached the field.
     await user.type(field, 'x^2$$')
-    await user.click(screen.getByRole('button', { name: /terminer/i }))
+    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
 
     const card = useCardsStore.getState().history.present.find(c => c.id === cardWithDefinition.id)
     expect(card?.content).toEqual([{ kind: 'math', latex: 'x^2' }])

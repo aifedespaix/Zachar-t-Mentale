@@ -1,28 +1,36 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState } from 'react'
 
 /**
- * WYSIWYG formula editing, on top of the same `latex` string the raw field
- * edits — so the two are interchangeable and neither is a dead end.
- *
- * Loaded through a dynamic `import()`, and only once a math block is actually
- * opened for editing: MathLive is ~5.7 MB unpacked, and startup must not pay
- * for a feature most cards never use.
- *
- * Which editor to show is decided ONCE at mount and never changes while the
- * block is open. Rendering `fallback` rather than a spinner is the same
- * principle: a slow — or failed — load must never leave the user unable to
- * type, and a field that swaps itself out mid-sentence is worse than one that
- * never upgrades.
+ * What the symbol palette drives. Exposed as a handle rather than as another
+ * `latex` prop because insertion is a POSITIONED act: it belongs where the
+ * caret is, and only the live element knows that.
  */
+export interface MathFieldHandle {
+  /**
+   * Inserts a fragment at the caret.
+   *
+   * `rich` may carry MathLive's placeholder syntax (`#0` for the selection,
+   * `#?` for the next tab stop), which is what makes a palette button leave
+   * the caret inside the fraction it just created. `plain` is the same
+   * fragment as literal LaTeX, for the raw-field path where those tokens
+   * would be typed out verbatim as text.
+   */
+  insert: (rich: string, plain?: string) => void
+}
+
 export interface MathFieldEditorProps {
   latex: string
   onChange: (latex: string) => void
   ariaLabel: string
   /** Shown until the editor is available, and kept if it never becomes available. */
   fallback: React.ReactNode
+  ref?: React.Ref<MathFieldHandle>
 }
 
-type MathfieldElement = HTMLElement & { value: string }
+type MathfieldElement = HTMLElement & {
+  value: string
+  insert?: (fragment: string, options?: { focus?: boolean }) => void
+}
 
 /** Module-level: the import is shared by every math block and resolves once. */
 let loadPromise: Promise<void> | undefined
@@ -40,7 +48,21 @@ function loadMathLive(): Promise<void> {
   return loadPromise
 }
 
-export function MathFieldEditor({ latex, onChange, ariaLabel, fallback }: MathFieldEditorProps) {
+/**
+ * WYSIWYG formula editing, on top of the same `latex` string the raw field
+ * edits — so the two are interchangeable and neither is a dead end.
+ *
+ * Loaded through a dynamic `import()`, and only once a math block is actually
+ * opened for editing: MathLive is ~5.7 MB unpacked, and startup must not pay
+ * for a feature most cards never use.
+ *
+ * Which editor to show is decided ONCE at mount and never changes while the
+ * block is open. Rendering `fallback` rather than a spinner is the same
+ * principle: a slow — or failed — load must never leave the user unable to
+ * type, and a field that swaps itself out mid-sentence is worse than one that
+ * never upgrades.
+ */
+export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, ref }: MathFieldEditorProps) {
   // Decided ONCE, at mount, and never revisited while this block is open.
   //
   // Reacting to the import resolving would mean the field can be replaced
@@ -55,6 +77,32 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback }: MathFi
   // without the effect having to tear the element down and rebuild it.
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  // Same reason as `onChangeRef`: the handle below is built once, so it must
+  // not close over the formula as it was at mount.
+  const latexRef = useRef(latex)
+  latexRef.current = latex
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      insert(rich, plain = rich) {
+        const field = fieldRef.current
+        // No live element — the raw-LaTeX path, before MathLive has loaded or
+        // after it failed to. There is no caret to insert at through this
+        // component (the textarea belongs to the caller), so the fragment goes
+        // at the end: appending is degraded, losing the click is not.
+        if (field === null || typeof field.insert !== 'function') {
+          onChangeRef.current(latexRef.current + plain)
+          return
+        }
+        field.insert(rich, { focus: true })
+        // MathLive's `insert()` mutates the field without necessarily emitting
+        // `input`, so the change is pushed out here rather than waited for.
+        onChangeRef.current(field.value)
+      },
+    }),
+    []
+  )
 
   // Kicks the import off without waiting for it: this block keeps whichever
   // editor it decided on, the next one benefits.
