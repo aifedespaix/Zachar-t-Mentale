@@ -27,3 +27,12 @@ export async function pickXmindFile(): Promise<string | null> {
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
   return readFile(path)
 }
+
+/** Decodes a base64 data URL (as produced by canvas/image capture) into raw bytes. */
+export function dataUrlToBytes(dataUrl: string): Uint8Array {
+  const base64 = dataUrl.split(',')[1] ?? ''
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}

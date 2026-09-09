@@ -10,7 +10,10 @@ vi.mock('../../export/exportMindMap', () => ({
   exportToImageDataUrls: vi.fn(async () => ['data:image/png;base64,AA==']),
 }))
 vi.mock('../../xmind/exportXmind', () => ({ writeXmindFile: vi.fn(async () => new Uint8Array([2])) }))
-vi.mock('../../persistence/exportIO', () => ({ saveBytesAs: vi.fn(async () => '/out/chapitre.pdf') }))
+vi.mock('../../persistence/exportIO', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../persistence/exportIO')>()
+  return { ...actual, saveBytesAs: vi.fn(async () => '/out/chapitre.pdf') }
+})
 
 import { exportToPdfBytes, exportToImageDataUrls } from '../../export/exportMindMap'
 import { writeXmindFile } from '../../xmind/exportXmind'

@@ -5,7 +5,7 @@ vi.mock('@tauri-apps/plugin-fs', () => ({ writeFile: vi.fn(), readFile: vi.fn() 
 
 import { save, open } from '@tauri-apps/plugin-dialog'
 import { writeFile, readFile } from '@tauri-apps/plugin-fs'
-import { saveBytesAs, pickXmindFile, readBinaryFile } from './exportIO'
+import { saveBytesAs, pickXmindFile, readBinaryFile, dataUrlToBytes } from './exportIO'
 
 describe('saveBytesAs', () => {
   beforeEach(() => {
@@ -48,5 +48,18 @@ describe('readBinaryFile', () => {
     vi.mocked(readFile).mockResolvedValue(new Uint8Array([9]))
     expect(await readBinaryFile('/a/b.xmind')).toEqual(new Uint8Array([9]))
     expect(readFile).toHaveBeenCalledWith('/a/b.xmind')
+  })
+})
+
+describe('dataUrlToBytes', () => {
+  it('decodes a base64 data URL into its raw bytes', () => {
+    // "AAECAw==" is the base64 encoding of the bytes [0, 1, 2, 3]
+    const bytes = dataUrlToBytes('data:image/png;base64,AAECAw==')
+    expect(bytes).toEqual(new Uint8Array([0, 1, 2, 3]))
+  })
+
+  it('returns an empty array for a data URL with no comma-separated payload', () => {
+    const bytes = dataUrlToBytes('not-a-data-url')
+    expect(bytes).toEqual(new Uint8Array([]))
   })
 })

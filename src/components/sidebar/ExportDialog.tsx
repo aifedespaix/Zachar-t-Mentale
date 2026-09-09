@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { Card } from '../../types/card'
 import { exportToPdfBytes, exportToImageDataUrls } from '../../export/exportMindMap'
 import { writeXmindFile } from '../../xmind/exportXmind'
-import { saveBytesAs } from '../../persistence/exportIO'
+import { saveBytesAs, dataUrlToBytes } from '../../persistence/exportIO'
 import { describeExportError } from '../../export/describeExportError'
 import { mindMapBaseName } from '../../persistence/paths'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
@@ -22,14 +22,6 @@ export interface ExportDialogProps {
   open: boolean
   onClose: () => void
   onError: (message: string) => void
-}
-
-function dataUrlToBytes(dataUrl: string): Uint8Array {
-  const base64 = dataUrl.split(',')[1] ?? ''
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-  return bytes
 }
 
 export function ExportDialog({ fileName, filePath, cards, open, onClose, onError }: ExportDialogProps) {
