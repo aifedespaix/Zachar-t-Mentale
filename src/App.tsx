@@ -87,7 +87,8 @@ function App() {
   useWindowTitle(currentFilePath)
   useThemeDomSync()
   useAppliedFontFamily()
-  const { updateReady, dismissed, applyUpdate, dismissUpdate } = useAppUpdater()
+  const { updateReady, dismissed, applyUpdate, dismissUpdate, status: updateStatus, checkNow: checkForUpdates } =
+    useAppUpdater()
   const { flush } = useAutosave(
     loadedPath ?? '',
     cards,
@@ -287,7 +288,9 @@ function App() {
           {/* The cards in memory, not the file on disk — see ExportMapButton. */}
           {!quizActive && <ExportMapButton filePath={loadedPath} cards={cards} />}
           {!quizActive && <QuizButton />}
-          {!quizActive && <SettingsButton />}
+          {!quizActive && (
+            <SettingsButton updateCheck={{ status: updateStatus, checkNow: checkForUpdates }} />
+          )}
           {!quizActive && <ThemeToggleButton />}
           <span title={currentFilePath ?? undefined} style={{ fontSize: 13, fontWeight: 500 }}>
             {currentFileName ?? 'Aucun fichier ouvert'}

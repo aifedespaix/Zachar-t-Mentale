@@ -6,6 +6,7 @@ import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsSto
 import { useQuizSettingsStore } from '../../state/useQuizSettingsStore'
 import type { AppearanceSettings } from '../../types/appearanceSettings'
 import type { QuizSettings } from '../../types/quizSettings'
+import type { UpdateCheckStatus } from '../../hooks/useAppUpdater'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { AppearanceSettingsPanel } from './AppearanceSettingsPanel'
 import { QuizSettingsPanel } from './QuizSettingsPanel'
@@ -21,6 +22,7 @@ const TABS: { id: SettingsTab; label: string; icon: LucideIcon; hint: string }[]
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  updateCheck: { status: UpdateCheckStatus; checkNow: () => Promise<void> }
 }
 
 /**
@@ -33,7 +35,7 @@ interface SettingsDialogProps {
  * snapshot taken when the window opened, which puts the app back exactly as it
  * was, preview included.
  */
-export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+export function SettingsDialog({ open, onOpenChange, updateCheck }: SettingsDialogProps) {
   const [tab, setTab] = useState<SettingsTab>('general')
   const [dirty, setDirty] = useState(false)
   // Refs, not state: the snapshot is never rendered, and re-rendering on it
@@ -168,7 +170,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             tabIndex={0}
             style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingRight: 6 }}
           >
-            {tab === 'general' && <GeneralSettingsPanel settings={appearance} onChange={editAppearance} />}
+            {tab === 'general' && (
+              <GeneralSettingsPanel settings={appearance} onChange={editAppearance} updateCheck={updateCheck} />
+            )}
             {tab === 'appearance' && <AppearanceSettingsPanel settings={appearance} onChange={editAppearance} />}
             {tab === 'quiz' && <QuizSettingsPanel settings={quiz} onChange={editQuiz} />}
           </div>

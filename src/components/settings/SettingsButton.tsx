@@ -3,13 +3,18 @@ import { Settings } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import { SettingsDialog } from './SettingsDialog'
+import type { UpdateCheckStatus } from '../../hooks/useAppUpdater'
+
+interface SettingsButtonProps {
+  updateCheck: { status: UpdateCheckStatus; checkNow: () => Promise<void> }
+}
 
 /**
  * The one settings entry point. Apparence, quiz and general options used to
  * each have their own header button; folding them into tabs of a single window
  * gives the header back to the actions that actually act on the mind map.
  */
-export function SettingsButton() {
+export function SettingsButton({ updateCheck }: SettingsButtonProps) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -22,7 +27,7 @@ export function SettingsButton() {
         </TooltipTrigger>
         <TooltipContent>Paramètres</TooltipContent>
       </Tooltip>
-      <SettingsDialog open={open} onOpenChange={setOpen} />
+      <SettingsDialog open={open} onOpenChange={setOpen} updateCheck={updateCheck} />
     </TooltipProvider>
   )
 }

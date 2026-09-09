@@ -18,6 +18,8 @@ vi.mock('../../persistence/quizSettings', () => ({
   saveQuizSettings: vi.fn().mockResolvedValue(undefined),
 }))
 
+const updateCheckStub = { status: 'idle' as const, checkNow: vi.fn().mockResolvedValue(undefined) }
+
 describe('SettingsDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -26,14 +28,24 @@ describe('SettingsDialog', () => {
   })
 
   it('opens on the Général tab', () => {
-    render(<SettingsDialog open onOpenChange={() => {}} />)
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     expect(screen.getByRole('tab', { name: /général/i })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('radiogroup', { name: 'Thème' })).toBeInTheDocument()
   })
 
+  it('forwards the update-check button to the Général tab', async () => {
+    const user = userEvent.setup()
+    const checkNow = vi.fn().mockResolvedValue(undefined)
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={{ status: 'idle', checkNow }} />)
+
+    await user.click(screen.getByRole('button', { name: 'Rechercher les mises à jour' }))
+
+    expect(checkNow).toHaveBeenCalled()
+  })
+
   it('offers the three sections as tabs so the header only needs one button', () => {
-    render(<SettingsDialog open onOpenChange={() => {}} />)
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual([
       expect.stringContaining('Général'),
@@ -44,7 +56,7 @@ describe('SettingsDialog', () => {
 
   it('switches panels when another tab is picked', async () => {
     const user = userEvent.setup()
-    render(<SettingsDialog open onOpenChange={() => {}} />)
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     await user.click(screen.getByRole('tab', { name: /quiz/i }))
 
@@ -54,7 +66,7 @@ describe('SettingsDialog', () => {
 
   it('shows the level editors on the Apparence tab', async () => {
     const user = userEvent.setup()
-    render(<SettingsDialog open onOpenChange={() => {}} />)
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     await user.click(screen.getByRole('tab', { name: /apparence/i }))
 
@@ -64,7 +76,7 @@ describe('SettingsDialog', () => {
 
   it('previews an edit immediately, without writing it to disk', async () => {
     const user = userEvent.setup()
-    render(<SettingsDialog open onOpenChange={() => {}} />)
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     await user.click(screen.getByRole('radio', { name: 'Sombre' }))
 
@@ -74,7 +86,7 @@ describe('SettingsDialog', () => {
 
   it('reports unsaved changes and only then allows saving', async () => {
     const user = userEvent.setup()
-    render(<SettingsDialog open onOpenChange={() => {}} />)
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     const save = screen.getByRole('button', { name: 'Enregistrer' })
     expect(save).toBeDisabled()
@@ -89,7 +101,7 @@ describe('SettingsDialog', () => {
   it('persists both settings files and closes on Enregistrer', async () => {
     const user = userEvent.setup()
     const onOpenChange = vi.fn()
-    render(<SettingsDialog open onOpenChange={onOpenChange} />)
+    render(<SettingsDialog open onOpenChange={onOpenChange} updateCheck={updateCheckStub} />)
 
     await user.click(screen.getByRole('radio', { name: 'Sombre' }))
     await user.click(screen.getByRole('button', { name: 'Enregistrer' }))
@@ -102,7 +114,7 @@ describe('SettingsDialog', () => {
   it('puts the previewed change back on Annuler', async () => {
     const user = userEvent.setup()
     const onOpenChange = vi.fn()
-    render(<SettingsDialog open onOpenChange={onOpenChange} />)
+    render(<SettingsDialog open onOpenChange={onOpenChange} updateCheck={updateCheckStub} />)
 
     await user.click(screen.getByRole('radio', { name: 'Sombre' }))
     await user.click(screen.getByRole('button', { name: 'Annuler' }))
@@ -114,7 +126,7 @@ describe('SettingsDialog', () => {
 
   it('reverts a quiz change on Annuler too, not just an appearance one', async () => {
     const user = userEvent.setup()
-    render(<SettingsDialog open onOpenChange={() => {}} />)
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     await user.click(screen.getByRole('tab', { name: /quiz/i }))
     await user.click(screen.getByRole('switch', { name: /Montrer la forme de la réponse/ }))
@@ -127,7 +139,7 @@ describe('SettingsDialog', () => {
 
   it('saves a quiz change made on the Quiz tab', async () => {
     const user = userEvent.setup()
-    render(<SettingsDialog open onOpenChange={() => {}} />)
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     await user.click(screen.getByRole('tab', { name: /quiz/i }))
     await user.click(screen.getByRole('switch', { name: /Corriger lettre par lettre/ }))
@@ -138,13 +150,13 @@ describe('SettingsDialog', () => {
 
   it('re-snapshots on each open, so a saved change is not reverted by a later cancel', async () => {
     const user = userEvent.setup()
-    const { rerender } = render(<SettingsDialog open onOpenChange={() => {}} />)
+    const { rerender } = render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     await user.click(screen.getByRole('radio', { name: 'Sombre' }))
     await user.click(screen.getByRole('button', { name: 'Enregistrer' }))
 
-    rerender(<SettingsDialog open={false} onOpenChange={() => {}} />)
-    rerender(<SettingsDialog open onOpenChange={() => {}} />)
+    rerender(<SettingsDialog open={false} onOpenChange={() => {}} updateCheck={updateCheckStub} />)
+    rerender(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
     await user.click(screen.getByRole('button', { name: 'Annuler' }))
 
     // "dark" was saved in the first session; cancelling the second must fall

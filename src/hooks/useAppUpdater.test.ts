@@ -92,4 +92,75 @@ describe('useAppUpdater', () => {
 
     await waitFor(() => expect(result.current.dismissed).toBe(true))
   })
+
+  it('starts with status "idle"', async () => {
+    vi.mocked(check).mockResolvedValue(null)
+    const { result } = renderHook(() => useAppUpdater())
+    expect(result.current.status).toBe('idle')
+    await waitFor(() => expect(check).toHaveBeenCalled())
+  })
+
+  it('checkNow() sets status to "up-to-date" when no update is available', async () => {
+    vi.mocked(check).mockResolvedValue(null)
+    const { result } = renderHook(() => useAppUpdater())
+    await waitFor(() => expect(check).toHaveBeenCalled())
+    vi.mocked(check).mockClear()
+
+    await act(async () => {
+      await result.current.checkNow()
+    })
+
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(result.current.status).toBe('up-to-date')
+  })
+
+  it('checkNow() sets status to "error" when check() rejects', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(check).mockResolvedValue(null)
+    const { result } = renderHook(() => useAppUpdater())
+    await waitFor(() => expect(check).toHaveBeenCalled())
+    vi.mocked(check).mockRejectedValue(new Error('offline'))
+
+    await act(async () => {
+      await result.current.checkNow()
+    })
+
+    expect(result.current.status).toBe('error')
+  })
+
+  it('checkNow() downloads and marks the update ready when one is found', async () => {
+    vi.mocked(check).mockResolvedValue(null)
+    const { result } = renderHook(() => useAppUpdater())
+    await waitFor(() => expect(check).toHaveBeenCalled())
+    const update = makeUpdate()
+    vi.mocked(check).mockResolvedValue(update as never)
+
+    await act(async () => {
+      await result.current.checkNow()
+    })
+
+    expect(update.download).toHaveBeenCalled()
+    expect(result.current.updateReady).toBe(true)
+  })
+
+  it('checkNow() reports "checking" status while in flight', async () => {
+    vi.mocked(check).mockResolvedValue(null)
+    const { result } = renderHook(() => useAppUpdater())
+    await waitFor(() => expect(check).toHaveBeenCalled())
+
+    let resolveCheck: (value: null) => void = () => {}
+    vi.mocked(check).mockReturnValue(new Promise(resolve => { resolveCheck = resolve }))
+
+    let checkPromise!: Promise<void>
+    act(() => {
+      checkPromise = result.current.checkNow()
+    })
+    await waitFor(() => expect(result.current.status).toBe('checking'))
+
+    resolveCheck(null)
+    await act(async () => {
+      await checkPromise
+    })
+    expect(result.current.status).toBe('up-to-date')
+  })
 })

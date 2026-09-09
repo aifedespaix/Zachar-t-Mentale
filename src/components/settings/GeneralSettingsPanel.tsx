@@ -1,7 +1,15 @@
 import { Sun, Moon, Monitor, type LucideIcon } from 'lucide-react'
 import type { AppearanceSettings, ThemeMode } from '../../types/appearanceSettings'
 import { FONT_OPTIONS } from '../../types/appearanceSettings'
+import type { UpdateCheckStatus } from '../../hooks/useAppUpdater'
 import { SettingsSection } from './SettingsSection'
+import { Button } from '../ui/button'
+
+const UPDATE_STATUS_LABEL: Partial<Record<UpdateCheckStatus, string>> = {
+  checking: 'Vérification en cours…',
+  'up-to-date': 'À jour',
+  error: 'Échec de la vérification',
+}
 
 const THEME_MODE_OPTIONS: { value: ThemeMode; label: string; icon: LucideIcon }[] = [
   { value: 'light', label: 'Clair', icon: Sun },
@@ -12,10 +20,11 @@ const THEME_MODE_OPTIONS: { value: ThemeMode; label: string; icon: LucideIcon }[
 interface GeneralSettingsPanelProps {
   settings: AppearanceSettings
   onChange: (next: AppearanceSettings) => void
+  updateCheck: { status: UpdateCheckStatus; checkNow: () => Promise<void> }
 }
 
 /** App-wide choices: the ones that change how everything looks, not just cards. */
-export function GeneralSettingsPanel({ settings, onChange }: GeneralSettingsPanelProps) {
+export function GeneralSettingsPanel({ settings, onChange, updateCheck }: GeneralSettingsPanelProps) {
   return (
     <div>
       <SettingsSection title="Thème" description="« Système » suit le réglage clair/sombre de ton ordinateur.">
@@ -94,6 +103,25 @@ export function GeneralSettingsPanel({ settings, onChange }: GeneralSettingsPane
         >
           Portez ce vieux whisky au juge blond qui fume — 0123456789
         </p>
+      </SettingsSection>
+
+      <SettingsSection title="Mises à jour" description="Vérifie manuellement si une nouvelle version est disponible.">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              void updateCheck.checkNow()
+            }}
+            disabled={updateCheck.status === 'checking'}
+          >
+            Rechercher les mises à jour
+          </Button>
+          {UPDATE_STATUS_LABEL[updateCheck.status] && (
+            <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)' }}>
+              {UPDATE_STATUS_LABEL[updateCheck.status]}
+            </span>
+          )}
+        </div>
       </SettingsSection>
     </div>
   )
