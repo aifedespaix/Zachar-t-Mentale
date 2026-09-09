@@ -1,10 +1,10 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Bumps the app version in package.json AND src-tauri/tauri.conf.json together
 // — the release workflow (.github/workflows/release.yml) tags off
 // tauri.conf.json's version via tauri-action's `tagName: v__VERSION__`, so the
 // two files must never drift apart.
 //
-// Usage: npm run version:bump -- <patch|minor|major|X.Y.Z>
+// Usage: bun run version:bump -- <patch|minor|major|X.Y.Z>
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -14,7 +14,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const arg = process.argv[2]
 
 if (!arg) {
-  console.error('Usage: npm run version:bump -- <patch|minor|major|X.Y.Z>')
+  console.error('Usage: bun run version:bump -- <patch|minor|major|X.Y.Z>')
   process.exit(1)
 }
 
@@ -53,4 +53,9 @@ tauriConf.version = next
 writeJson(tauriConfPath, tauriConf)
 
 console.log(`${current} -> ${next} (package.json, src-tauri/tauri.conf.json)`)
-console.log('Next: commit, push, then `git tag vX.Y.Z && git push origin vX.Y.Z` to trigger the release build.')
+console.log('\nNext, copy-paste:\n')
+console.log(`git add package.json src-tauri/tauri.conf.json`)
+console.log(`git commit -m "chore: bump version to ${next}"`)
+console.log(`git push origin main`)
+console.log(`git tag v${next}`)
+console.log(`git push origin v${next}`)

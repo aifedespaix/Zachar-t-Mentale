@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { sidecarDirOf, assetPathOf, writeAsset, readAssetBytes, MAX_ASSET_BYTES } from './assets'
+import { sidecarDirOf, assetPathOf, writeAsset, readAssetBytes, MAX_ASSET_BYTES, isAssetsSidecarName } from './assets'
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
   mkdir: vi.fn(),
@@ -25,6 +25,17 @@ describe('sidecarDirOf', () => {
 
   it('tolerates a map whose name is not .json', () => {
     expect(sidecarDirOf('/cours/carte')).toBe('/cours/carte.assets')
+  })
+})
+
+describe('isAssetsSidecarName', () => {
+  it('matches a sidecar folder name', () => {
+    expect(isAssetsSidecarName('pourcentages.assets')).toBe(true)
+  })
+
+  it('rejects an unrelated folder name, including a dotfile', () => {
+    expect(isAssetsSidecarName('chimie')).toBe(false)
+    expect(isAssetsSidecarName('.git')).toBe(false)
   })
 })
 

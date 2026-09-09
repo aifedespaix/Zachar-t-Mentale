@@ -26,6 +26,11 @@ export function sidecarDirOf(mindMapPath: string): string {
   return dir === '' ? `${base}.assets` : `${dir}${separatorOf(mindMapPath)}${base}.assets`
 }
 
+/** True for a sidecar folder produced by {@link sidecarDirOf} — always implementation detail, never user content. */
+export function isAssetsSidecarName(name: string): boolean {
+  return name.endsWith('.assets')
+}
+
 /**
  * The full path of one asset, refusing anything that is not a plain file name
  * directly inside the sidecar.

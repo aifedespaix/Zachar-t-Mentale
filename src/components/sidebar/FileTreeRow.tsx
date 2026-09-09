@@ -18,6 +18,7 @@ import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, withMindMapExten
 import { loadMindMap, saveMindMap, mindMapExists } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
+import { isAssetsSidecarName } from '../../persistence/assets'
 import { validateCards } from '../../validation/cardsValidation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
@@ -394,7 +395,7 @@ export function FileTreeRow({
 
         {isExpanded &&
           node.children
-            .filter(child => showUnreadable || child.type !== 'other')
+            .filter(child => (isAssetsSidecarName(child.name) ? showUnreadable : showUnreadable || child.type !== 'other'))
             .map(child => (
               <FileTreeRow
                 key={child.path}

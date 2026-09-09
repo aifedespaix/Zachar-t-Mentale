@@ -193,6 +193,63 @@ describe('FileTreeRow', () => {
     expect(screen.getByText('archive.zip')).toBeInTheDocument()
   })
 
+  it('hides an .assets sidecar folder by default, even when it has visible children', () => {
+    const node: FileTreeNode = {
+      type: 'folder',
+      name: 'chimie',
+      path: '/cours/chimie',
+      children: [
+        { type: 'mindmap', name: 'atomes.json', path: '/cours/chimie/atomes.json' },
+        {
+          type: 'folder',
+          name: 'atomes.assets',
+          path: '/cours/chimie/atomes.assets',
+          children: [{ type: 'other', name: 'photo.png', path: '/cours/chimie/atomes.assets/photo.png' }],
+        },
+      ],
+    }
+    useWorkspaceStore.setState({ expandedPaths: new Set(['/cours/chimie']) })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    expect(screen.getByText('atomes.json')).toBeInTheDocument()
+    expect(screen.queryByText('atomes.assets')).not.toBeInTheDocument()
+  })
+
+  it('shows an .assets sidecar folder when showUnreadable is true', () => {
+    const node: FileTreeNode = {
+      type: 'folder',
+      name: 'chimie',
+      path: '/cours/chimie',
+      children: [{ type: 'folder', name: 'atomes.assets', path: '/cours/chimie/atomes.assets', children: [] }],
+    }
+    useWorkspaceStore.setState({ expandedPaths: new Set(['/cours/chimie']) })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} showUnreadable />)
+
+    expect(screen.getByText('atomes.assets')).toBeInTheDocument()
+  })
+
+  it('does not hide an ordinary empty folder, or one with only "other" children, by default', () => {
+    const node: FileTreeNode = {
+      type: 'folder',
+      name: 'chimie',
+      path: '/cours/chimie',
+      children: [
+        { type: 'folder', name: 'vide', path: '/cours/chimie/vide', children: [] },
+        {
+          type: 'folder',
+          name: 'archives',
+          path: '/cours/chimie/archives',
+          children: [{ type: 'other', name: 'notes.pdf', path: '/cours/chimie/archives/notes.pdf' }],
+        },
+      ],
+    }
+    useWorkspaceStore.setState({ expandedPaths: new Set(['/cours/chimie']) })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    expect(screen.getByText('vide')).toBeInTheDocument()
+    expect(screen.getByText('archives')).toBeInTheDocument()
+  })
+
   it('toggles a folder open/closed and shows/hides its children', async () => {
     const user = userEvent.setup()
     const node: FileTreeNode = {
