@@ -13,6 +13,7 @@ import { useQuizSettingsStore } from './state/useQuizSettingsStore'
 import { useCardsStore } from './state/useCardsStore'
 import { useWorkspaceStore, describeError } from './state/useWorkspaceStore'
 import { useQuizStore } from './state/useQuizStore'
+import { useCardDetailStore } from './state/useCardDetailStore'
 import { useAutosave } from './persistence/useAutosave'
 import { loadMindMap, saveMindMap, mindMapExists } from './persistence/fileStore'
 import { fileNameOf, parentDirOf, repairedCopyPath } from './persistence/paths'
@@ -35,6 +36,7 @@ import { useThemeDomSync } from './hooks/useResolvedTheme'
 import { useAppliedFontFamily } from './hooks/useAppliedFontFamily'
 import { useAppUpdater } from './hooks/useAppUpdater'
 import { UpdateReadyBanner } from './components/update/UpdateReadyBanner'
+import { CardDetailPanel } from './components/detail/CardDetailPanel'
 import type { Card } from './types/card'
 
 /** A map that failed validation, held until the user decides what to do with it. */
@@ -140,6 +142,32 @@ function App() {
     useQuizSettingsStore.getState().init()
     useAppearanceSettingsStore.getState().init()
   }, [])
+
+  /**
+   * Open fiches belong to the map that is open, not to the application.
+   *
+   * Carrying them across a file switch would leave the panel showing cards
+   * that no longer exist — or, worse, cards from the previous map whose ids
+   * happen to collide with the new one's.
+   */
+  useEffect(() => {
+    useCardDetailStore.getState().closeAll()
+  }, [loadedPath])
+
+  /**
+   * A quiz closes every fiche, and this is correctness rather than tidiness:
+   * `qcm-definition` asks the user to recognise a definition, and a fiche left
+   * open beside the question hands them the answer. Same reasoning as the file
+   * sidebar, which a quiz also hides.
+   */
+  useEffect(() => {
+    if (quizActive) useCardDetailStore.getState().closeAll()
+  }, [quizActive])
+
+  /** A deleted card's fiche goes with it; undo brings both back. */
+  useEffect(() => {
+    useCardDetailStore.getState().retain(new Set(cards.map(card => card.id)))
+  }, [cards])
 
   // Re-runs on every file switch (open a different file, or a rename that
   // moves the current file to a new path): each switch starts a fresh
@@ -337,6 +365,12 @@ function App() {
           <QuizSummaryModal />
         </main>
       </div>
+
+      {/* Outside the canvas column, so it spans the full height and takes its
+          width out of the canvas rather than covering it — nothing is hidden,
+          and the tree stays readable beside the fiche it explains.
+          Hidden outright during a quiz, per the effect above. */}
+      {!quizActive && <CardDetailPanel />}
 
       {pendingRepair && (
         <CorruptedMapDialog

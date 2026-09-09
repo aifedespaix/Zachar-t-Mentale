@@ -219,6 +219,35 @@ export function flattenedCardCount(cards: Card[], cardId: string): number {
   return subtreeDepths(cards, cardId).size
 }
 
+/**
+ * The titles of a card's ancestors, root first, excluding the card itself.
+ *
+ * Used as the breadcrumb of the description editor, whose whole job is to make
+ * "which card am I editing?" unambiguous when it opens over a canvas of
+ * near-identical boxes.
+ *
+ * Walks up rather than down, with a `seen` guard for the same reason
+ * `computeLayout` carries one: a `.zmap` may have been shared or hand-edited,
+ * and a parent cycle would spin here forever. A detached card has no ancestry
+ * to show — its `parentId` is null like the root's — so it yields an empty
+ * chain rather than a misleading one.
+ */
+export function ancestorTitles(cards: Card[], cardId: string): string[] {
+  const byId = new Map(cards.map(card => [card.id, card]))
+  const titles: string[] = []
+  const seen = new Set<string>([cardId])
+
+  let parentId = byId.get(cardId)?.parentId ?? null
+  while (parentId !== null && !seen.has(parentId)) {
+    seen.add(parentId)
+    const parent = byId.get(parentId)
+    if (parent === undefined) break
+    titles.push(parent.title)
+    parentId = parent.parentId
+  }
+  return titles.reverse()
+}
+
 export function isDescendantOf(cards: Card[], ancestorId: string, cardId: string): boolean {
   return cardId !== ancestorId && subtreeDepths(cards, ancestorId).has(cardId)
 }
