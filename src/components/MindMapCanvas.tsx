@@ -12,6 +12,14 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { Sparkles, Undo2, Redo2, Download, X } from 'lucide-react'
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent } from './ui/context-menu'
+import { useWorkspaceStore } from '../state/useWorkspaceStore'
+import { exportToPdfBytes, exportToImageDataUrls } from '../export/exportMindMap'
+import { writeXmindFile } from '../xmind/exportXmind'
+import { saveBytesAs, dataUrlToBytes } from '../persistence/exportIO'
+import { describeExportError } from '../export/describeExportError'
+import { mindMapBaseName } from '../persistence/paths'
 import { useCardsStore } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
@@ -292,6 +300,13 @@ function MindMapCanvasInner() {
   const cards = useCardsStore(s => s.history.present)
   const locked = useCardsStore(s => s.locked)
   const moveCard = useCardsStore(s => s.moveCard)
+  const addFloatingCard = useCardsStore(s => s.addFloatingCard)
+  const undo = useCardsStore(s => s.undo)
+  const redo = useCardsStore(s => s.redo)
+  const canUndo = useCardsStore(s => s.history.past.length > 0)
+  const canRedo = useCardsStore(s => s.history.future.length > 0)
+  const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
+  const [exportError, setExportError] = useState<string | null>(null)
   const quizQuestions = useQuizStore(s => s.questions)
   const quizResults = useQuizStore(s => s.results)
   const theme = useResolvedTheme()
@@ -493,22 +508,94 @@ function MindMapCanvasInner() {
     [cards, dropTarget, moveCard, resyncNodes]
   )
 
+  async function exportFromCanvas(format: 'pdf' | 'image' | 'xmind') {
+    const options = { showDefinitions: true, includeDetached: true, mindMapPath: currentFilePath }
+    const baseName = currentFilePath ? mindMapBaseName(currentFilePath) : 'carte-mentale'
+    try {
+      if (format === 'pdf') {
+        const bytes = await exportToPdfBytes(cards, options)
+        await saveBytesAs(bytes, `${baseName}.pdf`, [{ name: 'PDF', extensions: ['pdf'] }])
+      } else if (format === 'image') {
+        const dataUrls = await exportToImageDataUrls(cards, options)
+        for (const [index, dataUrl] of dataUrls.entries()) {
+          const suffix = dataUrls.length > 1 ? ` (${index + 1})` : ''
+          const path = await saveBytesAs(dataUrlToBytes(dataUrl), `${baseName}${suffix}.png`, [
+            { name: 'Image PNG', extensions: ['png'] },
+          ])
+          if (path === null) break
+        }
+      } else {
+        const bytes = await writeXmindFile(cards)
+        await saveBytesAs(bytes, `${baseName}.xmind`, [{ name: 'XMind', extensions: ['xmind'] }])
+      }
+    } catch (error) {
+      setExportError(`Échec de l’export : ${describeExportError(error)}`)
+    }
+  }
+
   return (
     <>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        nodeTypes={nodeTypes}
-        onNodeDragStart={handleNodeDragStart}
-        onNodeDrag={handleNodeDrag}
-        onNodeDragStop={handleNodeDragStop}
-        fitView
-        colorMode={theme}
-      >
-        <Background />
-        <Controls showInteractive={false} />
-      </ReactFlow>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div style={{ width: '100%', height: '100%' }}>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              nodeTypes={nodeTypes}
+              onNodeDragStart={handleNodeDragStart}
+              onNodeDrag={handleNodeDrag}
+              onNodeDragStop={handleNodeDragStop}
+              fitView
+              colorMode={theme}
+            >
+              <Background />
+              <Controls showInteractive={false} />
+            </ReactFlow>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {!locked && (
+            <>
+              <ContextMenuItem onSelect={() => addFloatingCard()}>
+                <Sparkles size={14} /> Créer une carte volante
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem disabled={!canUndo} onSelect={undo}>
+                <Undo2 size={14} /> Annuler
+              </ContextMenuItem>
+              <ContextMenuItem disabled={!canRedo} onSelect={redo}>
+                <Redo2 size={14} /> Refaire
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              <Download size={14} /> Exporter
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              <ContextMenuItem onSelect={() => exportFromCanvas('pdf')}>PDF</ContextMenuItem>
+              <ContextMenuItem onSelect={() => exportFromCanvas('image')}>Image</ContextMenuItem>
+              <ContextMenuItem onSelect={() => exportFromCanvas('xmind')}>XMind</ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        </ContextMenuContent>
+      </ContextMenu>
+
+      {exportError && (
+        <div role="alert" className="status-banner">
+          <span style={{ flex: 1 }}>{exportError}</span>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Masquer le message d’erreur"
+            onClick={() => setExportError(null)}
+          >
+            <X size={14} />
+          </Button>
+        </div>
+      )}
 
       {pendingMove && (
         <Dialog open onOpenChange={open => !open && setPendingMove(null)}>

@@ -1,4 +1,4 @@
-import { render, screen, act, within } from '@testing-library/react'
+import { render, screen, act, within, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import {
@@ -9,6 +9,7 @@ import {
   resolveDropTarget,
 } from './MindMapCanvas'
 import { useCardsStore } from '../state/useCardsStore'
+import { useWorkspaceStore } from '../state/useWorkspaceStore'
 import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
 
@@ -24,6 +25,20 @@ vi.mock('@xyflow/react', async importOriginal => {
     useReactFlow: () => ({ ...actual.useReactFlow(), setCenter: mockSetCenter }),
   }
 })
+
+vi.mock('../export/exportMindMap', () => ({
+  exportToPdfBytes: vi.fn(async () => new Uint8Array([1])),
+  exportToImageDataUrls: vi.fn(async () => ['data:image/png;base64,AA==']),
+}))
+vi.mock('../xmind/exportXmind', () => ({ writeXmindFile: vi.fn(async () => new Uint8Array([2])) }))
+vi.mock('../persistence/exportIO', async importOriginal => {
+  const actual = await importOriginal<typeof import('../persistence/exportIO')>()
+  return { ...actual, saveBytesAs: vi.fn(async () => '/out/carte-mentale.pdf') }
+})
+
+import { exportToPdfBytes, exportToImageDataUrls } from '../export/exportMindMap'
+import { writeXmindFile } from '../xmind/exportXmind'
+import { saveBytesAs } from '../persistence/exportIO'
 
 const root: Card = { id: 'root', level: 1, title: 'Racine', parentId: null, order: 0 }
 const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
@@ -362,5 +377,122 @@ describe('overflowWarningMessage', () => {
     expect(overflowWarningMessage(1)).toBe(
       'Attention, ce déplacement dépasse la limite des 4 niveaux. 1 carte enfant située hors limite sera transformée en carte volante.'
     )
+  })
+})
+
+describe('MindMapCanvas — context menu', () => {
+  function openMenu(container: HTMLElement) {
+    fireEvent.contextMenu(container.querySelector('.react-flow')!)
+  }
+
+  beforeEach(() => {
+    useCardsStore.getState().loadCards([root, child])
+    useCardsStore.setState({ locked: false })
+    useWorkspaceStore.setState({ currentFilePath: null })
+    vi.mocked(exportToPdfBytes).mockClear()
+    vi.mocked(exportToImageDataUrls).mockClear()
+    vi.mocked(writeXmindFile).mockClear()
+    vi.mocked(saveBytesAs).mockClear()
+  })
+
+  it('opens on right-click anywhere on the canvas', async () => {
+    const { container } = render(<MindMapCanvas />)
+    openMenu(container)
+    expect(await screen.findByRole('menuitem', { name: /créer une carte volante/i })).toBeInTheDocument()
+  })
+
+  it('creates a floating card', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<MindMapCanvas />)
+    const before = useCardsStore.getState().history.present.length
+    openMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: /créer une carte volante/i }))
+    expect(useCardsStore.getState().history.present).toHaveLength(before + 1)
+    expect(useCardsStore.getState().history.present.some(c => c.detached)).toBe(true)
+  })
+
+  it('hides creation/undo/redo but keeps export when the map is locked', async () => {
+    useCardsStore.setState({ locked: true })
+    const { container } = render(<MindMapCanvas />)
+    openMenu(container)
+    expect(screen.queryByRole('menuitem', { name: /créer une carte volante/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Annuler' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Refaire' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: /exporter/i })).toBeInTheDocument()
+  })
+
+  it('disables Annuler when there is no history and Refaire when there is no future', async () => {
+    const { container } = render(<MindMapCanvas />)
+    openMenu(container)
+    expect(await screen.findByRole('menuitem', { name: 'Annuler' })).toHaveAttribute('data-disabled')
+    expect(screen.getByRole('menuitem', { name: 'Refaire' })).toHaveAttribute('data-disabled')
+  })
+
+  it('enables Annuler after a change and undoes it', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<MindMapCanvas />)
+    act(() => {
+      useCardsStore.getState().addFloatingCard()
+    })
+    const countAfterAdd = useCardsStore.getState().history.present.length
+    openMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Annuler' }))
+    expect(useCardsStore.getState().history.present).toHaveLength(countAfterAdd - 1)
+  })
+
+  it('exports to PDF via the submenu, using the workspace file name', async () => {
+    const user = userEvent.setup()
+    useWorkspaceStore.setState({ currentFilePath: '/cours/chapitre1.zmap' })
+    const { container } = render(<MindMapCanvas />)
+    openMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: /exporter/i }))
+    // `fireEvent.click`, not `user.click`, for the item nested inside the
+    // submenu: in jsdom, Radix's SubContent races its own outside-focus
+    // detection against React's portal-aware focus tracking, so
+    // `user.click`'s realistic hover/focus choreography makes `onFocusOutside`
+    // fire with the item itself as `event.target` and dismiss the submenu
+    // before the click lands — Radix's own guidance is that nested-menu
+    // interaction is unreliable in jsdom and should be driven by real
+    // browsers. A plain `click` event bypasses that broken focus sequence
+    // while still exercising the real onSelect wiring.
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'PDF' }))
+    expect(exportToPdfBytes).toHaveBeenCalledWith(useCardsStore.getState().history.present, {
+      showDefinitions: true,
+      includeDetached: true,
+      mindMapPath: '/cours/chapitre1.zmap',
+    })
+    // `fireEvent.click` doesn't wait out the async export chain the way
+    // `user.click` would — `waitFor` picks up where it leaves off.
+    await waitFor(() =>
+      expect(saveBytesAs).toHaveBeenCalledWith(new Uint8Array([1]), 'chapitre1.pdf', [
+        { name: 'PDF', extensions: ['pdf'] },
+      ])
+    )
+  })
+
+  it('exports to XMind via the submenu, defaulting the file name when nothing is open', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<MindMapCanvas />)
+    openMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: /exporter/i }))
+    // See the PDF export test above for why this is `fireEvent.click`.
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'XMind' }))
+    expect(writeXmindFile).toHaveBeenCalledWith(useCardsStore.getState().history.present)
+    await waitFor(() =>
+      expect(saveBytesAs).toHaveBeenCalledWith(new Uint8Array([2]), 'carte-mentale.xmind', [
+        { name: 'XMind', extensions: ['xmind'] },
+      ])
+    )
+  })
+
+  it('shows an error banner when the export fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(exportToPdfBytes).mockRejectedValueOnce(new Error('disque plein'))
+    const { container } = render(<MindMapCanvas />)
+    openMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: /exporter/i }))
+    // See the PDF export test above for why this is `fireEvent.click`.
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'PDF' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/disque plein/)
   })
 })
