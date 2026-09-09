@@ -82,6 +82,15 @@ describe('useCardsStore', () => {
     expect(store.getState().history.present.some(c => c.detached)).toBe(false)
   })
 
+  it('addFloatingCard adds a floating card and is undoable', () => {
+    const store = createCardsStore()
+    const newCardId = store.getState().addFloatingCard()
+    expect(store.getState().history.present.find(c => c.id === newCardId)?.detached).toBe(true)
+
+    store.getState().undo()
+    expect(store.getState().history.present.find(c => c.id === newCardId)).toBeUndefined()
+  })
+
   it('deleteCardDetachingChildren drops the card and keeps its branch afloat', () => {
     const store = createCardsStore()
     const rootId = store.getState().history.present[0].id

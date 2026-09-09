@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   createRootCard,
   addChild,
+  addFloatingCard,
+  nextDetachedOrder,
   addSibling,
   updateTitle,
   updateContent,
@@ -505,6 +507,46 @@ describe('detachCard', () => {
     const before = structuredClone(cards)
     detachCard(cards, a)
     expect(cards).toEqual(before)
+  })
+})
+
+describe('addFloatingCard', () => {
+  it('creates a new floating card with no parent', () => {
+    const root = createRootCard()
+    const { cards, newCardId } = addFloatingCard([root])
+    const card = cards.find(c => c.id === newCardId)!
+    expect(card.detached).toBe(true)
+    expect(card.parentId).toBeNull()
+    expect(card.title).toBe('Nouveau titre')
+    expect(card.order).toBe(0)
+  })
+
+  it('appends after existing floating cards', () => {
+    const { cards, c } = deepTree()
+    const detached = detachCard(cards, c)
+    const { cards: next, newCardId } = addFloatingCard(detached)
+    const card = next.find(x => x.id === newCardId)!
+    expect(card.order).toBe(1)
+  })
+
+  it('does not mutate the input cards array', () => {
+    const root = createRootCard()
+    const before = structuredClone([root])
+    addFloatingCard([root])
+    expect([root]).toEqual(before)
+  })
+})
+
+describe('nextDetachedOrder', () => {
+  it('is 0 when there are no floating cards yet', () => {
+    const root = createRootCard()
+    expect(nextDetachedOrder([root])).toBe(0)
+  })
+
+  it('is one past the highest existing floating order', () => {
+    const { cards, c } = deepTree()
+    const detached = detachCard(cards, c)
+    expect(nextDetachedOrder(detached)).toBe(1)
   })
 })
 

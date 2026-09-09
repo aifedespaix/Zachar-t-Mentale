@@ -6,6 +6,7 @@ import { createHistory, pushState, undo as undoHistory, redo as redoHistory, typ
 import {
   createRootCard,
   addChild as addChildOp,
+  addFloatingCard as addFloatingCardOp,
   addSibling as addSiblingOp,
   updateTitle as updateTitleOp,
   updateDefinition as updateDefinitionOp,
@@ -28,6 +29,7 @@ interface CardsState {
   locked: boolean
   addChild: (parentId: string) => string
   addSibling: (siblingId: string, position: 'above' | 'below') => string
+  addFloatingCard: () => string
   updateTitle: (id: string, title: string) => void
   /** Sets the card's mnemonic icon, or clears it with `undefined`. */
   updateIcon: (id: string, icon: string | undefined) => void
@@ -66,6 +68,11 @@ export function createCardsStore(): CardsStore {
     },
     addSibling: (siblingId, position) => {
       const { cards: next, newCardId } = addSiblingOp(get().history.present, siblingId, position)
+      set(state => ({ history: pushState(state.history, next) }))
+      return newCardId
+    },
+    addFloatingCard: () => {
+      const { cards: next, newCardId } = addFloatingCardOp(get().history.present)
       set(state => ({ history: pushState(state.history, next) }))
       return newCardId
     },

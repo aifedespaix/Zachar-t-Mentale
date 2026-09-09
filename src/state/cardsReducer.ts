@@ -49,7 +49,7 @@ function normalizeOrders(cards: Card[]): Card[] {
   })
 }
 
-function nextDetachedOrder(cards: Card[]): number {
+export function nextDetachedOrder(cards: Card[]): number {
   const orders = cards.filter(c => c.detached).map(c => c.order)
   return orders.length === 0 ? 0 : Math.max(...orders) + 1
 }
@@ -110,6 +110,25 @@ export function addSibling(
   }))
   const otherCards = cards.filter(c => c.parentId !== reference.parentId)
   return { cards: [...otherCards, ...newGroup], newCardId: newCard.id }
+}
+
+/**
+ * Creates a brand-new floating card, out of the hierarchy from the start.
+ * Lands in the floating-cards zone's layout at whatever slot
+ * `nextDetachedOrder` computes — no position math needed here, the grid
+ * layout places every detached card the same way regardless of how it
+ * became detached.
+ */
+export function addFloatingCard(cards: Card[]): { cards: Card[]; newCardId: string } {
+  const newCard: Card = {
+    id: crypto.randomUUID(),
+    level: 1,
+    title: 'Nouveau titre',
+    parentId: null,
+    detached: true,
+    order: nextDetachedOrder(cards),
+  }
+  return { cards: [...cards, newCard], newCardId: newCard.id }
 }
 
 export function updateTitle(cards: Card[], cardId: string, title: string): Card[] {
