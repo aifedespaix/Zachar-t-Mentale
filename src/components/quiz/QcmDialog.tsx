@@ -8,6 +8,13 @@ interface QcmDialogProps {
   heading: string
   hint?: string
   noHintNote?: string
+  /**
+   * A richly-rendered hint (e.g. a media block via `BlockView`), shown
+   * instead of `hint`/`noHintNote` when present. `hint` stays a plain string
+   * for the common text case; this exists only for content a string cannot
+   * carry.
+   */
+  hintNode?: ReactNode
   correctOption: string
   distractors: string[]
   /**
@@ -41,6 +48,7 @@ export function QcmDialog({
   heading,
   hint,
   noHintNote,
+  hintNode,
   correctOption,
   distractors,
   renderOption,
@@ -81,7 +89,7 @@ export function QcmDialog({
           <DialogTitle>{heading}</DialogTitle>
         </DialogHeader>
 
-        {(hint || noHintNote) && (
+        {(hintNode || hint || noHintNote) && (
           <div
             style={{
               display: 'flex',
@@ -93,12 +101,12 @@ export function QcmDialog({
               fontSize: 13,
             }}
           >
-            {hint ? (
+            {hintNode || hint ? (
               <Lightbulb size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             ) : (
               <Network size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             )}
-            <span>{hint ?? noHintNote}</span>
+            {hintNode ? <div style={{ minWidth: 0 }}>{hintNode}</div> : <span>{hint ?? noHintNote}</span>}
           </div>
         )}
 

@@ -57,6 +57,24 @@ describe('QcmDialog', () => {
     expect(screen.getByText(/aide-toi de la position/i)).toBeInTheDocument()
   })
 
+  it('renders hintNode instead of the plain hint/noHintNote text when provided', () => {
+    render(
+      <QcmDialog
+        open
+        heading="À quel titre correspond ce tableau ?"
+        hint="ignoré au profit de hintNode"
+        hintNode={<span data-testid="rich-hint">TABLEAU RENDU</span>}
+        correctOption="La bonne carte"
+        distractors={['Une autre carte']}
+        onAnswer={() => {}}
+        onCancel={() => {}}
+      />
+    )
+
+    expect(screen.getByTestId('rich-hint')).toBeInTheDocument()
+    expect(screen.queryByText('ignoré au profit de hintNode')).not.toBeInTheDocument()
+  })
+
   it('disables every option once one has been chosen', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(
