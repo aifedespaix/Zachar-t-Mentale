@@ -78,16 +78,28 @@ Pas de nouveau champ `media` : `content` (blocs `table`/`math`/`image`/
 au quiz *« ne traite pas le miroir texte de cette carte comme une vraie
 définition »*.
 
-**Validation** (`src/validation/cardsValidation.ts`) :
+**Pas de nouvelle catégorie dans `cardsValidation.ts`.** `validateCards` est
+un système binaire (structurel valide/invalide → repair dialog si invalide),
+réservé aux problèmes qui font planter le rendu (cycle, parent fantôme,
+niveau incohérent...). Ni « `kind: media` sans bloc média » ni « titre
+dupliqué » n'en font partie — ce sont des problèmes de qualité de contenu,
+pas d'intégrité structurelle, et les y ajouter déclencherait à tort le
+dialogue de réparation sur une carte par ailleurs saine :
 
-- `kind: 'media'` exige `content` avec au moins un bloc non-`text`. Une
-  carte `media` entièrement textuelle n'a pas de raison d'être — c'est une
-  définition mal classée.
-- **Nouvelle règle, indépendante de `kind`** : unicité des titres sur
-  l'ensemble du fichier, pas seulement entre sœurs — corrige le bug #1
-  ci-dessus. Émise comme avertissement de validation (pas un blocage dur :
-  une carte mentale existante avec des doublons doit continuer à s'ouvrir),
-  et comme règle du skill de génération pour les nouveaux fichiers.
+- **`kind: 'media'` sans bloc non-`text` dans `content`** : dégradation
+  gracieuse au moment du routage quiz (`quizReducer.ts`), même philosophie
+  que le reste du codebase (une icône inconnue ne s'affiche pas, un bloc
+  malformé se dégrade en texte) — la carte est traitée comme si `kind`
+  était absent plutôt que de bloquer l'ouverture du fichier.
+- **Titres dupliqués** (bug #1 de l'investigation) : deux garde-fous
+  distincts, aucun des deux dans `cardsValidation.ts`. (1) Règle du skill de
+  génération, pour que les nouveaux fichiers n'en créent pas — voir section
+  D. (2) Mitigation algorithmique dans `buildDistractorPoolFrom` : exclure
+  du pool de distracteurs toute carte dont le titre est strictement égal à
+  celui de la carte ciblée. Ça ne renomme rien ni ne bloque l'ouverture d'un
+  fichier existant qui en contient déjà — ça retire spécifiquement le cas où
+  la définition de la carte jumelle atterrit comme distracteur « faux » alors
+  qu'elle serait tout aussi valide pour ce titre-là.
 
 ## B. Bouton de fiche — itération sur le lot « fiche de carte »
 
@@ -158,6 +170,13 @@ pour l'identité/dédoublonnage, et le `renderOption` déjà branché sur
 `qcm-definition` s'étend à `qcm-media` de la même manière (résoudre l'option
 vers la carte source, rendre ses blocs).
 
+**Mitigation du bug #1** (titres dupliqués) : `buildDistractorPoolFrom`
+exclut désormais toute carte candidate dont `title === targetCard.title`,
+en plus de l'exclusion par valeur déjà en place — s'applique aux deux sens
+(`qcm-definition`/`qcm-media` et `qcm-title`/`qcm-media-title`), donc la
+carte jumelle ne peut plus fournir un distracteur qui serait en réalité une
+réponse tout aussi valable.
+
 **Aide « titre à trous »** (`blankPreview`, aujourd'hui réservée à
 `recall`) : étendue à `qcm-title` et `qcm-media-title` pendant l'attente sur
 le canevas. C'est l'aide visuelle systématique demandée dans la mission —
@@ -206,10 +225,10 @@ séparément si le besoin se confirme à l'usage.
 ## E. Tests
 
 - `quizReducer.test.ts` : routage par `kind` (les 4 branches du tableau
-  ci-dessus), absence de troncature Sens A, pool de distracteurs média,
-  heading adapté par type de bloc dominant.
-- `cardsValidation.test.ts` : `kind: 'media'` sans bloc non-`text` rejeté,
-  avertissement sur titre dupliqué dans tout le fichier.
+  ci-dessus), dégradation gracieuse d'un `kind: 'media'` sans bloc
+  non-`text`, absence de troncature Sens A, pool de distracteurs média,
+  exclusion par titre dupliqué (bug #1), heading adapté par type de bloc
+  dominant.
 - `QcmDialog.test.tsx` : `hintNode` riche rendu correctement, options en
   texte plat même quand la définition source contient `**mots-clés**`.
 - `CardNode.test.tsx` : badge bas-droit (position, couleur de niveau, icône
@@ -223,6 +242,6 @@ séparément si le besoin se confirme à l'usage.
 | Risque | Traitement |
 |---|---|
 | Cartes existantes sans `kind` mal interprétées | `kind` absent = `'definition'`, comportement identique à aujourd'hui — aucune migration nécessaire |
-| Cartes mentales déjà générées avec des titres dupliqués (bug #1) | Avertissement de validation, pas un blocage — la carte s'ouvre et se joue quand même, juste avec un signalement |
+| Cartes mentales déjà générées avec des titres dupliqués (bug #1) | Pas de blocage à l'ouverture (`cardsValidation.ts` inchangé) — l'exclusion par titre dans `buildDistractorPoolFrom` suffit à retirer l'ambiguïté au moment où elle se manifeste, sans dialogue de réparation ni migration |
 | `hintNode` riche fait diverger `QcmDialog` de son usage actuel (texte seul) | Rendu par le même `BlockView`/`resolveAsset` déjà partagé avec la fiche et le PDF — pas de nouveau moteur de rendu, juste un second point d'entrée |
 | Le skill oublie de router un contenu clairement média vers `kind: 'media'` | La règle de bascule (calcul résolu / formule / tableau / illustration vs fait énoncé) est testable mentalement, comme les règles existantes du skill pour titre/définition |
