@@ -5,7 +5,6 @@ import {
   Plus,
   ArrowRight,
   GripVertical,
-  AlignLeft,
   FlipHorizontal2,
   Unlink,
   Trash2,
@@ -17,11 +16,11 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { Card, CardLevel } from '../types/card'
+import type { CardBlock } from '../types/cardBlock'
 import { isRootCard } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { EMPTY_RECALL_PROGRESS } from '../types/quiz'
 import { useCardsStore } from '../state/useCardsStore'
-import { ancestorTitles } from '../state/cardsReducer'
 import { useQuizStore } from '../state/useQuizStore'
 import { useQuizSettingsStore } from '../state/useQuizSettingsStore'
 import { revealedSet, slotsOf } from '../quiz/blanks'
@@ -37,12 +36,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 import { QcmDialog } from './quiz/QcmDialog'
 import { RecallDialog } from './quiz/RecallDialog'
 import { FlipCard } from './FlipCard'
-import { DefinitionPopover } from './DefinitionPopover'
-import { DescriptionDialog } from '../content/DescriptionDialog'
-import { contentOf } from '../content/blocks'
+import { useCardDetailStore } from '../state/useCardDetailStore'
+import { ContentKindBadges } from '../content/ContentKindBadges'
+import { contentOf, blocksToPlainText } from '../content/blocks'
 import { BlockView } from '../content/BlockView'
-import { imageBlockFrom } from '../content/imageBlock'
-import { pickImageFile } from '../content/pickImage'
 import { assetSrc } from '../persistence/assets'
 import { useWorkspaceStore } from '../state/useWorkspaceStore'
 
@@ -125,6 +122,100 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
   )
 }
 
+/**
+ * The card's description control, in its two states.
+ *
+ * Both states occupy the SAME fixed box. That is règle anti-décalage 1 — the
+ * card's footprint never depends on what its definition holds — and it is why
+ * the preview is one elided line plus a fixed row of badges rather than the
+ * two or three lines that would say more: neighbouring cards must stay the
+ * same height, or the whole tree shifts every time a definition is edited.
+ *
+ * The badges are what make it worth clicking: "there is a formula and a
+ * diagram in here" is exactly what a single line of projected text cannot say.
+ */
+function DescriptionButton({
+  blocks,
+  locked,
+  active,
+  onActivate,
+}: {
+  blocks: CardBlock[]
+  locked: boolean
+  active: boolean
+  onActivate: () => void
+}) {
+  const hasContent = blocks.length > 0
+  // The plain-text mirror the model already maintains, so the preview cannot
+  // disagree with what the quiz and the export read.
+  const preview = blocksToPlainText(blocks).split('\n')[0] ?? ''
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={hasContent ? 'Afficher la description' : 'Ajouter une description'}
+          aria-pressed={active}
+          // Only CREATING is blocked on a locked map: a locked map is still
+          // read, and the fiche is the reading surface.
+          disabled={locked && !hasContent}
+          onClick={event => {
+            // The canvas uses clicks on a card for selection and drag; this
+            // one means "open the fiche" and nothing else.
+            event.stopPropagation()
+            onActivate()
+          }}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            gap: 2,
+            width: '100%',
+            // Fixed, in both states. The whole rule lives on this line.
+            height: 34,
+            marginTop: 6,
+            padding: '0 6px',
+            overflow: 'hidden',
+            textAlign: 'left',
+            fontSize: 10,
+            lineHeight: 1.2,
+            borderRadius: 6,
+            border: hasContent ? '1px solid var(--border)' : '1px dashed var(--border)',
+            background: active ? 'color-mix(in oklch, currentColor, transparent 88%)' : 'transparent',
+            color: 'inherit',
+            opacity: hasContent ? 0.9 : 0.55,
+            cursor: locked && !hasContent ? 'default' : 'pointer',
+          }}
+        >
+          {hasContent ? (
+            <>
+              <span
+                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}
+              >
+                {preview}
+              </span>
+              {/* Always rendered, even empty, so a card whose description is
+                  pure text is exactly as tall as one with a formula in it. */}
+              <span style={{ display: 'flex', alignItems: 'center', height: 12 }}>
+                <ContentKindBadges blocks={blocks} size={10} />
+              </span>
+            </>
+          ) : (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Plus size={11} />
+              Ajouter une description
+            </span>
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {hasContent ? 'Afficher la description dans le panneau' : 'Ajouter une description'}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function CardNode({ data }: CardNodeProps) {
   const { card, autoEdit = false, isReparentTarget = false, quiz } = data
   const similarityThreshold = useQuizSettingsStore(s => s.similarityThreshold)
@@ -176,11 +267,9 @@ export function CardNode({ data }: CardNodeProps) {
   }, [quiz])
 
   const updateTitle = useCardsStore(s => s.updateTitle)
-  const updateContent = useCardsStore(s => s.updateContent)
   const updateIcon = useCardsStore(s => s.updateIcon)
   const allCards = useCardsStore(s => s.history.present)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
-  const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   // ONE resolver for every read path of this card. Assets live in a sidecar
   // named after the open file, so it degrades to "not available" when there is
   // none — which `BlockView` renders as a named placeholder.
@@ -208,7 +297,9 @@ export function CardNode({ data }: CardNodeProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmDetachOpen, setConfirmDetachOpen] = useState(false)
   const [flipped, setFlipped] = useState(false)
-  const [descriptionOpen, setDescriptionOpen] = useState(false)
+  const showFiche = useCardDetailStore(s => s.show)
+  const editFiche = useCardDetailStore(s => s.setEditing)
+  const ficheOpen = useCardDetailStore(s => s.open.some(entry => entry.cardId === card.id))
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const isDetached = card.detached === true
   // A floating card is painted grey whatever level it last had: its level is
@@ -256,9 +347,17 @@ export function CardNode({ data }: CardNodeProps) {
     titleInputRef.current?.focus()
   }, [autoEdit])
 
+  /**
+   * The card's one description action, in both its states.
+   *
+   * A card with a description OPENS its fiche — reading is the common case, and
+   * the fiche is where the whole thing fits. A card without one goes straight
+   * to the editor: there is nothing to read, and making the user open an empty
+   * panel to find an "add" button would be a click spent on nothing.
+   */
   function openDescription() {
-    if (locked) return
-    setDescriptionOpen(true)
+    showFiche(card.id)
+    if (!locked && contentOf(card).length === 0) editFiche(card.id)
   }
 
   function handleTitleFocus() {
@@ -727,50 +826,24 @@ export function CardNode({ data }: CardNodeProps) {
       */}
       {!quizActive && (
       <TooltipProvider>
-        {/* `margin-top: auto` in the card's flex column keeps this pinned to
-            the bottom of the card regardless of title length or whether the
-            definition text below it is shown. */}
-        <div className="card-footer" style={{ display: 'flex', gap: '0.25rem', marginTop: 'auto' }}>
-          {/* `contentOf` rather than `card.definition`: a card whose whole
-              definition is a picture has blocks but, defensively, might not
-              have text — it must still get the popover, not the "add" button. */}
-          {contentOf(card).length > 0 ? (
-            <DefinitionPopover
-              blocks={contentOf(card)}
-              locked={locked}
-              onEdit={openDescription}
-              resolveAsset={resolveAsset}
-            />
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Ajouter une définition"
-                  disabled={locked}
-                  onClick={openDescription}
-                >
-                  <span style={{ position: 'relative', display: 'inline-flex' }}>
-                    <AlignLeft />
-                    <Plus
-                      size={9}
-                      strokeWidth={3}
-                      style={{
-                        position: 'absolute',
-                        right: -4,
-                        bottom: -4,
-                        background: 'var(--background)',
-                        borderRadius: '9999px',
-                      }}
-                    />
-                  </span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Ajouter une définition</TooltipContent>
-            </Tooltip>
-          )}
+        {/* The description gets a control of its own, above the row of small
+            icons: it is the one action on a card that leads somewhere with
+            more in it than the card itself, and it used to be a ghost icon
+            indistinguishable from « détacher » and « supprimer ».
 
+            `contentOf` rather than `card.definition`: a card whose whole
+            definition is a picture has blocks but, defensively, might not have
+            text — it must still read as "has a description". */}
+        <DescriptionButton
+          blocks={contentOf(card)}
+          locked={locked}
+          active={ficheOpen}
+          onActivate={openDescription}
+        />
+
+        {/* `margin-top: auto` in the card's flex column keeps this pinned to
+            the bottom of the card regardless of title length. */}
+        <div className="card-footer" style={{ display: 'flex', gap: '0.25rem', marginTop: 'auto' }}>
           {canDetach && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -818,34 +891,6 @@ export function CardNode({ data }: CardNodeProps) {
           </Tooltip>
         </div>
       </TooltipProvider>
-      )}
-
-      {/* Mounted only while open, like the delete and detach dialogs above:
-          that is what makes each visit start from the card as it is now
-          instead of resuming a draft left from a previous one. */}
-      {descriptionOpen && (
-        <DescriptionDialog
-          breadcrumb={ancestorTitles(allCards, card.id)}
-          cardTitle={card.title}
-          blocks={contentOf(card)}
-          onSave={blocks => updateContent(card.id, blocks)}
-          onClose={() => setDescriptionOpen(false)}
-          resolveAsset={resolveAsset}
-          // Image capabilities are gated on there being an open file: assets
-          // live in a sidecar named after it, so with none there is nowhere to
-          // store one and the affordances stay hidden rather than failing on
-          // click.
-          onInsertImage={currentFilePath ? source => imageBlockFrom(currentFilePath, source) : undefined}
-          onPickImage={
-            currentFilePath
-              ? async () => {
-                  const source = await pickImageFile()
-                  return source === null ? undefined : imageBlockFrom(currentFilePath, source)
-                }
-              : undefined
-          }
-          onError={setWorkspaceError}
-        />
       )}
 
       {isQcmPending && (

@@ -1,7 +1,7 @@
 # Fiche de carte : sidebar de lecture et modale d'édition — Design
 
 **Date** : 2026-09-09
-**Statut** : **Arbitré le 2026-09-09** — quatre lots, A → D
+**Statut** : **Implémenté le 2026-09-09** — lots A, B et C+D livrés
 **Lot** : 7 (Fiche de carte)
 
 ## Arbitrage
@@ -119,9 +119,16 @@ la question posée :
 3. **La modale s'ouvre depuis la fiche et hérite de son en-tête** — même titre,
    même fil d'ariane, même couleur de niveau. Continuité : ce n'est pas un
    autre écran, c'est le même écran passé en écriture.
-4. **Surlignage bidirectionnel.** La carte consultée est mise en évidence sur
-   le canevas ; survoler l'en-tête d'une fiche fait ressortir sa carte. On ne
-   peut pas se tromper de carte.
+4. **La carte dit qu'elle est ouverte.** Le bouton d'une carte dont la fiche
+   est affichée passe en état actif (`aria-pressed`), donc on voit sur le
+   canevas de quelles cartes les fiches viennent.
+
+   *Livré à moitié* : le sens inverse — survoler une fiche pour faire ressortir
+   sa carte — n'est pas implémenté. Il demande de faire redescendre un id
+   survolé dans les `data` des nœuds React Flow, ce qui reconstruit chaque
+   `CardNode` à chaque mouvement de souris (voir la note de `MindMapCanvas` sur
+   le coût d'une reconstruction de `data`). À reprendre avec une classe CSS
+   posée directement sur le nœud, hors du cycle React.
 
 ## Le bouton de la carte
 
@@ -345,15 +352,30 @@ l'utilisent.
 
 ## Découpage en lots
 
-| Lot | Contenu | Dépend de |
+| Lot | Contenu | Statut |
 |---|---|---|
-| **A** | Protocole asset (feature Rust + `assetProtocol` + scope), `resolveAsset` des options de QCM | — |
-| **B** | Modale d'édition : deux volets, palette math, réordonnancement, outils image, validation explicite. Retrait du `<textarea>` inline | A |
-| **C** | Sidebar fiche mono-carte, bouton large à deux états, retrait du popover, recentrage du viewport, fermeture pendant un quiz | B |
-| **D** | Aperçu / épingle, accordéon, largeur redimensionnable et mémorisée, règles d'état | C |
+| **A** | Protocole asset (feature Rust + `assetProtocol` + scope), `resolveAsset` des options de QCM | ✅ |
+| **B** | Modale d'édition : deux volets, palette math, réordonnancement, outils image, validation explicite. Retrait du `<textarea>` inline | ✅ |
+| **C+D** | Panneau fiche, bouton large à deux états, retrait du popover, recentrage du viewport, aperçu/épingle, accordéon, largeur mémorisée, règles d'état | ✅ |
 
 A est court et donne un résultat vérifiable immédiatement ; il conditionne tout
 test des lots suivants impliquant une image.
+
+**C et D n'ont finalement pas été séparés.** Le découpage supposait que
+l'épinglage viendrait après ; l'arbitrage l'ayant placé dans le même cycle, le
+livrer séparément aurait voulu dire écrire le panneau deux fois — une fois
+mono-fiche, une fois en accordéon — pour une étape intermédiaire que personne
+n'aurait utilisée. Le modèle de données, lui, était bien une liste dès le
+départ, comme prévu.
+
+### Réserve de vérification
+
+La moitié Rust du lot A (feature `protocol-asset`) n'a pas pu être compilée :
+l'environnement de développement utilisé n'a pas les bibliothèques GTK. Le
+graphe de dépendances résout et `http-range` — la crate que le protocole asset
+tire pour servir les requêtes Range — apparaît dans `Cargo.lock`, ce qui
+confirme le nom de la feature. Un `cargo build` reste à passer sur la machine
+de développement avant de considérer le bug image clos.
 
 ## Hors périmètre
 

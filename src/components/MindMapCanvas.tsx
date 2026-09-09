@@ -14,10 +14,12 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useCardsStore } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
+import { useCardDetailStore } from '../state/useCardDetailStore'
 import type { Card } from '../types/card'
 import { isRootCard } from '../types/card'
 import type { QuizQuestion, QuizResult } from '../types/quiz'
 import { computeLayout, type Position } from '../layout/columns'
+import { isFullyVisible } from '../layout/visibility'
 import { canMoveCardTo, overflowingCardCount, subtreeDepths } from '../state/cardsReducer'
 import { CardNode } from './CardNode'
 import { clampCardLevel } from '../colors/levelColors'
@@ -296,7 +298,8 @@ function MindMapCanvasInner() {
   const quizResults = useQuizStore(s => s.results)
   const theme = useResolvedTheme()
   const levelAppearance = useAppearanceSettingsStore(s => s.levels)
-  const { setCenter } = useReactFlow()
+  const { setCenter, getZoom, flowToScreenPosition } = useReactFlow()
+  const openFicheIds = useCardDetailStore(s => s.open)
 
   const layout = useMemo(() => computeLayout(cards), [cards])
 
@@ -329,6 +332,48 @@ function MindMapCanvasInner() {
     setSpawningId(createdId ?? null)
     previousIds.current = currentIds
   }, [cards, layout, setCenter])
+
+  /**
+   * Keeps the card whose fiche just opened in view.
+   *
+   * The fiche panel takes its width out of the flow pane, so a card near the
+   * right edge can end up BEHIND the panel that was opened to read it — the
+   * one failure that would make the whole panel feel hostile.
+   *
+   * Only when it is actually needed: `isFullyVisible` is checked against the
+   * pane as it is now (the panel has already been laid out by the time this
+   * effect runs), and the zoom is preserved, so this never re-frames a map the
+   * user had positioned deliberately. Same "compare against the previous set"
+   * shape as the newly-created-card effect above.
+   */
+  const paneRef = useRef<HTMLDivElement>(null)
+  const previousFicheIds = useRef(new Set<string>())
+  useEffect(() => {
+    const currentIds = new Set(openFicheIds.map(entry => entry.cardId))
+    const appeared = [...currentIds].find(id => !previousFicheIds.current.has(id))
+    previousFicheIds.current = currentIds
+    if (appeared === undefined) return
+
+    const position = layout[appeared]
+    const pane = paneRef.current
+    if (position === undefined || pane === null) return
+
+    const topLeft = flowToScreenPosition({ x: position.x, y: position.y })
+    const bottomRight = flowToScreenPosition({
+      x: position.x + NOMINAL_NODE_WIDTH,
+      y: position.y + NOMINAL_NODE_HEIGHT,
+    })
+    const card = { left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y }
+    const bounds = pane.getBoundingClientRect()
+    // The margin covers the sibling "+" buttons, which straddle the card's own
+    // border by ~14px and are just as unusable when clipped.
+    if (isFullyVisible(card, bounds, 24)) return
+
+    setCenter(position.x + NOMINAL_NODE_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
+      zoom: getZoom(),
+      duration: 300,
+    })
+  }, [openFicheIds, layout, flowToScreenPosition, getZoom, setCenter])
 
   // React Flow owns the node array so a drag moves the card live under the
   // cursor (`onNodesChange` applies position changes during the gesture).
@@ -496,6 +541,10 @@ function MindMapCanvasInner() {
   return (
     <>
       <ReactFlow
+        // Measured rather than assumed: the flow pane's width changes when the
+        // fiche panel opens, and the recentring above compares against what it
+        // actually is at that moment.
+        ref={paneRef}
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
