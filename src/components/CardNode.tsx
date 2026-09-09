@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import {
@@ -180,6 +180,18 @@ export function CardNode({ data }: CardNodeProps) {
   const allCards = useCardsStore(s => s.history.present)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
+  // ONE resolver for every read path of this card. Assets live in a sidecar
+  // named after the open file, so it degrades to "not available" when there is
+  // none — which `BlockView` renders as a named placeholder.
+  //
+  // Shared rather than passed per call site because it was not: the quiz's rich
+  // QCM options passed `() => ''` unconditionally, so a definition illustrated
+  // with a diagram read « Image introuvable » in the one place the user is
+  // being asked to recognise it.
+  const resolveAsset = useMemo(
+    () => (currentFilePath === null ? () => '' : (asset: string) => assetSrc(currentFilePath, asset)),
+    [currentFilePath]
+  )
   const addChild = useCardsStore(s => s.addChild)
   const addSibling = useCardsStore(s => s.addSibling)
   const deleteCard = useCardsStore(s => s.deleteCard)
@@ -738,10 +750,10 @@ export function CardNode({ data }: CardNodeProps) {
               blocks={contentOf(card)}
               locked={locked}
               onCommit={blocks => updateContent(card.id, blocks)}
-              // Assets live in a sidecar named after the open file, so every
-              // image capability is gated on there being one. With no file
-              // open the affordances stay hidden rather than failing on click.
-              resolveAsset={currentFilePath ? asset => assetSrc(currentFilePath, asset) : undefined}
+              resolveAsset={resolveAsset}
+              // The write capabilities stay gated on there being a file: with
+              // nowhere to store an asset the affordances are hidden rather
+              // than failing on click.
               onInsertImage={
                 currentFilePath ? source => imageBlockFrom(currentFilePath, source) : undefined
               }
@@ -872,7 +884,7 @@ export function CardNode({ data }: CardNodeProps) {
               ? option => {
                   const source = allCards.find(c => c.definition === option)
                   return source && source.content !== undefined ? (
-                    <BlockView blocks={contentOf(source)} resolveAsset={() => ''} />
+                    <BlockView blocks={contentOf(source)} resolveAsset={resolveAsset} />
                   ) : (
                     option
                   )
