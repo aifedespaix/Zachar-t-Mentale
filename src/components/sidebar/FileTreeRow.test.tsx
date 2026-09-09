@@ -141,6 +141,58 @@ describe('FileTreeRow', () => {
     expect(onOpenFile).not.toHaveBeenCalled()
   })
 
+  it('hides "other" (unreadable) children by default', () => {
+    const node: FileTreeNode = {
+      type: 'folder',
+      name: 'chimie',
+      path: '/cours/chimie',
+      children: [
+        { type: 'mindmap', name: 'atomes.json', path: '/cours/chimie/atomes.json' },
+        { type: 'other', name: 'notes.pdf', path: '/cours/chimie/notes.pdf' },
+      ],
+    }
+    useWorkspaceStore.setState({ expandedPaths: new Set(['/cours/chimie']) })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    expect(screen.getByText('atomes.json')).toBeInTheDocument()
+    expect(screen.queryByText('notes.pdf')).not.toBeInTheDocument()
+  })
+
+  it('shows "other" (unreadable) children when showUnreadable is true', () => {
+    const node: FileTreeNode = {
+      type: 'folder',
+      name: 'chimie',
+      path: '/cours/chimie',
+      children: [{ type: 'other', name: 'notes.pdf', path: '/cours/chimie/notes.pdf' }],
+    }
+    useWorkspaceStore.setState({ expandedPaths: new Set(['/cours/chimie']) })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} showUnreadable />)
+
+    expect(screen.getByText('notes.pdf')).toBeInTheDocument()
+  })
+
+  it('threads showUnreadable down to nested folders', () => {
+    const node: FileTreeNode = {
+      type: 'folder',
+      name: 'chimie',
+      path: '/cours/chimie',
+      children: [
+        {
+          type: 'folder',
+          name: 'td',
+          path: '/cours/chimie/td',
+          children: [{ type: 'other', name: 'archive.zip', path: '/cours/chimie/td/archive.zip' }],
+        },
+      ],
+    }
+    useWorkspaceStore.setState({
+      expandedPaths: new Set(['/cours/chimie', '/cours/chimie/td']),
+    })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} showUnreadable />)
+
+    expect(screen.getByText('archive.zip')).toBeInTheDocument()
+  })
+
   it('toggles a folder open/closed and shows/hides its children', async () => {
     const user = userEvent.setup()
     const node: FileTreeNode = {

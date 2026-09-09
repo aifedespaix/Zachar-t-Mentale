@@ -32,6 +32,8 @@ interface FileTreeRowProps {
   onOpenFile: (path: string) => void
   isRoot?: boolean
   onRemoveRoot?: (path: string) => void
+  /** Whether files the app cannot open (`type: 'other'`) are shown at all. */
+  showUnreadable?: boolean
 }
 
 interface NamingAction {
@@ -70,7 +72,14 @@ function ConfirmDeleteDialog({
   )
 }
 
-export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveRoot }: FileTreeRowProps) {
+export function FileTreeRow({
+  node,
+  depth,
+  onOpenFile,
+  isRoot = false,
+  onRemoveRoot,
+  showUnreadable = false,
+}: FileTreeRowProps) {
   const expandedPaths = useWorkspaceStore(s => s.expandedPaths)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const toggleExpanded = useWorkspaceStore(s => s.toggleExpanded)
@@ -384,7 +393,17 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
         )}
 
         {isExpanded &&
-          node.children.map(child => <FileTreeRow key={child.path} node={child} depth={depth + 1} onOpenFile={onOpenFile} />)}
+          node.children
+            .filter(child => showUnreadable || child.type !== 'other')
+            .map(child => (
+              <FileTreeRow
+                key={child.path}
+                node={child}
+                depth={depth + 1}
+                onOpenFile={onOpenFile}
+                showUnreadable={showUnreadable}
+              />
+            ))}
       </div>
     )
   }

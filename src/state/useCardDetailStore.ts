@@ -1,14 +1,20 @@
 import { create } from 'zustand'
+import { loadStackMode, saveStackMode } from '../persistence/stackMode'
 
 /**
  * One card open in the fiche panel.
  *
  * `pinned` is what separates the two ways a fiche gets there. Clicking a
- * card's description button opens it in PREVIEW: the next click replaces it,
- * so browsing a map does not silently pile up a dozen panels. Pinning makes it
- * permanent, and only then does a second fiche join it. That is the tab model
- * an editor uses, and it is the one that keeps "compare three cards" possible
- * without making "look at one card" expensive.
+ * card's description button opens it in PREVIEW: with stack mode off, the
+ * next click replaces it, so browsing a map does not silently pile up a
+ * dozen panels. Pinning makes it permanent, and only then does a second
+ * fiche join it. That is the tab model an editor uses, and it is the one
+ * that keeps "compare three cards" possible without making "look at one
+ * card" expensive.
+ *
+ * With `stackMode` on (the default — see below), every newly opened card
+ * joins the list instead, so at most one entry has `pinned: false` only
+ * while stack mode is off; with it on, several unpinned entries can coexist.
  */
 export interface OpenCard {
   cardId: string
@@ -17,7 +23,7 @@ export interface OpenCard {
 }
 
 interface CardDetailState {
-  /** Display order. At most one entry has `pinned: false`. */
+  /** Display order. */
   open: OpenCard[]
   /**
    * Which card's description editor is up, if any. Lives here rather than in
@@ -25,8 +31,18 @@ interface CardDetailState {
    * so the card node and the fiche cannot both open one for the same card.
    */
   editingCardId: string | null
+  /**
+   * When on, `show` appends every newly opened card instead of replacing the
+   * preview — the right sidebar's "pile" toggle. Persisted, and on by
+   * default: piling fiches up as you browse, then trimming with
+   * `clearUnpinned`, needs no per-card pinning to get there.
+   */
+  stackMode: boolean
 
-  /** Opens a card in preview, replacing whatever preview was there. */
+  /**
+   * Opens a card in preview. Replaces whatever preview was there when stack
+   * mode is off; appends when it is on.
+   */
   show: (cardId: string) => void
   /** Preview → pinned. Already-pinned cards are left alone. */
   pin: (cardId: string) => void
@@ -41,11 +57,15 @@ interface CardDetailState {
   closeAll: () => void
   /** Drops fiches for cards that no longer exist, after a deletion. */
   retain: (existingIds: Set<string>) => void
+  toggleStackMode: () => void
+  /** Drops every non-pinned fiche, keeping the ones pinned deliberately — the "vider la liste" button. */
+  clearUnpinned: () => void
 }
 
 export const useCardDetailStore = create<CardDetailState>((set) => ({
   open: [],
   editingCardId: null,
+  stackMode: loadStackMode(),
 
   show: cardId =>
     set(state => {
@@ -59,6 +79,9 @@ export const useCardDetailStore = create<CardDetailState>((set) => ({
             entry.cardId === cardId ? { ...entry, collapsed: false } : entry
           ),
         }
+      }
+      if (state.stackMode) {
+        return { open: [...state.open, { cardId, pinned: false, collapsed: false }] }
       }
       const pinnedOnly = state.open.filter(entry => entry.pinned)
       return { open: [...pinnedOnly, { cardId, pinned: false, collapsed: false }] }
@@ -95,6 +118,26 @@ export const useCardDetailStore = create<CardDetailState>((set) => ({
         open: kept,
         editingCardId:
           state.editingCardId !== null && existingIds.has(state.editingCardId) ? state.editingCardId : null,
+      }
+    }),
+
+  toggleStackMode: () =>
+    set(state => {
+      const next = !state.stackMode
+      saveStackMode(next)
+      return { stackMode: next }
+    }),
+
+  clearUnpinned: () =>
+    set(state => {
+      const kept = state.open.filter(entry => entry.pinned)
+      if (kept.length === state.open.length) return state
+      return {
+        open: kept,
+        editingCardId:
+          state.editingCardId !== null && kept.some(entry => entry.cardId === state.editingCardId)
+            ? state.editingCardId
+            : null,
       }
     }),
 }))

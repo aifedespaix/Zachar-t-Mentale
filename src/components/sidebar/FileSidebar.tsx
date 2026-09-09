@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { FolderPlus, PanelLeftClose, PanelLeftOpen, RefreshCw, X } from 'lucide-react'
+import { Eye, EyeOff, FolderPlus, PanelLeftClose, PanelLeftOpen, RefreshCw, X } from 'lucide-react'
 import { Button } from '../ui/button'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { FileTreeRow } from './FileTreeRow'
@@ -19,6 +19,7 @@ import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
 } from '../../persistence/sidebarWidth'
+import { loadShowUnreadableFiles, saveShowUnreadableFiles } from '../../persistence/showUnreadableFiles'
 import type { FileTreeNode } from '../../types/workspace'
 
 /** How far one arrow-key press moves the border, for a keyboard resize. */
@@ -42,6 +43,9 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const workspaceError = useWorkspaceStore(s => s.workspaceError)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const [collapsed, setCollapsed] = useState(false)
+  // Same reason as the width below: read synchronously so the tree doesn't
+  // flash unreadable files for a frame before hiding them again.
+  const [showUnreadable, setShowUnreadable] = useState(loadShowUnreadableFiles)
   // Read synchronously on the first render — an effect would paint the
   // default width for a frame and then visibly snap to the saved one.
   const [width, setWidth] = useState(loadSidebarWidth)
@@ -120,6 +124,12 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
     }
   }
 
+  function handleToggleShowUnreadable() {
+    const next = !showUnreadable
+    setShowUnreadable(next)
+    saveShowUnreadableFiles(next)
+  }
+
   function handleRemoveRoot(path: string) {
     removeRootFolder(path).catch(error =>
       setWorkspaceError(`Impossible de retirer le dossier : ${describeError(error)}`)
@@ -159,6 +169,16 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
           <Button variant="ghost" size="icon-sm" aria-label="Rafraîchir" onClick={handleRefreshAll}>
             <RefreshCw size={16} />
           </Button>
+          <Button
+            variant={showUnreadable ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            aria-label={showUnreadable ? 'Masquer les fichiers non lisibles' : 'Afficher les fichiers non lisibles'}
+            aria-pressed={showUnreadable}
+            title="Fichiers que l’application ne peut pas ouvrir"
+            onClick={handleToggleShowUnreadable}
+          >
+            {showUnreadable ? <Eye size={16} /> : <EyeOff size={16} />}
+          </Button>
           <Button variant="ghost" size="icon-sm" aria-label="Replier la barre latérale" onClick={() => setCollapsed(true)}>
             <PanelLeftClose size={16} />
           </Button>
@@ -196,6 +216,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
               onOpenFile={onOpenFile}
               isRoot
               onRemoveRoot={handleRemoveRoot}
+              showUnreadable={showUnreadable}
             />
           )
         })}

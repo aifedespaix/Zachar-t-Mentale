@@ -39,8 +39,10 @@ function resetStore(cards: Card[]) {
 
 describe('CardDetailPanel', () => {
   beforeEach(() => {
+    localStorage.clear()
     resetStore([root, branch, leaf, bare])
     useCardDetailStore.getState().closeAll()
+    useCardDetailStore.setState({ stackMode: true })
   })
 
   it('renders nothing at all when no fiche is open', () => {
@@ -162,5 +164,39 @@ describe('CardDetailPanel', () => {
 
     expect(screen.getByText('Chapitre entier')).toBeInTheDocument()
     expect(screen.queryByText('›')).not.toBeInTheDocument()
+  })
+
+  it('stacks every opened card by default instead of replacing the preview', () => {
+    useCardDetailStore.getState().show(leaf.id)
+    useCardDetailStore.getState().show(bare.id)
+    render(<CardDetailPanel />)
+
+    expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
+    expect(screen.getByLabelText('Fiche de Sans description')).toBeInTheDocument()
+  })
+
+  it('toggles stack mode off, so a newly opened card replaces the unpinned preview again', async () => {
+    const user = userEvent.setup()
+    useCardDetailStore.getState().show(leaf.id)
+    render(<CardDetailPanel />)
+
+    await user.click(screen.getByRole('button', { name: /désactiver le mode pile/i }))
+    act(() => useCardDetailStore.getState().show(bare.id))
+
+    expect(screen.queryByLabelText('Fiche de Signes contraires')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Fiche de Sans description')).toBeInTheDocument()
+  })
+
+  it('clears unpinned fiches from the "vider la liste" button, keeping the pinned ones', async () => {
+    const user = userEvent.setup()
+    useCardDetailStore.getState().show(leaf.id)
+    useCardDetailStore.getState().pin(leaf.id)
+    useCardDetailStore.getState().show(bare.id)
+    render(<CardDetailPanel />)
+
+    await user.click(screen.getByRole('button', { name: /vider la liste/i }))
+
+    expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Fiche de Sans description')).not.toBeInTheDocument()
   })
 })

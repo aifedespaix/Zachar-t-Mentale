@@ -5,7 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { ChevronDown, ChevronRight, Pencil, Pin, PinOff, Plus, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Eraser, Layers, Pencil, Pin, PinOff, Plus, Trash2, X } from 'lucide-react'
 import type { Card } from '../../types/card'
 import { useCardsStore } from '../../state/useCardsStore'
 import { useCardDetailStore } from '../../state/useCardDetailStore'
@@ -53,10 +53,13 @@ const KEYBOARD_RESIZE_STEP = 16
 export function CardDetailPanel() {
   const openEntries = useCardDetailStore(s => s.open)
   const editingCardId = useCardDetailStore(s => s.editingCardId)
+  const stackMode = useCardDetailStore(s => s.stackMode)
   const pin = useCardDetailStore(s => s.pin)
   const close = useCardDetailStore(s => s.close)
   const toggleCollapsed = useCardDetailStore(s => s.toggleCollapsed)
   const setEditing = useCardDetailStore(s => s.setEditing)
+  const toggleStackMode = useCardDetailStore(s => s.toggleStackMode)
+  const clearUnpinned = useCardDetailStore(s => s.clearUnpinned)
   const cards = useCardsStore(s => s.history.present)
 
   const [width, setWidth] = useState(loadCardDetailWidth)
@@ -154,6 +157,37 @@ export function CardDetailPanel() {
           background: resizing ? 'var(--primary)' : 'transparent',
         }}
       />
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 2,
+          padding: '4px 6px',
+          borderBottom: '1px solid var(--border)',
+        }}
+      >
+        <Button
+          variant={stackMode ? 'secondary' : 'ghost'}
+          size="icon-sm"
+          aria-label={stackMode ? 'Désactiver le mode pile' : 'Activer le mode pile'}
+          aria-pressed={stackMode}
+          title="Mode pile : une fiche ouverte reste affichée quand une autre s’ouvre, au lieu d’être remplacée"
+          onClick={toggleStackMode}
+        >
+          <Layers size={16} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Vider la liste des fiches"
+          title="Vider la liste : ferme toutes les fiches non épinglées"
+          onClick={clearUnpinned}
+        >
+          <Eraser size={16} />
+        </Button>
+      </div>
 
       {openEntries.map(entry => {
         const card = cards.find(c => c.id === entry.cardId)

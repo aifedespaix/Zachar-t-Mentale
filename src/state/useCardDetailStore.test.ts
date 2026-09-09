@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useCardDetailStore } from './useCardDetailStore'
+import { loadStackMode } from '../persistence/stackMode'
 
 const ids = () => useCardDetailStore.getState().open.map(entry => entry.cardId)
 const pinnedIds = () =>
@@ -9,9 +10,17 @@ const pinnedIds = () =>
     .map(entry => entry.cardId)
 
 describe('useCardDetailStore', () => {
-  beforeEach(() => useCardDetailStore.getState().closeAll())
+  beforeEach(() => {
+    localStorage.clear()
+    useCardDetailStore.getState().closeAll()
+    // Stack mode defaults to on (see stackMode.test.ts); most of these tests
+    // exercise the pre-existing "replace the preview" behaviour, which now
+    // only applies with it off. The dedicated describe blocks below turn it
+    // back on for what they test.
+    useCardDetailStore.setState({ stackMode: false })
+  })
 
-  it('replaces the preview rather than stacking fiches', () => {
+  it('replaces the preview rather than stacking fiches when stack mode is off', () => {
     // Without this, browsing a map quietly fills the panel with a dozen cards
     // nobody asked to keep.
     useCardDetailStore.getState().show('a')
@@ -110,5 +119,85 @@ describe('useCardDetailStore', () => {
 
     expect(ids()).toEqual([])
     expect(useCardDetailStore.getState().editingCardId).toBeNull()
+  })
+
+  describe('stack mode', () => {
+    beforeEach(() => useCardDetailStore.setState({ stackMode: true }))
+
+    it('stacks a newly opened card instead of replacing the preview', () => {
+      useCardDetailStore.getState().show('a')
+      useCardDetailStore.getState().show('b')
+
+      expect(ids()).toEqual(['a', 'b'])
+    })
+
+    it('does not duplicate a card that is already open', () => {
+      useCardDetailStore.getState().show('a')
+      useCardDetailStore.getState().show('b')
+      useCardDetailStore.getState().show('a')
+
+      expect(ids()).toEqual(['a', 'b'])
+    })
+
+    it('is on by default', () => {
+      // Reflects `stackMode.test.ts`'s "active by default": a fresh store
+      // (module-level `loadStackMode()` fallback) starts stacked, this test
+      // just pins that contract at the store's own public surface too.
+      useCardDetailStore.setState({ stackMode: loadStackMode() })
+      expect(useCardDetailStore.getState().stackMode).toBe(true)
+    })
+
+    it('toggles and persists the flag', () => {
+      useCardDetailStore.getState().toggleStackMode()
+      expect(useCardDetailStore.getState().stackMode).toBe(false)
+      expect(loadStackMode()).toBe(false)
+
+      useCardDetailStore.getState().toggleStackMode()
+      expect(useCardDetailStore.getState().stackMode).toBe(true)
+      expect(loadStackMode()).toBe(true)
+    })
+  })
+
+  describe('clearUnpinned', () => {
+    it('drops every unpinned fiche but keeps the pinned ones', () => {
+      useCardDetailStore.setState({ stackMode: true })
+      useCardDetailStore.getState().show('a')
+      useCardDetailStore.getState().pin('a')
+      useCardDetailStore.getState().show('b')
+      useCardDetailStore.getState().show('c')
+
+      useCardDetailStore.getState().clearUnpinned()
+
+      expect(ids()).toEqual(['a'])
+    })
+
+    it('clears the editor when it belonged to a card that got dropped', () => {
+      useCardDetailStore.getState().show('a')
+      useCardDetailStore.getState().setEditing('a')
+
+      useCardDetailStore.getState().clearUnpinned()
+
+      expect(useCardDetailStore.getState().editingCardId).toBeNull()
+    })
+
+    it('leaves the editor alone when it belongs to a card that stays pinned', () => {
+      useCardDetailStore.getState().show('a')
+      useCardDetailStore.getState().pin('a')
+      useCardDetailStore.getState().setEditing('a')
+
+      useCardDetailStore.getState().clearUnpinned()
+
+      expect(useCardDetailStore.getState().editingCardId).toBe('a')
+    })
+
+    it('is a no-op when every open fiche is already pinned', () => {
+      useCardDetailStore.getState().show('a')
+      useCardDetailStore.getState().pin('a')
+      const before = useCardDetailStore.getState().open
+
+      useCardDetailStore.getState().clearUnpinned()
+
+      expect(useCardDetailStore.getState().open).toBe(before)
+    })
   })
 })

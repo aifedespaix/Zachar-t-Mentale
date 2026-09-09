@@ -241,6 +241,41 @@ describe('FileSidebar', () => {
     expect(localStorage.getItem('zachart-mentale:sidebar-width')).toBe(String(DEFAULT_SIDEBAR_WIDTH))
   })
 
+  it('hides unreadable files by default, and reveals them from the toggle', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours-svt'] })
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'chapitre1.json', path: '/cours-svt/chapitre1.json' },
+      { type: 'other', name: 'notes.pdf', path: '/cours-svt/notes.pdf' },
+    ])
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('cours-svt')
+    await user.click(screen.getByRole('button', { name: 'cours-svt' }))
+    await screen.findByText('chapitre1.json')
+
+    expect(screen.queryByText('notes.pdf')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /afficher les fichiers non lisibles/i }))
+
+    expect(screen.getByText('notes.pdf')).toBeInTheDocument()
+  })
+
+  it('remembers the unreadable-files toggle across a remount', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours-svt'] })
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'other', name: 'notes.pdf', path: '/cours-svt/notes.pdf' }])
+    const { unmount } = render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('cours-svt')
+    await user.click(screen.getByRole('button', { name: /afficher les fichiers non lisibles/i }))
+    unmount()
+
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('cours-svt')
+    await user.click(screen.getByRole('button', { name: 'cours-svt' }))
+
+    expect(await screen.findByText('notes.pdf')).toBeInTheDocument()
+  })
+
   it('collapses the panel, hiding its content, and expands it back', async () => {
     const user = userEvent.setup()
     render(<FileSidebar onOpenFile={() => {}} />)
