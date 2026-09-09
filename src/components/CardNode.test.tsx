@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
@@ -9,6 +9,7 @@ import type { Card } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { EMPTY_RECALL_PROGRESS } from '../types/quiz'
 import { useQuizSettingsStore } from '../state/useQuizSettingsStore'
+import { useCardDetailStore } from '../state/useCardDetailStore'
 import { DEFAULT_QUIZ_SETTINGS } from '../types/quizSettings'
 
 type QuizData = {
@@ -91,6 +92,7 @@ function resetQuizStore() {
 
 describe('CardNode', () => {
   beforeEach(() => {
+    useCardDetailStore.getState().closeAll()
     resetStore([testCard])
     resetQuizStore()
     useQuizSettingsStore.setState(DEFAULT_QUIZ_SETTINGS)
@@ -451,6 +453,7 @@ describe('CardNode mnemonic icon', () => {
   const cardWithIcon: Card = { ...testCard, icon: 'Brain' }
 
   beforeEach(() => {
+    useCardDetailStore.getState().closeAll()
     resetStore([testCard])
     resetQuizStore()
   })
@@ -536,6 +539,7 @@ describe('CardNode mnemonic icon', () => {
 
 describe('CardNode footer', () => {
   beforeEach(() => {
+    useCardDetailStore.getState().closeAll()
     resetStore([testCard])
     resetQuizStore()
     useQuizSettingsStore.setState(DEFAULT_QUIZ_SETTINGS)
@@ -544,9 +548,32 @@ describe('CardNode footer', () => {
     useQuizStore.setState({ config: { levels: [1, 2, 3, 4], difficulty: 'difficile', qcmMode: false } })
   })
 
-  it('shows an "add definition" affordance when there is none yet', () => {
+  it('shows an "add description" affordance when there is none yet', () => {
     renderCardNode(testCard)
-    expect(screen.getByRole('button', { name: /ajouter une définition/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /ajouter une description/i })).toBeInTheDocument()
+  })
+
+  it('previews an existing description on one elided line, with badges for what else is in it', () => {
+    resetStore([{ ...cardWithDefinition, content: [{ kind: 'math', latex: '\\frac{1}{2}' }] }])
+    renderCardNode({ ...cardWithDefinition, content: [{ kind: 'math', latex: '\\frac{1}{2}' }] })
+
+    const button = screen.getByRole('button', { name: /afficher la description/i })
+    expect(within(button).getByLabelText(/contient une formule/i)).toBeInTheDocument()
+  })
+
+  it('keeps the description control the same height in both states', () => {
+    // Règle anti-décalage 1: two neighbouring cards must stay the same height,
+    // or writing a definition shifts the whole tree.
+    const { unmount } = renderCardNode(testCard)
+    const empty = screen.getByRole('button', { name: /ajouter une description/i }).style.height
+    unmount()
+
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+    const filled = screen.getByRole('button', { name: /afficher la description/i }).style.height
+
+    expect(empty).toBe(filled)
+    expect(empty).not.toBe('')
   })
 
   it('flips the card visually when the flip icon is clicked, without altering any card data', async () => {
@@ -732,40 +759,40 @@ describe('CardNode footer', () => {
     expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
   })
 
-  it('opens an editable field when "add definition" is clicked and commits the typed text on Enter', async () => {
+  it('opens the fiche AND its editor when the card has nothing to read yet', async () => {
+    // A card with no description has nothing to show, so sending the user to
+    // an empty panel to find an "add" button would spend a click on nothing.
     const user = userEvent.setup()
     renderCardNode(testCard)
 
-    await user.click(screen.getByRole('button', { name: /ajouter une définition/i }))
-    const field = screen.getByRole('textbox', { name: /définition/i })
-    await user.type(field, 'Nouvelle définition{Enter}')
+    await user.click(screen.getByRole('button', { name: /ajouter une description/i }))
 
-    expect(useCardsStore.getState().history.present.find(c => c.id === testCard.id)?.definition).toBe(
-      'Nouvelle définition'
-    )
+    expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([testCard.id])
+    expect(useCardDetailStore.getState().editingCardId).toBe(testCard.id)
   })
 
-  it('cancels the definition edit on Escape without calling updateDefinition', async () => {
+  it('opens the fiche for reading when the card already has a description', async () => {
     const user = userEvent.setup()
-    renderCardNode(testCard)
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
 
-    await user.click(screen.getByRole('button', { name: /ajouter une définition/i }))
-    const field = screen.getByRole('textbox', { name: /définition/i })
-    await user.type(field, 'Texte annulé{Escape}')
+    await user.click(screen.getByRole('button', { name: /afficher la description/i }))
 
-    expect(screen.queryByRole('textbox', { name: /définition/i })).not.toBeInTheDocument()
-    expect(useCardsStore.getState().history.present.find(c => c.id === testCard.id)?.definition).toBeUndefined()
+    expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([cardWithDefinition.id])
+    // Reading is the common case: the editor is one more click away, not the
+    // destination.
+    expect(useCardDetailStore.getState().editingCardId).toBeNull()
   })
 
-  it('does not push a history entry when the definition editor is closed unchanged', async () => {
+  it('opens a fiche in preview, so browsing a map does not pile panels up', async () => {
     const user = userEvent.setup()
-    renderCardNode(testCard)
-    await user.click(screen.getByRole('button', { name: /ajouter une définition/i }))
-    const before = useCardsStore.getState().history
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
 
-    await user.keyboard('{Enter}')
+    await user.click(screen.getByRole('button', { name: /afficher la description/i }))
+    await user.click(screen.getByRole('button', { name: /afficher la description/i }))
 
-    expect(useCardsStore.getState().history).toBe(before)
+    expect(useCardDetailStore.getState().open).toHaveLength(1)
   })
 
   it('marks itself as a reparent drop target when data.isReparentTarget is set', () => {
@@ -790,11 +817,24 @@ describe('CardNode footer', () => {
     expect(useCardsStore.getState().history.present[0].title).toBe('Titre initial')
   })
 
-  it('disables the "add definition" button when the mind map is locked', () => {
+  it('disables the "add description" button when the mind map is locked', () => {
     useCardsStore.setState({ locked: true })
     renderCardNode(testCard)
 
-    expect(screen.getByRole('button', { name: /ajouter une définition/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /ajouter une description/i })).toBeDisabled()
+  })
+
+  it('still opens the fiche of a card that HAS a description on a locked map', async () => {
+    // Locking stops editing, not reading, and the fiche is the reading surface.
+    const user = userEvent.setup()
+    resetStore([cardWithDefinition])
+    useCardsStore.setState({ locked: true })
+    renderCardNode(cardWithDefinition)
+
+    await user.click(screen.getByRole('button', { name: /afficher la description/i }))
+
+    expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([cardWithDefinition.id])
+    expect(useCardDetailStore.getState().editingCardId).toBeNull()
   })
 
   it('shows a green border once graded correct', () => {
@@ -806,56 +846,6 @@ describe('CardNode footer', () => {
     renderCardNode(testCard, false, false, { type: 'recall', result: 'incorrect' })
 
     expect(screen.getByTestId(`card-${testCard.id}`)).toHaveStyle({ borderColor: '#dc2626' })
-  })
-
-  it('wires the definition popover to the store when a new value is committed', async () => {
-    const user = userEvent.setup()
-    resetStore([cardWithDefinition])
-    renderCardNode(cardWithDefinition)
-
-    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
-    await user.click(screen.getByText('Définition existante'))
-    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
-    await user.clear(field)
-    await user.type(field, 'Définition modifiée')
-    await user.click(screen.getByRole('button', { name: /terminer/i }))
-
-    const card = useCardsStore.getState().history.present.find(c => c.id === cardWithDefinition.id)
-    expect(card?.definition).toBe('Définition modifiée')
-    // Plain text stays plain: editing a text-only definition must not leave a
-    // `content` array behind on a card that never needed one.
-    expect(card && 'content' in card).toBe(false)
-  })
-
-  it('stores a formula as a content block, with `definition` kept as its plain-text mirror', async () => {
-    const user = userEvent.setup()
-    resetStore([cardWithDefinition])
-    renderCardNode(cardWithDefinition)
-
-    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
-    await user.click(screen.getByText('Définition existante'))
-    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
-    await user.clear(field)
-    // No braces in the typed string: userEvent reads `{...}` as key-descriptor
-    // syntax, which would swallow them before they reached the field.
-    await user.type(field, 'x^2$$')
-    await user.click(screen.getByRole('button', { name: /terminer/i }))
-
-    const card = useCardsStore.getState().history.present.find(c => c.id === cardWithDefinition.id)
-    expect(card?.content).toEqual([{ kind: 'math', latex: 'x^2' }])
-    expect(card?.definition).toBe('x²')
-  })
-
-  it('renders the definition outside the card element (portaled), so the card never has to resize to fit it', async () => {
-    const user = userEvent.setup()
-    resetStore([cardWithDefinition])
-    renderCardNode(cardWithDefinition)
-
-    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
-    const definitionText = screen.getByText('Définition existante')
-    const cardElement = screen.getByTestId(`card-${cardWithDefinition.id}`)
-
-    expect(cardElement).not.toContainElement(definitionText)
   })
 
   it('opens the QCM dialog when a pending qcm-definition question\'s "Répondre" button is clicked', async () => {
@@ -870,9 +860,13 @@ describe('CardNode footer', () => {
 
     await user.click(screen.getByRole('button', { name: /répondre/i }))
 
+    // Scoped to the dialog: the card behind it previews its own description,
+    // so a bare query would match the answer twice. (Not a leak in the app —
+    // a real quiz hides the card's whole footer.)
+    const dialog = within(screen.getByRole('dialog'))
     expect(screen.getByRole('heading', { name: cardWithDef.title })).toBeInTheDocument()
-    expect(screen.getByText('Bonne définition')).toBeInTheDocument()
-    expect(screen.getByText('Fausse A')).toBeInTheDocument()
+    expect(dialog.getByText('Bonne définition')).toBeInTheDocument()
+    expect(dialog.getByText('Fausse A')).toBeInTheDocument()
   })
 
   it('records the qcm-definition answer in the quiz store once a choice is made', async () => {
@@ -887,7 +881,7 @@ describe('CardNode footer', () => {
     })
 
     await user.click(screen.getByRole('button', { name: /répondre/i }))
-    await user.click(screen.getByText('Bonne définition'))
+    await user.click(within(screen.getByRole('dialog')).getByText('Bonne définition'))
     vi.advanceTimersByTime(700)
 
     expect(useQuizStore.getState().results[cardWithDef.id]).toBe('correct')
@@ -968,7 +962,7 @@ describe('CardNode — rich QCM options', () => {
 
     await user.click(screen.getByRole('button', { name: /répondre/i }))
 
-    expect(screen.getByText('Bonne définition')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('Bonne définition')).toBeInTheDocument()
     expect(document.querySelector('.katex')).toBeNull()
   })
 })

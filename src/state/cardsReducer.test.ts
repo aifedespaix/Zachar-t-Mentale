@@ -21,6 +21,7 @@ import {
   flattenedCardCount,
   overflowingCardCount,
   subtreeDepths,
+  ancestorTitles,
 } from './cardsReducer'
 import type { Card } from '../types/card'
 
@@ -659,5 +660,44 @@ describe('updateDefinition routes through the same single writer', () => {
     const card = next.find(c => c.id === 'a')!
     expect('content' in card).toBe(false)
     expect('definition' in card).toBe(false)
+  })
+})
+
+describe('ancestorTitles', () => {
+  it('lists the ancestors root first, without the card itself', () => {
+    const root = createRootCard('Nombres relatifs')
+    const withChild = addChild([root], root.id)
+    const withGrandChild = addChild(withChild.cards, withChild.newCardId)
+    const cards = updateTitle(
+      updateTitle(withGrandChild.cards, withChild.newCardId, 'Addition'),
+      withGrandChild.newCardId,
+      'Signes contraires'
+    )
+
+    expect(ancestorTitles(cards, withGrandChild.newCardId)).toEqual(['Nombres relatifs', 'Addition'])
+  })
+
+  it('gives the root an empty chain', () => {
+    const root = createRootCard('Chapitre')
+    expect(ancestorTitles([root], root.id)).toEqual([])
+  })
+
+  it('gives a floating card an empty chain rather than a misleading one', () => {
+    // A detached card shares the root's `parentId: null` but is not under it.
+    const detached: Card = { id: 'd', level: 3, title: 'Volante', parentId: null, order: 0, detached: true }
+    expect(ancestorTitles([createRootCard(), detached], 'd')).toEqual([])
+  })
+
+  it('terminates on a parent cycle rather than spinning', () => {
+    // A `.zmap` may have been shared or hand-edited; `computeLayout` carries
+    // the same guard for the same reason.
+    const a: Card = { id: 'a', level: 2, title: 'A', parentId: 'b', order: 0 }
+    const b: Card = { id: 'b', level: 2, title: 'B', parentId: 'a', order: 0 }
+    expect(ancestorTitles([a, b], 'a')).toEqual(['B'])
+  })
+
+  it('stops at a parent that is not in the list', () => {
+    const orphan: Card = { id: 'o', level: 3, title: 'Orpheline', parentId: 'disparu', order: 0 }
+    expect(ancestorTitles([orphan], 'o')).toEqual([])
   })
 })

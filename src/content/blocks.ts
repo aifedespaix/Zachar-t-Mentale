@@ -1,5 +1,5 @@
 import type { Card } from '../types/card'
-import type { CardBlock } from '../types/cardBlock'
+import type { CardBlock, CardBlockKind } from '../types/cardBlock'
 
 /**
  * The block model's pure core: how blocks project down to plain text, and how
@@ -229,6 +229,22 @@ export function contentOf(card: Card): CardBlock[] {
     return [{ kind: 'text', text: card.definition }]
   }
   return []
+}
+
+/**
+ * Which non-text kinds a definition holds, in a stable order.
+ *
+ * Drives the badges on the card's description button and on a collapsed fiche
+ * header. Text is excluded because it is the default: a badge on every card
+ * that merely has words would carry no information and cost a row of chrome.
+ *
+ * The order is fixed rather than first-seen so two cards with the same kinds
+ * always show the same badges in the same places — a card is scanned, not
+ * read, and a badge that moves between cards is a badge that has to be read.
+ */
+export function nonTextKinds(blocks: CardBlock[]): Exclude<CardBlockKind, 'text'>[] {
+  const order: Exclude<CardBlockKind, 'text'>[] = ['math', 'image', 'table']
+  return order.filter(kind => blocks.some(block => block.kind === kind))
 }
 
 /** Every readable block of a raw `content` array. Exported for the repair path. */
