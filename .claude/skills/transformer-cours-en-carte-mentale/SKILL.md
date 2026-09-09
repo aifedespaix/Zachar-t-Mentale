@@ -18,12 +18,14 @@ référence.
 
 ```ts
 type CardLevel = 1 | 2 | 3 | 4
+type CardKind = 'definition' | 'media'   // absent = 'definition'
 interface Card {
   id: string
   level: CardLevel        // 1=Titre principal 2=Sous-titre 3=Sous-partie 4=Info
   title: string
-  definition?: string      // texte brut ; miroir DÉRIVÉ dès que `content` existe
-  content?: CardBlock[]    // optionnel : définition riche (formules, tableaux)
+  kind?: CardKind          // 'media' pour un tableau/formule/exemple chiffré qui N'EST PAS une vraie définition
+  definition?: string      // texte brut ; miroir DÉRIVÉ dès que `content` existe — reste obligatoire même pour une carte média, mais mécaniquement, jamais rédigé à la main
+  content?: CardBlock[]    // optionnel pour une définition, obligatoire (≥ 1 bloc non-text) pour un média
   parentId: string | null  // null uniquement pour la racine
   order: number             // position parmi les frères/sœurs
 }
@@ -42,6 +44,55 @@ type CardBlock =
 - Extension : `.zmap` — c'est celle que l'installeur associe à l'app, donc la
   carte s'ouvre d'un double-clic depuis l'explorateur. Le contenu reste du JSON.
   Les anciens `.json` continuent de s'ouvrir, mais rien de neuf n'en écrit.
+
+## Définition ou média : la carte est l'un OU l'autre
+
+Une carte est `kind: 'media'` quand son contenu n'énonce pas un fait ou une
+règle mais un calcul déjà résolu, une formule, un tableau, ou une
+illustration — pas de phrase de définition à rédiger autour, la projection
+texte de `content` suffit et se calcule mécaniquement (voir ci-dessus).
+Sinon, elle est une définition (`kind` absent).
+
+Test à faire mentalement sur chaque card : *si je devais expliquer cette
+carte à quelqu'un, est-ce que je dirais « ça définit X » ou « ça montre
+comment calculer/représenter X » ?* Le premier cas est `definition`, le
+second `media`.
+
+```json
+// MÉDIA — un calcul déjà résolu, pas une définition
+{
+  "id": "ex-avec-calculatrice", "level": 4, "title": "Exemple avec calculatrice",
+  "kind": "media",
+  "parentId": "avec-calculatrice", "order": 0,
+  "content": [
+    { "kind": "math", "latex": "\\frac{20}{100} \\times 425 = 85" },
+    { "kind": "text", "text": "Il y a 85 élèves demi-pensionnaires." }
+  ],
+  "definition": "20/100 × 425 = 85\nIl y a 85 élèves demi-pensionnaires."
+}
+
+// DÉFINITION — énonce une règle, même avec une formule dedans
+{
+  "id": "signes-contraires", "level": 3, "title": "Signes contraires",
+  "parentId": "…", "order": 0,
+  "content": [
+    { "kind": "text", "text": "On garde le signe du nombre le plus éloigné de zéro, puis on soustrait les distances à zéro." },
+    { "kind": "math", "latex": "(+10) + (-4) = +(10-4) = +6" }
+  ],
+  "definition": "On garde le signe du nombre le plus éloigné de zéro, puis on soustrait les distances à zéro.\n(+10) + (-4) = +6"
+}
+```
+
+Formules physique/chimie (`\\ce{}`, `\\pu{}`) et tableaux suivent exactement
+les mêmes règles de bloc que déjà décrites plus bas — la seule différence est
+de leur donner `kind: 'media'` plutôt que de forcer une phrase de définition
+autour quand il n'y en a pas de naturelle.
+
+**Hors périmètre** : les schémas labellisés (coupe de sol, cellule, chaîne
+alimentaire...) n'ont pas de type de bloc dédié aujourd'hui. Route une
+légende/schéma SVT vers un bloc `table` (numéro / nom / rôle) plutôt que de
+l'omettre — moins fidèle visuellement, mais dans le périmètre du modèle
+actuel.
 
 ## Écrire les maths en blocs, pas en texte
 
@@ -150,9 +201,11 @@ différente sur ce qui est écrit :
 
 | Question | Ce que l'app montre | Ce que l'utilisateur fournit | Déclenchée quand |
 |---|---|---|---|
-| `qcm-definition` | le `title` de la card | il choisit la bonne `definition` parmi 4 | la card A une `definition` |
-| `recall` | le `title` en texte à trous | il écrit le titre lettre par lettre | la card n'a PAS de `definition` |
-| `qcm-title` | la `definition` (comme indice) | il choisit le bon `title` parmi 4 | mode QCM activé |
+| `qcm-definition` | le `title` de la card | il choisit la bonne `definition` parmi 4 | `kind` absent/`definition`, la card a une `definition` |
+| `recall` | le `title` en texte à trous | il écrit le titre lettre par lettre | `kind` absent/`definition`, la card n'a PAS de `definition` |
+| `qcm-title` | la `definition` en entier (comme indice) | il choisit le bon `title` parmi 4 | `kind` absent/`definition`, mode QCM activé |
+| `qcm-media` | le `title` de la card | il choisit le bon média (tableau/formule/image) parmi 4 | `kind: 'media'` |
+| `qcm-media-title` | le média en entier (comme indice) | il choisit le bon `title` parmi 4 | `kind: 'media'`, mode QCM activé |
 
 ### 1. Titre et définition doivent se déterminer l'un l'autre
 
@@ -179,7 +232,23 @@ définition suffit-elle à le retrouver ? Si je masque la définition, le titre
 suffit-il à la reconnaître parmi ses sœurs ?** Si l'une des deux réponses est
 non, réécrire.
 
-### 2. Les sœurs doivent être distinguables — mais pas trivialement
+### 2. Marquer les mots-clés d'une définition
+
+Dans le texte d'une `definition` (ou d'un bloc `text`), encadrer les mots ou
+groupes de mots essentiels avec des doubles astérisques : `**mot-clé**`.
+L'application les affiche en couleur dans la fiche de lecture — jamais dans
+le quiz, où toute option s'affiche en texte plat, y compris pour cette
+carte-là si elle sert de distracteur ailleurs.
+
+```json
+// BON — les mots qui portent le sens sont marqués, la phrase reste lisible sans eux
+{ "title": "Addition de fractions", "definition": "**Mettre au même dénominateur**, puis additionner les numérateurs en gardant le dénominateur commun." }
+```
+
+Ne pas marquer une phrase entière ni un mot sur deux — deux ou trois termes
+par définition, ceux qu'un élève chercherait à retenir en premier.
+
+### 3. Les sœurs doivent être distinguables — mais pas trivialement
 
 Les distracteurs d'un QCM sont pris parmi les cards sœurs (même parent, sinon
 même niveau, sinon tout le fichier). D'où deux échecs symétriques :
@@ -197,7 +266,17 @@ Corollaire pour les maths : deux formules dont la projection texte est
 identique fusionnent en une seule option de QCM — c'est correct mais ça
 réduit le nombre de distracteurs. Varier les formulations entre sœurs.
 
-### 3. Un titre sans définition sera écrit à la main
+**Le titre lui-même doit être unique sur TOUT le fichier, pas seulement
+entre sœurs.** Deux cartes de branches différentes partageant un titre (ex.
+« Avec calculatrice » sous deux thèmes distincts) rendent le QCM titre→
+définition réellement ambigu : la question n'affiche que le titre nu, sans
+le thème parent, donc rien ne dit laquelle des deux définitions est la
+bonne — un élève qui connaît les deux méthodes n'a aucun moyen de choisir.
+Si deux cartes décrivent la même méthode sous deux thèmes, différencier
+leurs titres (« Avec calculatrice, en appliquant » / « Avec calculatrice, en
+calculant ») plutôt que les laisser identiques.
+
+### 4. Un titre sans définition sera écrit à la main
 
 Une card sans `definition` devient une question `recall` : l'app affiche le
 titre en texte à trous (`P____s______e`) et l'utilisateur tape les lettres
@@ -218,11 +297,15 @@ Un titre destiné à être tapé doit donc être :
 Si un titre ne peut pas être court, donner une `definition` à la card : elle
 bascule alors en QCM, où la longueur du titre n'est plus un problème.
 
-### 4. Rédiger l'indice de `qcm-title` via la définition
+### 5. Rédiger l'indice de `qcm-title` via la définition
 
-En mode QCM, la `definition` sert d'indice pour retrouver le titre, gradué
-par difficulté : intégrale en facile, tronquée à la moitié en moyen, absente
-en difficile (il ne reste que la position dans l'arbre).
+En mode QCM, la `definition` (ou le média) sert d'indice pour retrouver le
+titre : affichée intégralement en facile et en moyen, absente en difficile
+(il ne reste que la position dans l'arbre). Elle n'est plus jamais coupée en
+plein milieu — écrire l'information qui rattache la définition à son titre
+n'importe où dans le texte, pas seulement au début, reste malgré tout une
+bonne pratique : une définition lisible d'un coup d'œil sert mieux l'élève
+qu'une définition optimisée pour une troncature qui n'existe plus.
 
 Ce que ça impose :
 
@@ -241,7 +324,7 @@ Ce que ça impose :
 { "title": "Périmètre du cercle", "definition": "Longueur du tour complet, égale à 2 × π × rayon." }
 ```
 
-### 5. Une définition par card, autoportante
+### 6. Une définition par card, autoportante
 
 Pas de renvoi (« comme vu plus haut », « idem », « voir la card
 précédente ») : en quiz, une définition est lue SEULE, hors de son contexte
@@ -260,6 +343,7 @@ dans l'arbre, à côté de trois distracteurs. Un renvoi y devient du bruit.
 | Titre long ou numéroté sur une card sans définition | Elle devient une question à écrire lettre par lettre : intapable |
 | Renvoi d'une card à une autre (« comme ci-dessus ») | Une définition est lue seule en quiz, hors de son contexte |
 | Inventer un numéro de chapitre non trouvé dans les sources | Nommer par slug thématique si le numéro réel n'est pas connu |
+| Titre identique à celui d'une carte d'une autre branche | Rend le QCM titre→définition réellement ambigu — aucune des deux définitions n'est reconnaissable comme LA bonne réponse |
 
 ## Adaptation à d'autres matières
 
