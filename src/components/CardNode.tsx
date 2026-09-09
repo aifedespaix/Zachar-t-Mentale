@@ -13,6 +13,7 @@ import {
   PenLine,
   ListChecks,
   Sparkles,
+  BookOpen,
   type LucideIcon,
 } from 'lucide-react'
 import type { Card, CardLevel } from '../types/card'
@@ -37,8 +38,8 @@ import { QcmDialog } from './quiz/QcmDialog'
 import { RecallDialog } from './quiz/RecallDialog'
 import { FlipCard } from './FlipCard'
 import { useCardDetailStore } from '../state/useCardDetailStore'
-import { ContentKindBadges } from '../content/ContentKindBadges'
-import { contentOf, blocksToPlainText, nonTextKinds } from '../content/blocks'
+import { CONTENT_KIND_ICONS } from '../content/ContentKindBadges'
+import { contentOf, nonTextKinds } from '../content/blocks'
 import { BlockView } from '../content/BlockView'
 import { stripHighlightMarkers } from '../content/highlight'
 import { assetSrc } from '../persistence/assets'
@@ -124,95 +125,67 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
 }
 
 /**
- * The card's description control, in its two states.
- *
- * Both states occupy the SAME fixed box. That is règle anti-décalage 1 — the
- * card's footprint never depends on what its definition holds — and it is why
- * the preview is one elided line plus a fixed row of badges rather than the
- * two or three lines that would say more: neighbouring cards must stay the
- * same height, or the whole tree shifts every time a definition is edited.
- *
- * The badges are what make it worth clicking: "there is a formula and a
- * diagram in here" is exactly what a single line of projected text cannot say.
+ * The card's one door into its fiche — a fixed-size badge, not a text
+ * preview: `règle anti-décalage 1` (a card's footprint never depends on its
+ * content) is easier to keep with NO content-dependent sizing at all than
+ * with an ellipsed line. Position and colour read as an ACTION (bottom-right,
+ * the card's own level colour), distinct from the emoji identity badge
+ * (top-right, inset) and from the ghost footer row (Détacher/Retourner/
+ * Supprimer) it sits just outside of.
  */
-function DescriptionButton({
-  blocks,
+function FicheBadge({
+  card,
   locked,
   active,
+  borderColor,
   onActivate,
 }: {
-  blocks: CardBlock[]
+  card: Card
   locked: boolean
   active: boolean
+  borderColor: string
   onActivate: () => void
 }) {
+  const blocks = contentOf(card)
   const hasContent = blocks.length > 0
-  // The plain-text mirror the model already maintains, so the preview cannot
-  // disagree with what the quiz and the export read.
-  const preview = blocksToPlainText(blocks).split('\n')[0] ?? ''
+  const dominant = card.kind === 'media' ? nonTextKinds(blocks)[0] : undefined
+  const Icon = dominant ? CONTENT_KIND_ICONS[dominant].icon : BookOpen
+  const label = !hasContent ? 'Ajouter une description' : card.kind === 'media' ? 'Afficher le média' : 'Afficher la définition'
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-label={hasContent ? 'Afficher la description' : 'Ajouter une description'}
+          aria-label={label}
           aria-pressed={active}
-          // Only CREATING is blocked on a locked map: a locked map is still
-          // read, and the fiche is the reading surface.
           disabled={locked && !hasContent}
           onClick={event => {
-            // The canvas uses clicks on a card for selection and drag; this
-            // one means "open the fiche" and nothing else.
             event.stopPropagation()
             onActivate()
           }}
           style={{
+            position: 'absolute',
+            bottom: -9,
+            right: -9,
+            width: 24,
+            height: 24,
+            borderRadius: '9999px',
             display: 'flex',
-            flexDirection: 'column',
+            alignItems: 'center',
             justifyContent: 'center',
-            gap: 2,
-            width: '100%',
-            // Fixed, in both states. The whole rule lives on this line.
-            height: 34,
-            marginTop: 6,
-            padding: '0 6px',
-            overflow: 'hidden',
-            textAlign: 'left',
-            fontSize: 10,
-            lineHeight: 1.2,
-            borderRadius: 6,
-            border: hasContent ? '1px solid var(--border)' : '1px dashed var(--border)',
-            background: active ? 'color-mix(in oklch, currentColor, transparent 88%)' : 'transparent',
-            color: 'inherit',
-            opacity: hasContent ? 0.9 : 0.55,
+            border: `1.5px solid ${borderColor}`,
+            background: 'var(--background)',
+            color: borderColor,
+            boxShadow: hasContent ? '0 1px 3px rgba(0, 0, 0, 0.15)' : 'none',
+            opacity: hasContent ? 1 : 0.55,
             cursor: locked && !hasContent ? 'default' : 'pointer',
           }}
         >
-          {hasContent ? (
-            <>
-              <span
-                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}
-              >
-                {preview}
-              </span>
-              {/* Always rendered, even empty, so a card whose description is
-                  pure text is exactly as tall as one with a formula in it. */}
-              <span style={{ display: 'flex', alignItems: 'center', height: 12 }}>
-                <ContentKindBadges blocks={blocks} size={10} />
-              </span>
-            </>
-          ) : (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Plus size={11} />
-              Ajouter une description
-            </span>
-          )}
+          <Icon size={13} strokeWidth={2.3} />
         </button>
       </TooltipTrigger>
-      <TooltipContent>
-        {hasContent ? 'Afficher la description dans le panneau' : 'Ajouter une description'}
-      </TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   )
 }
@@ -855,20 +828,9 @@ export function CardNode({ data }: CardNodeProps) {
       */}
       {!quizActive && (
       <TooltipProvider>
-        {/* The description gets a control of its own, above the row of small
-            icons: it is the one action on a card that leads somewhere with
-            more in it than the card itself, and it used to be a ghost icon
-            indistinguishable from « détacher » and « supprimer ».
-
-            `contentOf` rather than `card.definition`: a card whose whole
-            definition is a picture has blocks but, defensively, might not have
-            text — it must still read as "has a description". */}
-        <DescriptionButton
-          blocks={contentOf(card)}
-          locked={locked}
-          active={ficheOpen}
-          onActivate={openDescription}
-        />
+        <span style={{ position: 'relative' }}>
+          <FicheBadge card={card} locked={locked} active={ficheOpen} borderColor={toCss(colors.border)} onActivate={openDescription} />
+        </span>
 
         {/* `margin-top: auto` in the card's flex column keeps this pinned to
             the bottom of the card regardless of title length. */}

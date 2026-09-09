@@ -553,24 +553,18 @@ describe('CardNode footer', () => {
     expect(screen.getByRole('button', { name: /ajouter une description/i })).toBeInTheDocument()
   })
 
-  it('previews an existing description on one elided line, with badges for what else is in it', () => {
-    resetStore([{ ...cardWithDefinition, content: [{ kind: 'math', latex: '\\frac{1}{2}' }] }])
-    renderCardNode({ ...cardWithDefinition, content: [{ kind: 'math', latex: '\\frac{1}{2}' }] })
-
-    const button = screen.getByRole('button', { name: /afficher la description/i })
-    expect(within(button).getByLabelText(/contient une formule/i)).toBeInTheDocument()
-  })
-
-  it('keeps the description control the same height in both states', () => {
+  it('keeps the description control the same size in both states', () => {
     // Règle anti-décalage 1: two neighbouring cards must stay the same height,
-    // or writing a definition shifts the whole tree.
+    // or writing a definition shifts the whole tree. The fiche badge is a
+    // fixed-size circle regardless of content, so this holds trivially now —
+    // but the invariant itself still matters and is worth asserting.
     const { unmount } = renderCardNode(testCard)
     const empty = screen.getByRole('button', { name: /ajouter une description/i }).style.height
     unmount()
 
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
-    const filled = screen.getByRole('button', { name: /afficher la description/i }).style.height
+    const filled = screen.getByRole('button', { name: /afficher la définition/i }).style.height
 
     expect(empty).toBe(filled)
     expect(empty).not.toBe('')
@@ -787,7 +781,7 @@ describe('CardNode footer', () => {
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
 
-    await user.click(screen.getByRole('button', { name: /afficher la description/i }))
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
 
     expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([cardWithDefinition.id])
     // Reading is the common case: the editor is one more click away, not the
@@ -800,8 +794,8 @@ describe('CardNode footer', () => {
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
 
-    await user.click(screen.getByRole('button', { name: /afficher la description/i }))
-    await user.click(screen.getByRole('button', { name: /afficher la description/i }))
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
 
     expect(useCardDetailStore.getState().open).toHaveLength(1)
   })
@@ -842,7 +836,7 @@ describe('CardNode footer', () => {
     useCardsStore.setState({ locked: true })
     renderCardNode(cardWithDefinition)
 
-    await user.click(screen.getByRole('button', { name: /afficher la description/i }))
+    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
 
     expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([cardWithDefinition.id])
     expect(useCardDetailStore.getState().editingCardId).toBeNull()
@@ -997,6 +991,54 @@ describe('CardNode footer', () => {
 
     expect(useQuizStore.getState().results[mediaCard.id]).toBe('incorrect')
     vi.useRealTimers()
+  })
+})
+
+describe('the fiche corner badge', () => {
+  beforeEach(() => {
+    useCardDetailStore.getState().closeAll()
+    resetStore([testCard])
+    resetQuizStore()
+    useQuizSettingsStore.setState(DEFAULT_QUIZ_SETTINGS)
+  })
+
+  it('shows a BookOpen icon for a definition card, with an accessible label', () => {
+    renderCardNode(cardWithDefinition)
+    expect(screen.getByRole('button', { name: /afficher la définition/i })).toBeInTheDocument()
+  })
+
+  it('shows the content-kind icon (e.g. table) for a media card, not the definition label', () => {
+    const mediaCard: Card = {
+      ...cardWithDefinition,
+      kind: 'media',
+      content: [{ kind: 'table', header: ['A'], rows: [['1']] }],
+      definition: 'A\n1',
+    }
+    renderCardNode(mediaCard)
+    expect(screen.getByRole('button', { name: /afficher le média/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /afficher la définition/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the "add" label and stays enabled on a card with no content yet', () => {
+    renderCardNode(testCard)
+    expect(screen.getByRole('button', { name: /ajouter une description/i })).toBeInTheDocument()
+  })
+
+  it('no longer shows any text preview of the definition on the card face', () => {
+    renderCardNode(cardWithDefinition)
+    expect(screen.queryByText('Définition existante')).not.toBeInTheDocument()
+  })
+
+  it('opens the fiche when clicked, and reflects the open state via aria-pressed', async () => {
+    const user = userEvent.setup()
+    renderCardNode(cardWithDefinition)
+
+    const badge = screen.getByRole('button', { name: /afficher la définition/i })
+    expect(badge).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(badge)
+
+    expect(useCardDetailStore.getState().open.some(entry => entry.cardId === cardWithDefinition.id)).toBe(true)
   })
 })
 

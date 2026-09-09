@@ -2,11 +2,14 @@ import { Sigma, Image as ImageIcon, Table2 } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
 import { nonTextKinds } from './blocks'
 
-const BADGES = {
+/** Exported so the fiche corner badge (`CardNode.tsx`) can reuse the exact same icon per content kind, rather than maintaining a second mapping that could drift from this one. */
+export const CONTENT_KIND_ICONS = {
   math: { icon: Sigma, label: 'Contient une formule' },
   image: { icon: ImageIcon, label: 'Contient une image' },
   table: { icon: Table2, label: 'Contient un tableau' },
 } as const
+
+const BADGES = CONTENT_KIND_ICONS
 
 export interface ContentKindBadgesProps {
   blocks: CardBlock[]
