@@ -24,6 +24,7 @@ import { Button } from '../ui/button'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu'
 import { ExportDialog } from './ExportDialog'
 import { NameDialog } from './NameDialog'
+import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
 
 interface FileTreeRowProps {
   node: FileTreeNode
@@ -388,6 +389,7 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
 
   if (node.type === 'mindmap') {
     const isActive = node.path === currentFilePath
+    const formatValid = useMindMapFormatValid(node.path)
     return (
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <ContextMenu>
@@ -426,7 +428,11 @@ export function FileTreeRow({ node, depth, onOpenFile, isRoot = false, onRemoveR
                     cursor: 'pointer',
                   }}
                 >
-                  <FileJson size={16} />
+                  {formatValid ? (
+                    <img src="/favicon.svg" width={16} height={16} alt="" />
+                  ) : (
+                    <FileJson size={16} />
+                  )}
                   <span>{node.name}</span>
                 </button>
               )}

@@ -24,6 +24,7 @@ vi.mock('../../persistence/fileTree', async importOriginal => {
 vi.mock('../../persistence/fileStore', () => ({ loadMindMap: vi.fn(), saveMindMap: vi.fn(), mindMapExists: vi.fn() }))
 vi.mock('../../persistence/exportIO', () => ({ pickXmindFile: vi.fn(), readBinaryFile: vi.fn() }))
 vi.mock('../../xmind/importXmind', () => ({ readXmindFile: vi.fn() }))
+vi.mock('../../hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
 
 import {
   createMindMapFile,
@@ -37,6 +38,7 @@ import { scanFolder } from '../../persistence/fileTree'
 import { loadMindMap, saveMindMap, mindMapExists } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
+import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
 
 function resetWorkspaceStore() {
   const pristine = createWorkspaceStore().getState()
@@ -68,6 +70,7 @@ describe('FileTreeRow', () => {
     vi.mocked(pickXmindFile).mockReset()
     vi.mocked(readBinaryFile).mockReset()
     vi.mocked(readXmindFile).mockReset()
+    vi.mocked(useMindMapFormatValid).mockReset()
     // The naming modal's pre-filled default always comes from `freeSiblingPath` —
     // most tests care about the name the user actually submits, not this
     // default, so simulate "always free" (no numbered suffix) unless a test
@@ -89,6 +92,34 @@ describe('FileTreeRow', () => {
     await user.click(screen.getByText('chapitre1.json'))
 
     expect(onOpenFile).toHaveBeenCalledWith('/cours/chapitre1.json')
+  })
+
+  it('shows the generic icon while the mind map format check has not resolved to valid', () => {
+    vi.mocked(useMindMapFormatValid).mockReturnValue(undefined)
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    const { container } = render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+    expect(container.querySelector('img[src="/favicon.svg"]')).not.toBeInTheDocument()
+  })
+
+  it('shows the app favicon once the mind map format check resolves to valid', () => {
+    vi.mocked(useMindMapFormatValid).mockReturnValue(true)
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    const { container } = render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+    expect(container.querySelector('img[src="/favicon.svg"]')).toBeInTheDocument()
+  })
+
+  it('keeps the generic icon when the mind map format check resolves to invalid', () => {
+    vi.mocked(useMindMapFormatValid).mockReturnValue(false)
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    const { container } = render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+    expect(container.querySelector('img[src="/favicon.svg"]')).not.toBeInTheDocument()
+  })
+
+  it('passes the node path to the format-validity hook', () => {
+    vi.mocked(useMindMapFormatValid).mockReturnValue(false)
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+    expect(useMindMapFormatValid).toHaveBeenCalledWith('/cours/chapitre1.json')
   })
 
   it('highlights the row matching the currently open file', () => {
