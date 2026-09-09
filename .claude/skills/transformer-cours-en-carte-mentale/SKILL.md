@@ -309,10 +309,6 @@ qu'une définition optimisée pour une troncature qui n'existe plus.
 
 Ce que ça impose :
 
-- **L'information qui rattache la définition à son titre doit venir en
-  DÉBUT de définition** — en difficulté moyenne, la seconde moitié est
-  coupée. Une définition qui ne nomme son sujet qu'à la dernière phrase
-  devient un indice vide.
 - **Ne jamais écrire le titre mot pour mot dans la définition** : l'indice
   donnerait la réponse. Le reformuler.
 
