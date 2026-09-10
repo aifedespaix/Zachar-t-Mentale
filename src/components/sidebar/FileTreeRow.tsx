@@ -1,6 +1,6 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useEffect, useRef, useState } from 'react'
-import { Folder, FolderOpen, FolderPlus, FileJson, FilePlus, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, FileUp, Copy, Lock } from 'lucide-react'
+import { Folder, FolderOpen, FolderPlus, FileJson, FilePlus, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, FileUp, Copy, Lock, CloudUpload } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
@@ -27,6 +27,7 @@ import { ExportDialog } from './ExportDialog'
 import { NameDialog } from './NameDialog'
 import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
 import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
+import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import { useSyncStore } from '../../state/useSyncStore'
 
 interface FileTreeRowProps {
@@ -105,6 +106,12 @@ export function FileTreeRow({
   const currentUser = useSyncStore(s => s.currentUser)
   const meta = useMindMapAuthor(node.type === 'mindmap' ? node.path : null)
   const isLocked = meta !== null && meta.author !== currentUser?.username
+  const { canPublish, publish } = usePublishMindMap()
+  // Offered only where the action means something (see the hook): a local map,
+  // inside the sync folder, with an account to stamp it with. An already-synced
+  // file has nothing to publish, and a locked one is entered through
+  // « Personnaliser » on the canvas.
+  const publishable = canPublish(node.path, meta)
 
   const indent = { paddingLeft: 8 + depth * 16 }
 
@@ -520,6 +527,14 @@ export function FileTreeRow({
               }
             }}
           >
+            {publishable && (
+              <>
+                <ContextMenuItem onSelect={() => void publish(node.path)}>
+                  <CloudUpload size={14} /> Publier pour la synchronisation
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+              </>
+            )}
             <ContextMenuItem onSelect={openDuplicateDialog}>
               <Copy size={14} /> Dupliquer
             </ContextMenuItem>

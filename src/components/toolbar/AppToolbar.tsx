@@ -9,6 +9,7 @@ import {
   FilePlus,
   FolderOpen,
   FolderSearch,
+  CloudUpload,
   GraduationCap,
   Keyboard,
   Lock,
@@ -26,7 +27,7 @@ import {
   Undo2,
   X,
 } from 'lucide-react'
-import type { Card } from '../../types/card'
+import type { Card, MindMapMeta } from '../../types/card'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import {
@@ -50,6 +51,7 @@ import { useCardsStore } from '../../state/useCardsStore'
 import { useCardDetailStore } from '../../state/useCardDetailStore'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
+import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 import { startCircularThemeTransition } from '../../theme/circularReveal'
 import { deletePath, duplicatePath, freeSiblingPath, renamePath } from '../../persistence/fileOps'
@@ -62,6 +64,8 @@ interface AppToolbarProps {
   /** The map actually on screen — `null` when nothing is open. */
   filePath: string | null
   cards: Card[]
+  /** The open map's sync metadata — `null` for a map that has never been synced. */
+  meta: MindMapMeta | null
   /** The app's guarded file-switch, the only way a map is opened. */
   onOpenFile: (path: string) => void
   /** Writes a pending autosave immediately — what « Enregistrer » actually does. */
@@ -85,7 +89,7 @@ type PendingNaming = { kind: 'rename' | 'duplicate'; initialName: string }
  * button: a command triggered from the keyboard has no button to open its
  * dialog for it.
  */
-export function AppToolbar({ filePath, cards, onOpenFile, flush, updateCheck }: AppToolbarProps) {
+export function AppToolbar({ filePath, cards, meta, onOpenFile, flush, updateCheck }: AppToolbarProps) {
   const [newMapOpen, setNewMapOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [quizOpen, setQuizOpen] = useState(false)
@@ -106,6 +110,7 @@ export function AppToolbar({ filePath, cards, onOpenFile, flush, updateCheck }: 
   const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
   const setThemeMode = useAppearanceSettingsStore(s => s.setThemeMode)
   const resolvedTheme = useResolvedTheme()
+  const { canPublish, publish } = usePublishMindMap()
 
   const hasFile = filePath !== null
   const fileName = filePath === null ? null : fileNameOf(filePath)
@@ -154,6 +159,16 @@ export function AppToolbar({ filePath, cards, onOpenFile, flush, updateCheck }: 
       })()
     },
     hasFile
+  )
+
+  // Acts on the open file, and only when there is something to do: a local map
+  // inside the sync folder. Its own handler reports a refusal or a failure.
+  useCommand(
+    'sync.publish',
+    () => {
+      if (filePath !== null) void publish(filePath)
+    },
+    canPublish(filePath, meta)
   )
 
   useCommand('file.delete', () => setConfirmDeleteOpen(true), hasFile)
@@ -285,6 +300,7 @@ export function AppToolbar({ filePath, cards, onOpenFile, flush, updateCheck }: 
             <CommandDropdownItem command="file.save" icon={Save} />
             <CommandDropdownItem command="file.rename" icon={PenLine} />
             <CommandDropdownItem command="file.duplicate" icon={Copy} />
+            <CommandDropdownItem command="sync.publish" icon={CloudUpload} />
             <DropdownMenuSeparator />
             <CommandDropdownItem command="file.export" icon={Download} />
             <CommandDropdownItem command="file.exportPdf" icon={FileDown} />

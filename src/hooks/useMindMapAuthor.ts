@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { loadMindMapMeta } from '../persistence/fileStore'
+import { useWorkspaceStore } from '../state/useWorkspaceStore'
 import type { MindMapMeta } from '../types/card'
 
 /**
@@ -10,6 +11,9 @@ import type { MindMapMeta } from '../types/card'
  */
 export function useMindMapAuthor(path: string | null): MindMapMeta | null {
   const [meta, setMeta] = useState<MindMapMeta | null>(null)
+  // Read, not merely subscribed: a publish or a pull rewrites the file at this
+  // very path, and the path alone would not re-run the effect below.
+  const revision = useWorkspaceStore(state => state.fileMetaRevision)
 
   useEffect(() => {
     if (path === null) {
@@ -25,7 +29,7 @@ export function useMindMapAuthor(path: string | null): MindMapMeta | null {
     return () => {
       cancelled = true
     }
-  }, [path])
+  }, [path, revision])
 
   return meta
 }

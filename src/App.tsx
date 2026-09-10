@@ -327,6 +327,7 @@ function App() {
             <AppToolbar
               filePath={loadedPath}
               cards={cards}
+              meta={loadedMeta}
               onOpenFile={requestOpenFile}
               flush={flush}
               updateCheck={{ status: updateStatus, checkNow: checkForUpdates }}

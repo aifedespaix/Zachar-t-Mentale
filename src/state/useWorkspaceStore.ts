@@ -15,6 +15,16 @@ interface WorkspaceState {
    * fs operation must never just leave the tree unchanged with no signal.
    */
   workspaceError: string | null
+  /**
+   * Bumped whenever a `.zmap`'s `meta` header changed under an EXISTING path —
+   * publishing a file, or pulling one during a sync.
+   *
+   * `useMindMapAuthor` keys its read on the path, so without this a row's lock
+   * badge would keep showing the metadata it read at mount: the file is the
+   * same file, only its header moved.
+   */
+  fileMetaRevision: number
+  bumpFileMetaRevision: () => void
   init: () => Promise<void>
   addRootFolder: (path: string) => Promise<void>
   removeRootFolder: (path: string) => Promise<void>
@@ -78,6 +88,8 @@ export function createWorkspaceStore(): WorkspaceStore {
     expandedPaths: new Set(),
     currentFilePath: null,
     workspaceError: null,
+    fileMetaRevision: 0,
+    bumpFileMetaRevision: () => set(state => ({ fileMetaRevision: state.fileMetaRevision + 1 })),
     init: async () => {
       let configuredPaths: string[]
       try {

@@ -1,5 +1,5 @@
 import { exists, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
-import type { Card, MindMapMeta } from '../types/card'
+import type { Card, MindMapMeta, UserRole } from '../types/card'
 import { serializeMindMap, deserializeMindMap } from './serialization'
 
 /**
@@ -55,6 +55,37 @@ export async function stripMindMapSyncMeta(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * The inverse of {@link stripMindMapSyncMeta}: gives a purely local map the
+ * identity the sync engine looks for — a fresh id, and `author` as its owner.
+ *
+ * This is the missing half of the « Dupliquer » flow: a duplicate is local on
+ * purpose (its `meta` is stripped), so without this a chapter written in the
+ * app could never be pushed — the push loop only ever sends files whose
+ * `meta.author` is the signed-in user.
+ *
+ * Refuses to touch a file that already HAS a `meta`: it is either already
+ * syncable, or someone else's (a fork is the way in, not a stamp), and
+ * replacing the id would orphan the remote record it points at.
+ *
+ * Unlike the strip, this one is NOT silent: it runs from a click, and a
+ * failure (unreadable file, read-only disk) must reach the user's banner.
+ *
+ * @returns whether the file was stamped.
+ */
+export async function stampMindMapSyncMeta(path: string, author: string, role: UserRole): Promise<boolean> {
+  const { meta, cards } = deserializeMindMap(await readTextFile(path))
+  if (meta !== null) return false
+  const stamped: MindMapMeta = {
+    id: crypto.randomUUID(),
+    author,
+    role,
+    lastModified: new Date().toISOString(),
+  }
+  await writeTextFile(path, serializeMindMap(stamped, cards))
+  return true
 }
 
 /**

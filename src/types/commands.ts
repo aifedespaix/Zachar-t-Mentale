@@ -456,6 +456,15 @@ export const COMMANDS = [
     defaultBinding: 'Mod+Shift+Q',
   },
   {
+    id: 'sync.publish',
+    label: 'Publier pour la synchronisation',
+    description: 'Donne à cette carte locale une identité de synchronisation, pour qu’elle soit envoyée au prochain sync.',
+    category: 'file',
+    // Deliberately unbound: it is a deliberate, occasional action, and its
+    // availability depends on the file being inside the sync folder.
+    defaultBinding: null,
+  },
+  {
     id: 'sync.now',
     label: 'Synchroniser',
     description: 'Envoie vos cartes au serveur et récupère celles des autres, tout de suite.',
