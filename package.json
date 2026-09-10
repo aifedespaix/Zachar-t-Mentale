@@ -29,6 +29,7 @@
     "lucide-react": "^1.41.0",
     "mathlive": "^0.110.0",
     "motion": "^13.2.0",
+    "pocketbase": "^0.28.1",
     "radix-ui": "^1.6.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
