@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SlidersHorizontal, Palette, GraduationCap, type LucideIcon } from 'lucide-react'
+import { SlidersHorizontal, Palette, GraduationCap, RefreshCw, type LucideIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
@@ -10,13 +10,15 @@ import type { UpdateCheckStatus } from '../../hooks/useAppUpdater'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { AppearanceSettingsPanel } from './AppearanceSettingsPanel'
 import { QuizSettingsPanel } from './QuizSettingsPanel'
+import { SyncSettingsPanel } from './SyncSettingsPanel'
 
-type SettingsTab = 'general' | 'appearance' | 'quiz'
+type SettingsTab = 'general' | 'appearance' | 'quiz' | 'sync'
 
 const TABS: { id: SettingsTab; label: string; icon: LucideIcon; hint: string }[] = [
   { id: 'general', label: 'Général', icon: SlidersHorizontal, hint: 'Thème et police' },
   { id: 'appearance', label: 'Apparence', icon: Palette, hint: 'Couleurs des niveaux' },
   { id: 'quiz', label: 'Quiz', icon: GraduationCap, hint: 'Correction et aides' },
+  { id: 'sync', label: 'Synchronisation', icon: RefreshCw, hint: 'Compte et serveur' },
 ]
 
 interface SettingsDialogProps {
@@ -175,6 +177,7 @@ export function SettingsDialog({ open, onOpenChange, updateCheck }: SettingsDial
             )}
             {tab === 'appearance' && <AppearanceSettingsPanel settings={appearance} onChange={editAppearance} />}
             {tab === 'quiz' && <QuizSettingsPanel settings={quiz} onChange={editQuiz} />}
+            {tab === 'sync' && <SyncSettingsPanel />}
           </div>
         </div>
 

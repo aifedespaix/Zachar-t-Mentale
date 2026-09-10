@@ -51,6 +51,7 @@ describe('SettingsDialog', () => {
       expect.stringContaining('Général'),
       expect.stringContaining('Apparence'),
       expect.stringContaining('Quiz'),
+      expect.stringContaining('Synchronisation'),
     ])
   })
 
@@ -162,5 +163,14 @@ describe('SettingsDialog', () => {
     // "dark" was saved in the first session; cancelling the second must fall
     // back to THAT, not to the value the very first snapshot happened to hold.
     expect(useAppearanceSettingsStore.getState().themeMode).toBe('dark')
+  })
+
+  it('shows the sync panel on the Synchronisation tab', async () => {
+    const user = userEvent.setup()
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
+
+    await user.click(screen.getByRole('tab', { name: /synchronisation/i }))
+
+    expect(screen.getByLabelText('URL du serveur')).toBeInTheDocument()
   })
 })
