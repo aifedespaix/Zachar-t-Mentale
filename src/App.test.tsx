@@ -11,6 +11,7 @@ vi.mock('./persistence/fileStore', () => ({
   loadMindMap: vi.fn(),
   saveMindMap: vi.fn(),
   mindMapExists: vi.fn(),
+  loadMindMapMeta: vi.fn().mockResolvedValue(null),
 }))
 vi.mock('./persistence/workspaceConfig', () => ({
   loadWorkspaceConfig: vi.fn(),
