@@ -90,6 +90,40 @@ describe('usePublishMindMap — publishing', () => {
     expect(useWorkspaceStore.getState().workspaceError).toMatch(/disque plein/)
   })
 
+  it('publishes a whole list, and refreshes what changed only once', async () => {
+    const { result } = renderHook(() => usePublishMindMap())
+    const revision = useWorkspaceStore.getState().fileMetaRevision
+
+    const outcome = await result.current.publishAll([LOCAL_PATH, '/cours/b.zmap', OUTSIDE_PATH])
+
+    expect(outcome).toEqual({ published: 2, failed: 0 })
+    // The one outside the folder is refused without touching the disk at all.
+    expect(stampMindMapSyncMeta).toHaveBeenCalledTimes(2)
+    // One folder walk for the whole batch, not one per file.
+    expect(refreshFolder).toHaveBeenCalledTimes(1)
+    expect(useWorkspaceStore.getState().fileMetaRevision).toBe(revision + 1)
+  })
+
+  it('counts a failure without giving up on the rest of the list', async () => {
+    vi.mocked(stampMindMapSyncMeta)
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('disque plein'))
+      .mockResolvedValueOnce(true)
+    const { result } = renderHook(() => usePublishMindMap())
+
+    const outcome = await result.current.publishAll(['/cours/a.zmap', '/cours/b.zmap', '/cours/c.zmap'])
+
+    expect(outcome).toEqual({ published: 2, failed: 1 })
+  })
+
+  it('refreshes nothing when there was nothing to publish', async () => {
+    vi.mocked(stampMindMapSyncMeta).mockResolvedValue(false) // already published, all of them
+    const { result } = renderHook(() => usePublishMindMap())
+
+    expect(await result.current.publishAll([LOCAL_PATH])).toEqual({ published: 0, failed: 0 })
+    expect(refreshFolder).not.toHaveBeenCalled()
+  })
+
   it('never touches a file outside the sync folder, whatever the caller asks', async () => {
     const { result } = renderHook(() => usePublishMindMap())
 

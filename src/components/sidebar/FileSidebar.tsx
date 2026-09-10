@@ -103,6 +103,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const syncProgress = useSyncStore(s => s.progress)
   const cancelSync = useSyncStore(s => s.cancelSync)
   const pendingCount = useSyncStore(s => s.pendingCount)
+  const localOnlyCount = useSyncStore(s => s.localOnlyCount)
   const lastSuccessAt = useSyncStore(s => s.lastSuccessAt)
   const refreshPendingCount = useSyncStore(s => s.refreshPendingCount)
   // The username, not the object: a fresh `{username, role}` on every auth tick
@@ -367,6 +368,12 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
    * it cannot be known, and the count is also on the badge, for the glance that
    * does not hover anything.
    */
+  // « à publier » comes first and matters most: those maps need a gesture, and
+  // without them a folder full of chapters happily reports « rien à envoyer ».
+  const localOnlyDetail =
+    localOnlyCount === null || localOnlyCount === 0
+      ? null
+      : `${localOnlyCount} carte${localOnlyCount > 1 ? 's' : ''} à publier`
   const pendingDetail =
     pendingCount === null
       ? null
@@ -380,9 +387,9 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
         : 'jamais synchronisé'
       : `dernière synchro ${formatRelativeTime(lastSuccessAt) ?? 'inconnue'}`
   const syncTooltipDetail =
-    syncRunning || (pendingDetail === null && lastSyncDetail === null)
+    syncRunning || (localOnlyDetail === null && pendingDetail === null && lastSyncDetail === null)
       ? undefined
-      : [pendingDetail, lastSyncDetail].filter(part => part !== null).join(' · ')
+      : [localOnlyDetail, pendingDetail, lastSyncDetail].filter(part => part !== null).join(' · ')
 
   return (
     <TooltipProvider>
@@ -557,7 +564,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
               spinning={syncRunning}
               tooltipDetail={syncTooltipDetail}
             />
-            {pendingCount !== null && pendingCount > 0 && (
+            {(pendingCount ?? 0) + (localOnlyCount ?? 0) > 0 && (
               <span
                 role="status"
                 style={{
@@ -577,7 +584,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
                   pointerEvents: 'none',
                 }}
               >
-                {pendingCount}
+                {(pendingCount ?? 0) + (localOnlyCount ?? 0)}
               </span>
             )}
           </span>

@@ -113,6 +113,18 @@ compte créé ci-dessus (pseudo + mot de passe), choisissez le dossier local à
 synchroniser, puis cliquez sur **Synchroniser**. Le même bouton existe en bas de
 la barre latérale.
 
+L'adresse et les identifiants sont **enregistrés en clair** dans le dossier de
+configuration de l'application, sur cet appareil uniquement : le formulaire est
+donc déjà rempli au démarrage, et l'application se reconnecte toute seule quand
+la session a expiré. Ce fichier n'est jamais synchronisé ni versionné ; il voisine
+avec le jeton de session PocketBase, qui donne déjà accès aux mêmes cartes.
+
+Si un dossier contient des cartes **jamais publiées** (créées dans l'application,
+donc sans identité de synchronisation), elles ne partent pas — c'est ce que dit
+le message « N cartes n'ont pas encore d'identité de synchronisation » dans les
+réglages, avec le bouton qui les publie toutes d'un coup. Une carte publiée garde
+son auteur : seul lui pourra la modifier par la suite.
+
 ## 6. Sauvegardes
 
 Le script d'installation **active les sauvegardes automatiques de PocketBase**,

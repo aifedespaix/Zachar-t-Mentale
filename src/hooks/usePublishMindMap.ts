@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { stampMindMapSyncMeta } from '../persistence/fileStore'
-import { fileNameOf, isInsideFolder, parentDirOf } from '../persistence/paths'
+import { fileNameOf, isInsideFolder } from '../persistence/paths'
 import { useSyncStore } from '../state/useSyncStore'
 import { useWorkspaceStore, describeError } from '../state/useWorkspaceStore'
 import type { MindMapMeta } from '../types/card'
@@ -41,33 +41,82 @@ export function usePublishMindMap() {
     [currentUser, syncFolderPath]
   )
 
-  const publish = useCallback(async (path: string): Promise<PublishOutcome> => {
-    // Read fresh rather than closed over: a command handler is kept in a ref
-    // and may fire long after the render that created it.
-    const { currentUser: user, syncFolderPath: folder } = useSyncStore.getState()
-    if (user === null || folder === null || !isInsideFolder(path, folder)) return 'not-eligible'
-
-    const { refreshFolder, bumpFileMetaRevision, setWorkspaceError } = useWorkspaceStore.getState()
-    const name = fileNameOf(path)
-    try {
-      const stamped = await stampMindMapSyncMeta(path, user.username, user.role)
-      if (!stamped) {
-        setWorkspaceError(`« ${name} » est déjà publiée : elle a déjà une identité de synchronisation.`)
-        return 'already-published'
+  /** The stamping itself, with no interface work: what a single publish and a bulk one both need. */
+  const stampOne = useCallback(
+    async (path: string): Promise<{ outcome: PublishOutcome; error: unknown }> => {
+      // Read fresh rather than closed over: a command handler is kept in a ref
+      // and may fire long after the render that created it.
+      const { currentUser: user, syncFolderPath: folder } = useSyncStore.getState()
+      if (user === null || folder === null || !isInsideFolder(path, folder)) {
+        return { outcome: 'not-eligible', error: null }
       }
-      // Both the row's badge and the pending counter read state this file's
-      // header just changed.
-      bumpFileMetaRevision()
-      await refreshFolder(parentDirOf(path))
-      // The published file is one more to send: the footer's counter would
-      // otherwise stay at the number it read before the click.
-      await useSyncStore.getState().refreshPendingCount()
-      return 'published'
-    } catch (error) {
-      setWorkspaceError(`Impossible de publier « ${name} » : ${describeError(error)}`)
-      return 'failed'
-    }
+
+      try {
+        const stamped = await stampMindMapSyncMeta(path, user.username, user.role)
+        return { outcome: stamped ? 'published' : 'already-published', error: null }
+      } catch (error) {
+        // Carried out rather than swallowed: the caller is the one that can tell
+        // the user WHY the write failed.
+        return { outcome: 'failed', error }
+      }
+    },
+    []
+  )
+
+  /** Everything that reads a changed header: the rows' badges, the tree, the counter. */
+  const refreshAfterPublishing = useCallback(async (folder: string) => {
+    const { refreshFolder, bumpFileMetaRevision } = useWorkspaceStore.getState()
+    bumpFileMetaRevision()
+    await refreshFolder(folder)
+    await useSyncStore.getState().refreshPendingCount()
   }, [])
 
-  return { canPublish, publish }
+  const publish = useCallback(
+    async (path: string): Promise<PublishOutcome> => {
+      const folder = useSyncStore.getState().syncFolderPath
+      const name = fileNameOf(path)
+      const { outcome, error } = await stampOne(path)
+
+      if (outcome === 'already-published') {
+        useWorkspaceStore
+          .getState()
+          .setWorkspaceError(`« ${name} » est déjà publiée : elle a déjà une identité de synchronisation.`)
+        return outcome
+      }
+      if (outcome === 'failed') {
+        useWorkspaceStore
+          .getState()
+          .setWorkspaceError(`Impossible de publier « ${name} » : ${describeError(error)}`)
+        return outcome
+      }
+      if (outcome === 'published' && folder !== null) await refreshAfterPublishing(folder)
+      return outcome
+    },
+    [refreshAfterPublishing, stampOne]
+  )
+
+  /**
+   * Publishes a whole list — what the settings screen offers when the survey
+   * finds maps that no amount of syncing will ever move.
+   *
+   * The refresh happens ONCE at the end: doing it per file would re-scan the
+   * folder thirty times for a thirty-file folder.
+   */
+  const publishAll = useCallback(
+    async (paths: string[]): Promise<{ published: number; failed: number }> => {
+      let published = 0
+      let failed = 0
+      for (const path of paths) {
+        const { outcome } = await stampOne(path)
+        if (outcome === 'published') published += 1
+        else if (outcome === 'failed') failed += 1
+      }
+      const folder = useSyncStore.getState().syncFolderPath
+      if (published > 0 && folder !== null) await refreshAfterPublishing(folder)
+      return { published, failed }
+    },
+    [refreshAfterPublishing, stampOne]
+  )
+
+  return { canPublish, publish, publishAll }
 }

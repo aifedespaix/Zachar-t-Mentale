@@ -62,6 +62,8 @@ function resetSyncStore() {
     lastResult: null,
     lastSuccessAt: null,
     pendingCount: null,
+    localOnlyCount: null,
+    localOnlyPaths: [],
     progress: null,
     syncNow: vi.fn().mockResolvedValue(undefined),
   })
@@ -349,7 +351,7 @@ describe('FileSidebar', () => {
     const user = userEvent.setup()
     useSyncStore.setState({ syncFolderPath: '/cours-svt' })
     vi.mocked(useSyncStore.getState().syncNow).mockImplementation(async () => {
-      useSyncStore.setState({ lastResult: { pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [] } })
+      useSyncStore.setState({ lastResult: { pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [], transferred: [] } })
     })
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('Cartes mentales')
@@ -380,6 +382,21 @@ describe('FileSidebar', () => {
     await user.hover(screen.getByRole('button', { name: 'Afficher les fichiers non lisibles' }))
 
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Fichiers que l’application ne peut pas ouvrir')
+  })
+
+  it('counts the maps waiting for a publish as well as those waiting for a sync', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+    act(() => useSyncStore.setState({ pendingCount: 2, localOnlyCount: 12 }))
+
+    expect(screen.getByRole('status')).toHaveTextContent('14')
+
+    await user.hover(screen.getByRole('button', { name: 'Synchroniser' }))
+
+    const tooltip = await screen.findByRole('tooltip')
+    expect(tooltip).toHaveTextContent('12 cartes à publier')
+    expect(tooltip).toHaveTextContent('2 cartes à envoyer')
   })
 
   it('badges the sync button with what is waiting to be sent', async () => {
@@ -438,6 +455,7 @@ describe('FileSidebar', () => {
             remoteUpdated: '2026-02-01 09:00:00.000Z',
           },
         ],
+        transferred: [],
       },
     })
     render(<FileSidebar onOpenFile={() => {}} />)
@@ -466,7 +484,7 @@ describe('FileSidebar', () => {
       currentUser: { username: 'aife', role: 'prof' },
     })
     vi.mocked(useSyncStore.getState().syncNow).mockImplementation(async () => {
-      useSyncStore.setState({ lastResult: { pushed: 1, pulled: 1, errors: [], cancelled: false, conflicts: [] } })
+      useSyncStore.setState({ lastResult: { pushed: 1, pulled: 1, errors: [], cancelled: false, conflicts: [], transferred: [] } })
     })
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('Cartes mentales')

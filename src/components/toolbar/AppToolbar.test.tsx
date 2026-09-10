@@ -44,13 +44,17 @@ describe('AppToolbar', () => {
     vi.mocked(revealItemInDir).mockClear()
     // Not publishable by default: each test opts in, so a test that forgets to
     // cannot silently pass on a hook stub that always says yes.
-    vi.mocked(usePublishMindMap).mockReturnValue({ canPublish: () => false, publish: vi.fn() })
+    vi.mocked(usePublishMindMap).mockReturnValue({
+      canPublish: () => false,
+      publish: vi.fn(),
+      publishAll: vi.fn(),
+    })
   })
 
   it('publishes the open map from the Fichier menu when it is still purely local', async () => {
     const user = userEvent.setup()
     const publish = vi.fn().mockResolvedValue('published')
-    vi.mocked(usePublishMindMap).mockReturnValue({ canPublish: () => true, publish })
+    vi.mocked(usePublishMindMap).mockReturnValue({ canPublish: () => true, publish, publishAll: vi.fn() })
     renderToolbar()
 
     await user.click(screen.getByRole('button', { name: 'Fichier' }))
@@ -62,7 +66,7 @@ describe('AppToolbar', () => {
   it('leaves Publier inert when there is nothing to publish', async () => {
     const user = userEvent.setup()
     const publish = vi.fn().mockResolvedValue('not-eligible')
-    vi.mocked(usePublishMindMap).mockReturnValue({ canPublish: () => false, publish })
+    vi.mocked(usePublishMindMap).mockReturnValue({ canPublish: () => false, publish, publishAll: vi.fn() })
     renderToolbar()
 
     await user.click(screen.getByRole('button', { name: 'Fichier' }))

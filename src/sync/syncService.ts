@@ -1,4 +1,4 @@
-import { exists, mkdir, readDir, writeTextFile } from '@tauri-apps/plugin-fs'
+import { exists, mkdir, readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
 import { loadMindMap, loadMindMapMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
@@ -143,32 +143,74 @@ export function isConflict(
   )
 }
 
+export interface SyncSurvey {
+  /** Maps this account authored and changed since the last push: a sync would send them. */
+  pending: string[]
+  /**
+   * Maps with NO sync identity at all (`meta === null`). They are invisible to
+   * the push loop, and no amount of clicking « Synchroniser » will ever move
+   * them — which is exactly what a user staring at « 0 envoyé » needs to be told.
+   */
+  localOnly: string[]
+}
+
 /**
- * How many maps a sync would push right now.
+ * What a sync WOULD do with the folder, without doing anything.
  *
- * Reads one header per `.zmap` under the sync folder — the same walk the sync
- * itself does, which is why the sidebar only recomputes it on real events (a
- * finished sync, a published file, a re-scan) rather than on every render.
+ * Walks every `.zmap` and legacy `.json` of the sync folder, subfolders
+ * included, and reads one header each — the same walk the sync itself does,
+ * which is why the caller recomputes it on real events (a finished sync, a
+ * published file, a re-scan) rather than on every render.
  *
- * A file that cannot be read is skipped rather than counted: the sync reports
- * it, and a wrong number in the footer would be worse than a missing one.
+ * A file that is not a mind map (a random `.json` lying in the folder) is not
+ * ours and is skipped in silence; one that cannot be READ is skipped too, since
+ * the sync itself reports it and a wrong number in the footer is worse than a
+ * missing one.
  */
-export async function countPendingPushes(params: {
+export async function surveySyncFolder(params: {
   syncFolderPath: string
   currentUser: string
   state: SyncState
-}): Promise<number> {
+}): Promise<SyncSurvey> {
   const tree = await scanFolder(params.syncFolderPath)
-  let pending = 0
+  const survey: SyncSurvey = { pending: [], localOnly: [] }
   for (const path of flattenMindMapPaths(tree)) {
-    const meta = await loadMindMapMeta(path).catch(() => null)
-    if (meta === null || !isPushPending(meta, params.currentUser, params.state[meta.id])) continue
-    pending += 1
+    // `loadMindMapMeta` throws on anything that is not a mind map, and answers
+    // `null` for a map that has simply never been published: the two cases this
+    // survey has to tell apart.
+    const meta = await loadMindMapMeta(path).catch(() => undefined)
+    if (meta === undefined) continue
+    if (meta === null) survey.localOnly.push(path)
+    else if (isPushPending(meta, params.currentUser, params.state[meta.id])) survey.pending.push(path)
   }
-  return pending
+  return survey
 }
 
-function flattenMindMapPaths(nodes: FileTreeNode[]): string[] {
+/**
+ * Whether a `.json` file is readable but is NOT a mind map — a data export, a
+ * settings file, anything that happens to live in the synced folder.
+ *
+ * Such a file is not ours: the sync skips it without a word, rather than
+ * reporting an error the user can do nothing about. A file that cannot even be
+ * read is NOT this case (it is a real problem, and stays reported).
+ */
+async function isNonMindMapFile(path: string): Promise<boolean> {
+  let text: string
+  try {
+    text = await readTextFile(path)
+  } catch {
+    return false
+  }
+  try {
+    deserializeMindMap(text)
+    return false
+  } catch {
+    return true
+  }
+}
+
+/** Every mind map under `nodes`, subfolders included — the sync's own idea of "the folder". */
+export function flattenMindMapPaths(nodes: FileTreeNode[]): string[] {
   const paths: string[] = []
   for (const node of nodes) {
     if (node.type === 'mindmap') paths.push(node.path)
@@ -297,7 +339,11 @@ export async function sync({
     try {
       meta = await loadMindMapMeta(path)
     } catch (error) {
-      result.errors.push({ fileId: path, message: describeSyncError(error) })
+      // A .json that is not a mind map is simply not ours; one that cannot be
+      // read is a real problem and is still reported.
+      if (!(await isNonMindMapFile(path))) {
+        result.errors.push({ fileId: path, message: describeSyncError(error) })
+      }
       return
     }
     if (meta === null || meta.author !== currentUser) return

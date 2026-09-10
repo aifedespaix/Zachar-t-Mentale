@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@tauri-apps/plugin-fs', () => ({
   exists: vi.fn().mockResolvedValue(false),
   writeTextFile: vi.fn(),
+  readTextFile: vi.fn(),
   mkdir: vi.fn(),
   readDir: vi.fn(),
 }))
@@ -22,8 +23,9 @@ import { loadMindMap, loadMindMapMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { readAssetBytes, writeAsset } from '../persistence/assets'
 import {
-  countPendingPushes,
+  flattenMindMapPaths,
   isPushPending,
+  surveySyncFolder,
   sync,
   type SyncClient,
   type RemoteMindMapRecord,
@@ -83,40 +85,75 @@ describe('isPushPending', () => {
   })
 })
 
-describe('countPendingPushes', () => {
-  it('counts only our own maps that moved since the last push', async () => {
+describe('flattenMindMapPaths', () => {
+  it('walks the whole tree, subfolders included, and ignores everything else', () => {
+    const paths = flattenMindMapPaths([
+      { type: 'mindmap', name: 'racine.zmap', path: '/cours/racine.zmap' },
+      { type: 'other', name: 'notes.pdf', path: '/cours/notes.pdf' },
+      {
+        type: 'folder',
+        name: 'chapitre 1',
+        path: '/cours/chapitre 1',
+        children: [
+          { type: 'mindmap', name: 'a.zmap', path: '/cours/chapitre 1/a.zmap' },
+          {
+            type: 'folder',
+            name: 'approfondissement',
+            path: '/cours/chapitre 1/approfondissement',
+            children: [{ type: 'mindmap', name: 'b.zmap', path: '/cours/chapitre 1/approfondissement/b.zmap' }],
+          },
+        ],
+      },
+    ])
+
+    expect(paths).toEqual([
+      '/cours/racine.zmap',
+      '/cours/chapitre 1/a.zmap',
+      '/cours/chapitre 1/approfondissement/b.zmap',
+    ])
+  })
+})
+
+describe('surveySyncFolder', () => {
+  it('tells apart what a sync would send from what has never been published', async () => {
     vi.mocked(scanFolder).mockResolvedValue([
       { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
       { type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' },
       { type: 'mindmap', name: 'c.zmap', path: '/cours/c.zmap' },
+      { type: 'mindmap', name: 'neuve.zmap', path: '/cours/neuve.zmap' },
     ])
     vi.mocked(loadMindMapMeta).mockImplementation(async path => {
       if (path === '/cours/b.zmap') return { ...AIFE, id: 'b' }
       if (path === '/cours/c.zmap') return { ...AIFE, id: 'c', author: 'someone-else' }
+      if (path === '/cours/neuve.zmap') return null
       return { ...AIFE, id: 'a' }
     })
 
-    const pending = await countPendingPushes({
+    const survey = await surveySyncFolder({
       syncFolderPath: '/cours',
       currentUser: 'aife',
       state: { b: { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' } },
     })
 
-    expect(pending).toBe(1) // 'a' never pushed; 'b' unchanged; 'c' is not ours
+    // 'a' never pushed; 'b' unchanged; 'c' is not ours; 'neuve' has no identity.
+    expect(survey.pending).toEqual(['/cours/a.zmap'])
+    expect(survey.localOnly).toEqual(['/cours/neuve.zmap'])
   })
 
-  it('skips a map it cannot read rather than counting it', async () => {
-    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
-    vi.mocked(loadMindMapMeta).mockRejectedValue(new Error('corrompu'))
+  it('ignores a file that is not a mind map rather than calling it unpublished', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'donnees.json', path: '/cours/donnees.json' }])
+    vi.mocked(loadMindMapMeta).mockRejectedValue(new Error('pas une carte'))
 
-    expect(await countPendingPushes({ syncFolderPath: '/cours', currentUser: 'aife', state: {} })).toBe(0)
+    const survey = await surveySyncFolder({ syncFolderPath: '/cours', currentUser: 'aife', state: {} })
+
+    expect(survey).toEqual({ pending: [], localOnly: [] })
   })
 
   it('lets an unreadable folder throw, so the caller can answer "unknown"', async () => {
     vi.mocked(scanFolder).mockRejectedValue(new Error('dossier disparu'))
 
     await expect(
-      countPendingPushes({ syncFolderPath: '/cours', currentUser: 'aife', state: {} })
+      surveySyncFolder({ syncFolderPath: '/cours', currentUser: 'aife', state: {} })
     ).rejects.toThrow('dossier disparu')
   })
 })
