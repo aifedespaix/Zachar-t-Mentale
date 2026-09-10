@@ -84,8 +84,12 @@ Options utiles (`--help` liste tout) :
 | Option | Effet |
 | --- | --- |
 | `--dry-run` | Affiche ce qui serait changé, n'écrit rien. |
+| `--check` | Lecture seule **et code de sortie** : `0` si le serveur est conforme, `1` s'il reste des changements, `2` s'il est injoignable. Fait pour un déploiement automatique. |
+| `--export [chemin]` | Écrit l'état **réel** des trois collections en JSON trié (par défaut `infra/pocketbase-schema.applied.json`) : committable, et un diff ne montre alors qu'une vraie dérive de configuration. |
 | `--add-user pseudo:role[:motdepasse]` | Crée (ou met à jour) un compte `eleve`/`prof`. Sans mot de passe, un mot de passe solide est généré **et affiché**. |
 | `--verify pseudo:motdepasse` | Après configuration, se connecte avec ce compte et fait un aller-retour réel sur `cartes_mentales` (écriture d'un contenu long, relecture, suppression) : la preuve que les champs et les règles acceptent le trafic de l'application. |
+| `--backup-cron <expr>` · `--backup-keep <n>` | Planification des sauvegardes automatiques (défaut `0 3 * * *`) et nombre conservé (défaut 7). |
+| `--no-backups` | Ne touche pas aux sauvegardes automatiques du serveur. |
 | `--insecure` | Accepte un certificat TLS auto-signé (serveur local). |
 
 ## 4. Créer les comptes des élèves et du professeur
@@ -109,7 +113,45 @@ compte créé ci-dessus (pseudo + mot de passe), choisissez le dossier local à
 synchroniser, puis cliquez sur **Synchroniser**. Le même bouton existe en bas de
 la barre latérale.
 
-## 6. Quand ça ne marche pas
+## 6. Sauvegardes
+
+Le script d'installation **active les sauvegardes automatiques de PocketBase**,
+qu'il faut connaître parce qu'elles sont désactivées d'origine : son `cron` est
+vide, donc un serveur que personne ne surveille n'a rien à restaurer tant que
+quelqu'un n'y a pas pensé. Par défaut il programme une sauvegarde par nuit à 3 h
+et en garde 7 ; `--backup-cron`/`--backup-keep` changent cela, `--no-backups`
+laisse le serveur tranquille.
+
+Pour une sauvegarde **maintenant** — avant de changer la version de l'image, par
+exemple :
+
+```bash
+bun run infra/backup-pocketbase.mjs                       # crée et télécharge
+bun run infra/backup-pocketbase.mjs --list                # ce que le serveur garde
+bun run infra/backup-pocketbase.mjs --restore <clé> --yes # ⚠ remplace TOUTES les données
+```
+
+Elle arrive dans `infra/backups/` (gitignoré) et se restaure donc aussi depuis
+le tableau de bord. `--restore` exige `--yes` : il remplace cartes, comptes et
+réglages, et PocketBase redémarre son service dans la foulée.
+
+## 7. Vérifier et automatiser
+
+`bun run infra/setup-pocketbase.mjs --check` répond à la seule question qui
+compte pour un déploiement : « ce serveur est-il exactement configuré ? » — et le
+dit dans son code de sortie (`0` oui, `1` non, `2` injoignable). Un
+post-déploiement peut donc refuser de publier tant que la réponse est non.
+
+Le workflow `.github/workflows/infra-pocketbase.yml` fait ce contrôle en
+intégration continue, contre un PocketBase **éphémère monté à la version épinglée
+dans `infra/docker-compose.yml`** : il vérifie que `--check` échoue sur un
+serveur vierge, que la configuration passe, que le second passage ne change plus
+rien, qu'un compte ordinaire peut réellement publier et relire un fichier long,
+et qu'une sauvegarde se télécharge. C'est la seule protection réelle contre une
+API PocketBase qui bouge sous nos pieds — c'est exactement ce qui a fait
+disparaître le champ `username` des collections par défaut.
+
+## 8. Quand ça ne marche pas
 
 - **Journal de synchronisation** : chaque connexion et chaque synchronisation y
   laisse une ligne (succès comme échec), dans le dossier de configuration de

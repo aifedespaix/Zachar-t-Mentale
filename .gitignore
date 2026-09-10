@@ -45,3 +45,6 @@ src-tauri/gen/schemas
 
 # PocketBase deployment credentials (superuser email/password) — see infra/.env.example
 infra/.env
+
+# PocketBase backups downloaded by infra/backup-pocketbase.mjs — data, not code
+infra/backups/

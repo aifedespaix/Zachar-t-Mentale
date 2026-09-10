@@ -17,7 +17,7 @@
  * already has, and only writes when something differs. `--dry-run` prints that
  * plan and writes nothing.
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID, randomBytes } from 'node:crypto'
@@ -26,16 +26,18 @@ import {
   MIND_MAPS_COLLECTION,
   USERNAME_FIELD,
   desiredCollections,
+  planBackups,
   planCollection,
 } from './pocketbase-schema.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ENV_FILE = join(HERE, '.env')
+/** Where `--export` writes when no path is given: beside the schema it mirrors. */
+export const DEFAULT_EXPORT_PATH = join(HERE, 'pocketbase-schema.applied.json')
 
 export const HELP = `Configuration PocketBase pour la synchronisation des cartes mentales.
 
-Usage :
-  bun run infra/setup-pocketbase.mjs [options]
+Usage : bun run infra/setup-pocketbase.mjs [options]
 
 Options :
   --url <url>              URL du serveur (ex. https://cartes.mon-domaine.fr).
@@ -52,6 +54,15 @@ Options :
                            contenu long, relecture, suppression) pour prouver que
                            les champs et les règles acceptent le trafic de l'app.
   --dry-run                Montre ce qui serait changé, sans rien écrire.
+  --check                  Lecture seule, et code de sortie : 0 si le serveur est
+                           conforme, 1 s'il reste des changements à appliquer,
+                           2 si le serveur est injoignable. Pour un déploiement.
+  --export [chemin]        Écrit l'état RÉEL des collections de synchronisation
+                           (JSON trié, diffable en PR) et s'arrête. Par défaut :
+                           infra/pocketbase-schema.applied.json.
+  --backup-keep <n>        Nombre de sauvegardes automatiques à conserver (défaut 7).
+  --backup-cron <expr>     Planification des sauvegardes (défaut « 0 3 * * * »).
+  --no-backups             Ne touche pas aux sauvegardes automatiques du serveur.
   --insecure               Accepte un certificat TLS auto-signé (serveur local).
   --help                   Affiche cette aide.
 
@@ -60,8 +71,22 @@ infra/.env (PB_URL, PB_ADMIN_EMAIL, PB_ADMIN_PASSWORD — les mêmes noms que
 ceux lus par le conteneur Docker).
 `
 
-/** Raised for anything the operator can fix: bad arguments, bad credentials, an unreachable server. */
-export class SetupError extends Error {}
+/**
+ * Raised for anything the operator can fix: bad arguments, bad credentials, an
+ * unreachable server.
+ *
+ * `code` is the process exit code the failure deserves. 1 means "something is
+ * wrong with the arguments or with what the server holds", 2 means "the script
+ * could not even talk to the server" — a distinction a deployment pipeline can
+ * act on (retry vs. fix the configuration).
+ */
+export class SetupError extends Error {
+  constructor(message, code = 1) {
+    super(message)
+    this.name = 'SetupError'
+    this.code = code
+  }
+}
 
 /**
  * `KEY=VALUE` lines, `#` comments, optional surrounding quotes, optional
@@ -150,6 +175,11 @@ export function parseArgs(argv) {
     users: [],
     verify: null,
     dryRun: false,
+    check: false,
+    export: null,
+    backups: true,
+    backupKeep: null,
+    backupCron: null,
     insecure: false,
     help: false,
   }
@@ -189,6 +219,33 @@ export function parseArgs(argv) {
       case '--dry-run':
         options.dryRun = true
         break
+      case '--check':
+        // Implies "write nothing": what matters here is the exit code.
+        options.check = true
+        options.dryRun = true
+        break
+      case '--export': {
+        // The path is optional: with none, the checked-in default is used.
+        const next = argv[index + 1]
+        if (next !== undefined && !next.startsWith('--')) {
+          options.export = next
+          index += 1
+        } else {
+          options.export = DEFAULT_EXPORT_PATH
+        }
+        break
+      }
+      case '--no-backups':
+        options.backups = false
+        break
+      case '--backup-keep':
+        options.backupKeep = Number(value(index))
+        index += 1
+        break
+      case '--backup-cron':
+        options.backupCron = value(index)
+        index += 1
+        break
       case '--insecure':
         options.insecure = true
         break
@@ -201,6 +258,75 @@ export function parseArgs(argv) {
     }
   }
   return options
+}
+
+/**
+ * The field options worth diffing in a pull request. Deliberately an allow-list:
+ * PocketBase adds its own keys over time (ids, timestamps), and an export that
+ * changed every release would be noise nobody reads.
+ */
+const EXPORTED_FIELD_KEYS = [
+  'name',
+  'type',
+  'required',
+  'presentable',
+  'unique',
+  'min',
+  'max',
+  'pattern',
+  'autocomplete',
+  'maxSelect',
+  'maxSize',
+  'mimeTypes',
+  'thumbs',
+  'values',
+  'help',
+]
+
+function pickFieldOptions(field) {
+  const picked = {}
+  for (const key of EXPORTED_FIELD_KEYS) {
+    if (field[key] !== undefined) picked[key] = field[key]
+  }
+  return picked
+}
+
+/** One collection as a stable, diffable object — rules included, in a fixed order. */
+export function describeCollectionForExport(collection) {
+  return {
+    name: collection.name,
+    type: collection.type,
+    fields: (collection.fields ?? []).map(pickFieldOptions),
+    indexes: [...(collection.indexes ?? [])].sort(),
+    listRule: collection.listRule ?? null,
+    viewRule: collection.viewRule ?? null,
+    createRule: collection.createRule ?? null,
+    updateRule: collection.updateRule ?? null,
+    deleteRule: collection.deleteRule ?? null,
+  }
+}
+
+/**
+ * The document `--export` writes: only the collections this script owns, sorted
+ * by name, so two exports of the same server are byte-identical and a diff shows
+ * exactly what drifts.
+ */
+export function exportDocument(collections, exportedAt, names = desiredCollections().map(entry => entry.name)) {
+  const wanted = new Set(names)
+  return {
+    exportedAt,
+    collections: collections
+      .filter(collection => wanted.has(collection.name))
+      .map(describeCollectionForExport)
+      .sort((left, right) => left.name.localeCompare(right.name)),
+  }
+}
+
+/** 0 when the server already matches, 1 when something would have to be written. */
+export function exitCodeFor(report) {
+  const collectionsConform = report.collections.every(entry => entry.status === 'unchanged')
+  const backupsConform = report.backups === null || report.backups.status === 'unchanged'
+  return collectionsConform && backupsConform ? 0 : 1
 }
 
 /** CLI flags, then the environment, then `infra/.env` — the first value found wins. */
@@ -241,7 +367,7 @@ export function assertComplete(config) {
  * against a fake, and what keeps this file free of PocketBase specifics.
  */
 export async function runSetup(client, config, log = console.log) {
-  const report = { dryRun: config.dryRun, collections: [], users: [], verification: null }
+  const report = { dryRun: config.dryRun, collections: [], backups: null, users: [], verification: null }
   const prefix = config.dryRun ? '[simulation] ' : ''
 
   const session = await client.auth()
@@ -273,6 +399,23 @@ export async function runSetup(client, config, log = console.log) {
     else if (plan.update !== undefined) await client.updateCollection(current.id, plan.update)
   }
 
+  // Automatic backups: PocketBase ships them DISABLED, so the script turns them
+  // on unless the operator asked for it to keep its hands off.
+  if (config.backups !== false) {
+    const settings = await client.getSettings()
+    const plan = planBackups(settings?.backups, {
+      cron: config.backupCron ?? undefined,
+      cronMaxKeep: config.backupKeep ?? undefined,
+    })
+    report.backups = { status: plan.changes.length === 0 ? 'unchanged' : 'updated', changes: plan.changes }
+    log(
+      plan.changes.length === 0
+        ? `${prefix}= sauvegardes : déjà à jour`
+        : `${prefix}~ sauvegardes : ${plan.changes.join(' ; ')}`
+    )
+    if (!config.dryRun && plan.update !== undefined) await client.updateSettings(plan.update)
+  }
+
   for (const user of config.users) {
     if (config.dryRun) {
       log(`${prefix}~ compte « ${user.username} » (${user.role}) créé ou mis à jour`)
@@ -296,7 +439,11 @@ export async function runSetup(client, config, log = console.log) {
   return report
 }
 
-function describeAuthError(error, url) {
+/**
+ * Turns whatever the SDK threw into the SetupError the operator should read —
+ * message AND exit code, so both the human and a pipeline get the right answer.
+ */
+export function setupErrorForAuth(error, url) {
   const status = error && typeof error === 'object' ? error.status : undefined
   if (status === 0) {
     // The one misconfiguration worth naming: a LAN address reached over https.
@@ -304,13 +451,22 @@ function describeAuthError(error, url) {
       /^https:\/\//i.test(url) && isLocalAddress(url)
         ? ' Un serveur local se joint en http:// (ou avec --insecure s’il a un certificat auto-signé).'
         : ''
-    return `Serveur injoignable à l'adresse ${url}. Vérifiez l'URL et la connexion.${hint}`
+    return new SetupError(
+      `Serveur injoignable à l'adresse ${url}. Vérifiez l'URL et la connexion.${hint}`,
+      2
+    )
   }
   if (status === 404) {
-    return `Pas d'API superutilisateur sur ${url} : ce serveur est plus ancien que PocketBase 0.23, ou l'URL ne pointe pas sur PocketBase.`
+    return new SetupError(
+      `Pas d'API superutilisateur sur ${url} : ce serveur est plus ancien que PocketBase 0.23, ou l'URL ne pointe pas sur PocketBase.`,
+      2
+    )
   }
-  if (status === 400) return `Email ou mot de passe superutilisateur refusé par ${url}.`
-  return `Connexion à ${url} impossible (${error && error.message ? error.message : 'erreur inconnue'}).`
+  if (status === 400) {
+    return new SetupError(`Email ou mot de passe superutilisateur refusé par ${url}.`, 2)
+  }
+  const message = error && error.message ? error.message : 'erreur inconnue'
+  return new SetupError(`Connexion à ${url} impossible (${message}).`, 2)
 }
 
 function describeApiError(error, action) {
@@ -339,7 +495,7 @@ export async function createPocketBaseSetupClient({ url, email, password, insecu
       try {
         await pb.collection('_superusers').authWithPassword(email, password)
       } catch (error) {
-        throw new SetupError(describeAuthError(error, url))
+        throw setupErrorForAuth(error, url)
       }
       if (pb.authStore.isSuperuser !== true) {
         throw new SetupError(`La session ouverte sur ${url} n'est pas une session superutilisateur.`)
@@ -352,6 +508,22 @@ export async function createPocketBaseSetupClient({ url, email, password, insecu
         return await pb.collections.getFullList()
       } catch (error) {
         throw new SetupError(describeApiError(error, 'La lecture des collections'))
+      }
+    },
+
+    async getSettings() {
+      try {
+        return await pb.settings.getAll()
+      } catch (error) {
+        throw new SetupError(describeApiError(error, 'La lecture des réglages'))
+      }
+    },
+
+    async updateSettings(patch) {
+      try {
+        return await pb.settings.update(patch)
+      } catch (error) {
+        throw new SetupError(describeApiError(error, 'La mise à jour des réglages'))
       }
     },
 
@@ -405,7 +577,7 @@ export async function createPocketBaseSetupClient({ url, email, password, insecu
       try {
         await asUser.collection(USERS_COLLECTION).authWithPassword(username, secret)
       } catch (error) {
-        throw new SetupError(describeAuthError(error, url))
+        throw setupErrorForAuth(error, url)
       }
       const fileId = `verification-${randomUUID()}`
       const longText = 'vérification '.repeat(700)
@@ -452,6 +624,32 @@ export async function main(argv) {
   const config = resolveConfig(parsed, process.env, readEnvFile())
   assertComplete(config)
   const client = await createPocketBaseSetupClient(config)
+
+  // `--export` is a read-only snapshot: no collection is touched, nobody is
+  // created, and the file it writes is meant to be committed and diffed.
+  if (config.export !== null) {
+    const session = await client.auth()
+    console.log(`✓ Superutilisateur connecté : ${session.email}`)
+    const collections = await client.listCollections()
+    const document = exportDocument(collections, new Date().toISOString())
+    writeFileSync(config.export, `${JSON.stringify(document, null, 2)}\n`)
+    console.log(`✓ Schéma exporté : ${config.export} (${document.collections.length} collections)`)
+    return 0
+  }
+
+  // `--check` answers a pipeline's question and nothing else: it never creates
+  // an account nor runs the live verification, both of which would write.
+  if (config.check) {
+    const report = await runSetup(client, { ...config, users: [], verify: null })
+    const conform = exitCodeFor(report) === 0
+    console.log(
+      conform
+        ? '\n✓ Serveur conforme.'
+        : '\n✗ Serveur non conforme — relancez sans --check pour appliquer les changements ci-dessus.'
+    )
+    return conform ? 0 : 1
+  }
+
   const report = await runSetup(client, config)
   const nothingToDo =
     report.users.length === 0 && report.collections.every(entry => entry.status === 'unchanged')
@@ -468,8 +666,13 @@ if (invokedDirectly) {
   try {
     process.exitCode = await main(process.argv.slice(2))
   } catch (error) {
-    if (error instanceof SetupError) console.error(`\n✗ ${error.message}`)
-    else console.error('\n✗ Échec inattendu :', error)
-    process.exitCode = 1
+    if (error instanceof SetupError) {
+      console.error(`\n✗ ${error.message}`)
+      // 2 for "could not talk to the server", 1 for everything else.
+      process.exitCode = error.code
+    } else {
+      console.error('\n✗ Échec inattendu :', error)
+      process.exitCode = 1
+    }
   }
 }
