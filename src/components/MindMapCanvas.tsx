@@ -5,22 +5,36 @@ import {
   Background,
   Controls,
   useNodesState,
+  useOnSelectionChange,
   useReactFlow,
+  useStoreApi,
   type Node,
   type Edge,
   type NodeProps,
   type OnNodeDrag,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Sparkles, Undo2, Redo2, Download, X } from 'lucide-react'
+import {
+  Sparkles,
+  Undo2,
+  Redo2,
+  Download,
+  X,
+  ClipboardPaste,
+  Maximize,
+  ZoomIn,
+  ZoomOut,
+  Scan,
+  Home,
+} from 'lucide-react'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent } from './ui/context-menu'
+import { CommandMenuItem } from './commands/CommandMenuItem'
+import { useCanvasCommands } from '../hooks/useCanvasCommands'
+import { useCardSelectionStore } from '../state/useCardSelectionStore'
 import { useWorkspaceStore } from '../state/useWorkspaceStore'
-import { exportToPdfBytes, exportToImageDataUrls } from '../export/exportMindMap'
-import { writeXmindFile } from '../xmind/exportXmind'
-import { saveBytesAs, dataUrlToBytes } from '../persistence/exportIO'
+import { quickExport, type QuickExportFormat } from '../export/quickExport'
 import { describeExportError } from '../export/describeExportError'
-import { mindMapBaseName } from '../persistence/paths'
-import { useCardsStore } from '../state/useCardsStore'
+import { useCardsStore, selectEditsBlocked } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
 import { useCardDetailStore } from '../state/useCardDetailStore'
 import type { Card } from '../types/card'
@@ -133,8 +147,16 @@ export function carryMeasured(next: Node[], previous: Node[]): Node[] {
   const previousById = new Map(previous.map(node => [node.id, node]))
   return next.map(node => {
     const before = previousById.get(node.id)
-    if (!before?.measured) return node
-    return { ...node, measured: before.measured, width: before.width, height: before.height }
+    if (before === undefined) return node
+    // `selected` rides along for a different reason than the measurements:
+    // `buildNodes` derives nodes from the card list, which knows nothing about
+    // selection, so every rebuild (a title edit, a lock toggle) would clear it.
+    // Losing it mid-edit breaks the chained keyboard flow the shortcuts exist
+    // for — Tab, type, Entrée, type — since each new card would deselect the
+    // one the next keystroke is meant to act on.
+    const withSelection = before.selected === true ? { ...node, selected: true } : node
+    if (!before.measured) return withSelection
+    return { ...withSelection, measured: before.measured, width: before.width, height: before.height }
   })
 }
 
@@ -300,21 +322,16 @@ interface PendingMove {
 
 function MindMapCanvasInner() {
   const cards = useCardsStore(s => s.history.present)
-  const locked = useCardsStore(s => s.locked)
+  const locked = useCardsStore(selectEditsBlocked)
   const moveCard = useCardsStore(s => s.moveCard)
-  const addFloatingCard = useCardsStore(s => s.addFloatingCard)
-  const undo = useCardsStore(s => s.undo)
-  const redo = useCardsStore(s => s.redo)
-  const canUndo = useCardsStore(s => s.history.past.length > 0)
-  const canRedo = useCardsStore(s => s.history.future.length > 0)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const [exportError, setExportError] = useState<string | null>(null)
   const quizQuestions = useQuizStore(s => s.questions)
   const quizResults = useQuizStore(s => s.results)
-  const quizActive = useQuizStore(s => s.active)
   const theme = useResolvedTheme()
   const levelAppearance = useAppearanceSettingsStore(s => s.levels)
   const { setCenter, getZoom, flowToScreenPosition } = useReactFlow()
+  const storeApi = useStoreApi()
   const openFicheIds = useCardDetailStore(s => s.open)
 
   const layout = useMemo(() => computeLayout(cards), [cards])
@@ -324,6 +341,83 @@ function MindMapCanvasInner() {
   const previousIds = useRef(new Set(cards.map(c => c.id)))
   const [autoEditId, setAutoEditId] = useState<string | null>(null)
   const [spawningId, setSpawningId] = useState<string | null>(null)
+  /**
+   * Set just before an action that adds cards which already HAVE their text —
+   * a paste, a duplicate. Opening the title editor there (and selecting the
+   * title, as a fresh card's editor does) would leave the pasted branch one
+   * keystroke from being overwritten. A blank new card still wants it.
+   */
+  const suppressAutoEdit = useRef(false)
+  const requestSuppressAutoEdit = useCallback(() => {
+    suppressAutoEdit.current = true
+  }, [])
+
+  /** Brings a card into the middle of the viewport, at the current zoom. */
+  const focusCard = useCallback(
+    (cardId: string) => {
+      const position = layout[cardId]
+      if (position === undefined) return
+      setCenter(position.x + NOMINAL_NODE_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
+        zoom: getZoom(),
+        duration: 250,
+      })
+    },
+    [layout, setCenter, getZoom]
+  )
+
+  /**
+   * React Flow owns selection (it is what a click sets and what the outline
+   * draws); this mirrors it into the store the command handlers read, so
+   * « supprimer la carte » and the arrow keys act on the card the user can see
+   * is selected. Only card nodes count — the insertion line and the zone label
+   * are chrome, never a target.
+   */
+  // Memoised: React Flow re-subscribes whenever this identity changes, and an
+  // inline arrow would hand it a new one on every render of the canvas.
+  const handleSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[] }) => {
+    const card = selectedNodes.find(node => node.type === 'card')
+    useCardSelectionStore.getState().select(card?.id ?? null)
+  }, [])
+  useOnSelectionChange({ onChange: handleSelectionChange })
+
+  /**
+   * Applies a selection made in code — an arrow-key move, a card just created
+   * or pasted, a cut that left nothing selected.
+   *
+   * Through React Flow's own selection action rather than by rewriting the node
+   * array: React Flow owns selection, and a second writer patching `selected`
+   * onto the nodes it is handed sets the two of them re-triggering each other
+   * (its adoption emits changes, `onNodesChange` writes a new array, adoption
+   * runs again) until React gives up on the render loop.
+   *
+   * A card created a moment ago is not in React Flow's lookup yet — the node
+   * array is rebuilt by the effect that runs after this one — so the request is
+   * held and re-applied by the effect below, once the node exists.
+   */
+  const pendingSelection = useRef<string | null>(null)
+  const selectCard = useCallback(
+    (cardId: string | null) => {
+      // Mirrored first and unconditionally: the command handlers read this, and
+      // they must see the new selection even when the node is still on its way.
+      useCardSelectionStore.getState().select(cardId)
+      const { addSelectedNodes, unselectNodesAndEdges, nodeLookup } = storeApi.getState()
+      if (cardId === null) {
+        unselectNodesAndEdges()
+        return
+      }
+      if (nodeLookup.has(cardId)) addSelectedNodes([cardId])
+      else pendingSelection.current = cardId
+    },
+    [storeApi]
+  )
+
+  // Read through a ref by the creation effect below, which must not re-run
+  // (and re-centre the viewport) just because this callback was re-created.
+  const selectCardRef = useRef(selectCard)
+  selectCardRef.current = selectCard
+
+  useCanvasCommands({ cards, locked, focusCard, selectCard, suppressAutoEdit: requestSuppressAutoEdit })
+
   // Which card is currently being dragged and what its drop would do — see
   // `resolveDropTarget`. Both are only ever set between onNodeDragStart and
   // onNodeDragStop.
@@ -344,8 +438,13 @@ function MindMapCanvasInner() {
         duration: 400,
       })
     }
-    setAutoEditId(createdId ?? null)
+    // A card you just created is the card you are about to act on: selecting it
+    // is what makes "Tab, Tab, Tab" build a branch, and what lets Suppr undo a
+    // mis-click without reaching for the mouse.
+    if (createdId) selectCardRef.current(createdId)
+    setAutoEditId(suppressAutoEdit.current ? null : (createdId ?? null))
     setSpawningId(createdId ?? null)
+    suppressAutoEdit.current = false
     previousIds.current = currentIds
   }, [cards, layout, setCenter])
 
@@ -422,6 +521,17 @@ function MindMapCanvasInner() {
   // insertion line, the reparent highlight). Used when a drag ends without a
   // move — an empty drop zone, or a cancelled overflow confirmation: "la carte
   // retourne à sa place initiale".
+  useEffect(() => {
+    const pending = pendingSelection.current
+    if (pending === null) return
+    const { addSelectedNodes, nodeLookup } = storeApi.getState()
+    if (!nodeLookup.has(pending)) return
+    // Cleared before the call, so the node changes it triggers re-enter this
+    // effect with nothing left to do.
+    pendingSelection.current = null
+    addSelectedNodes([pending])
+  }, [nodes, storeApi])
+
   const resyncNodes = useCallback(() => {
     setNodes(current => carryMeasured(buildNodes(cards, layout, locked, autoEditId, null, quizQuestions, quizResults), current))
   }, [cards, layout, locked, autoEditId, quizQuestions, quizResults, setNodes])
@@ -554,26 +664,9 @@ function MindMapCanvasInner() {
     [cards, dropTarget, moveCard, resyncNodes]
   )
 
-  async function exportFromCanvas(format: 'pdf' | 'image' | 'xmind') {
-    const options = { showDefinitions: true, includeDetached: true, mindMapPath: currentFilePath }
-    const baseName = currentFilePath ? mindMapBaseName(currentFilePath) : 'carte-mentale'
+  async function exportFromCanvas(format: QuickExportFormat) {
     try {
-      if (format === 'pdf') {
-        const bytes = await exportToPdfBytes(cards, options)
-        await saveBytesAs(bytes, `${baseName}.pdf`, [{ name: 'PDF', extensions: ['pdf'] }])
-      } else if (format === 'image') {
-        const dataUrls = await exportToImageDataUrls(cards, options)
-        for (const [index, dataUrl] of dataUrls.entries()) {
-          const suffix = dataUrls.length > 1 ? ` (${index + 1})` : ''
-          const path = await saveBytesAs(dataUrlToBytes(dataUrl), `${baseName}${suffix}.png`, [
-            { name: 'Image PNG', extensions: ['png'] },
-          ])
-          if (path === null) break
-        }
-      } else {
-        const bytes = await writeXmindFile(cards)
-        await saveBytesAs(bytes, `${baseName}.xmind`, [{ name: 'XMind', extensions: ['xmind'] }])
-      }
+      await quickExport(format, cards, currentFilePath)
     } catch (error) {
       setExportError(`Échec de l’export : ${describeExportError(error)}`)
     }
@@ -601,7 +694,12 @@ function MindMapCanvasInner() {
               // then remove that still-selected card from the canvas the
               // instant focus leaves an input — e.g. when a wrong answer
               // disables the field. No card may ever disappear during a quiz.
-              deleteKeyCode={quizActive ? null : 'Backspace'}
+              // Card deletion goes through the `edit.delete` command instead,
+              // so the keyboard, the card's own × and the context menu all end
+              // up in the same confirmation dialog — React Flow's built-in
+              // shortcut would remove a branch outright, with no warning and no
+              // "détacher les enfants" option.
+              deleteKeyCode={null}
               fitView
               colorMode={theme}
             >
@@ -610,22 +708,42 @@ function MindMapCanvasInner() {
             </ReactFlow>
           </div>
         </ContextMenuTrigger>
+        {/*
+          The canvas menu is the one you get on empty space: everything here
+          acts on the map as a whole. Actions on a single card live on the
+          card's own right-click menu (see `CardNode`), which stops this one
+          from opening over it.
+
+          Entries are `CommandMenuItem`s rather than inline handlers, so each
+          one shows its current shortcut and greys itself out exactly when the
+          keyboard would refuse it — a locked map, an empty clipboard.
+        */}
         <ContextMenuContent>
-          {!locked && (
-            <>
-              <ContextMenuItem onSelect={() => addFloatingCard()}>
-                <Sparkles size={14} /> Créer une carte volante
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-              <ContextMenuItem disabled={!canUndo} onSelect={undo}>
-                <Undo2 size={14} /> Annuler
-              </ContextMenuItem>
-              <ContextMenuItem disabled={!canRedo} onSelect={redo}>
-                <Redo2 size={14} /> Refaire
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-            </>
-          )}
+          <CommandMenuItem command="card.addFloating" icon={Sparkles} />
+          <CommandMenuItem command="edit.paste" icon={ClipboardPaste} />
+          <ContextMenuSeparator />
+          <CommandMenuItem command="edit.undo" icon={Undo2} />
+          <CommandMenuItem command="edit.redo" icon={Redo2} />
+          <ContextMenuSeparator />
+          <CommandMenuItem command="view.fitView" icon={Maximize} />
+          <CommandMenuItem command="nav.root" icon={Home} />
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              <Scan size={14} /> Zoom
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              <CommandMenuItem command="view.zoomIn" icon={ZoomIn} />
+              <CommandMenuItem command="view.zoomOut" icon={ZoomOut} />
+              <CommandMenuItem command="view.zoomReset" icon={Scan} />
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+          <ContextMenuSeparator />
+          {/*
+            Export stays on its own handlers rather than the command registry:
+            these three write a file from the cards on screen through this
+            component's own error banner, and the catalogue's `file.export`
+            opens the full dialog (formats, page setup) from the header.
+          */}
           <ContextMenuSub>
             <ContextMenuSubTrigger>
               <Download size={14} /> Exporter

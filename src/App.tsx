@@ -4,9 +4,7 @@ import { MindMapCanvas } from './components/MindMapCanvas'
 import { CanvasErrorBoundary } from './components/CanvasErrorBoundary'
 import { CorruptedMapDialog } from './components/CorruptedMapDialog'
 import { SaveFailedDialog } from './components/SaveFailedDialog'
-import { LockToggle } from './components/LockToggle'
 import { FileSidebar } from './components/sidebar/FileSidebar'
-import { QuizButton } from './components/quiz/QuizButton'
 import { QuizFrame } from './components/quiz/QuizFrame'
 import { QuizSummaryModal } from './components/quiz/QuizSummaryModal'
 import { useQuizSettingsStore } from './state/useQuizSettingsStore'
@@ -21,7 +19,7 @@ import { useSyncStore } from './state/useSyncStore'
 import { ReadOnlyMapOverlay } from './components/ReadOnlyMapOverlay'
 import { fileNameOf, parentDirOf, repairedCopyPath } from './persistence/paths'
 import { repairCards, validateCards, type CardIssue } from './validation/cardsValidation'
-import { useUndoRedoShortcuts } from './hooks/useUndoRedoShortcuts'
+import { useGlobalShortcuts } from './hooks/useGlobalShortcuts'
 import { useWindowTitle } from './hooks/useWindowTitle'
 import { useUnsavedChangesGuard } from './hooks/useUnsavedChangesGuard'
 import { useFileDropZone } from './hooks/useFileDropZone'
@@ -30,11 +28,10 @@ import { imageBlockFrom } from './content/imageBlock'
 import { mimeForPath } from './content/pickImage'
 import { contentOf } from './content/blocks'
 import { readFile } from '@tauri-apps/plugin-fs'
-import { NewMindMapButton } from './components/NewMindMapButton'
-import { ExportMapButton } from './components/ExportMapButton'
-import { ThemeToggleButton } from './components/ThemeToggleButton'
-import { SettingsButton } from './components/settings/SettingsButton'
+import { AppToolbar } from './components/toolbar/AppToolbar'
 import { useAppearanceSettingsStore } from './state/useAppearanceSettingsStore'
+import { useShortcutSettingsStore } from './state/useShortcutSettingsStore'
+import { useCardSelectionStore } from './state/useCardSelectionStore'
 import { useThemeDomSync } from './hooks/useResolvedTheme'
 import { useAppliedFontFamily } from './hooks/useAppliedFontFamily'
 import { useAppUpdater } from './hooks/useAppUpdater'
@@ -88,7 +85,7 @@ function App() {
   const [loadedMeta, setLoadedMeta] = useState<MindMapMeta | null>(null)
   const currentUser = useSyncStore(s => s.currentUser)
   const mainRef = useRef<HTMLElement | null>(null)
-  useUndoRedoShortcuts()
+  useGlobalShortcuts()
   useWindowTitle(currentFilePath)
   useThemeDomSync()
   useAppliedFontFamily()
@@ -149,6 +146,7 @@ function App() {
   useEffect(() => {
     useQuizSettingsStore.getState().init()
     useAppearanceSettingsStore.getState().init()
+    useShortcutSettingsStore.getState().init()
     useSyncStore.getState().init()
   }, [])
 
@@ -161,6 +159,10 @@ function App() {
    */
   useEffect(() => {
     useCardDetailStore.getState().closeAll()
+    // Selection belongs to the map too: a card id carried across a switch would
+    // aim every card shortcut at a card that is no longer on screen — or, worse,
+    // at whatever card of the new map happens to share its id.
+    useCardSelectionStore.getState().reset()
   }, [loadedPath])
 
   /**
@@ -170,7 +172,10 @@ function App() {
    * sidebar, which a quiz also hides.
    */
   useEffect(() => {
-    if (quizActive) useCardDetailStore.getState().closeAll()
+    if (quizActive) {
+      useCardDetailStore.getState().closeAll()
+      useCardSelectionStore.getState().reset()
+    }
   }, [quizActive])
 
   /** A deleted card's fiche goes with it; undo brings both back. */
@@ -282,6 +287,20 @@ function App() {
   const currentFileName = currentFilePath ? fileNameOf(currentFilePath) : null
   const isReadOnly = loadedMeta !== null && loadedMeta.author !== currentUser?.username
 
+  /**
+   * Publishes "this map is someone else's" to the store every editing
+   * affordance already consults.
+   *
+   * The canvas overlay only blocks the POINTER. The header's buttons sit above
+   * it, and a keyboard shortcut never touches it at all — so without this, a
+   * `Suppr` or a `Ctrl+V` would happily edit a file the user was just told is
+   * read-only, and autosave would write the result to disk.
+   */
+  useEffect(() => {
+    useCardsStore.getState().setReadOnly(isReadOnly)
+  }, [isReadOnly])
+
+
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
       {/*
@@ -294,15 +313,25 @@ function App() {
       {!quizActive && <FileSidebar onOpenFile={requestOpenFile} />}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
         <header style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-          {!quizActive && <LockToggle />}
-          {!quizActive && <NewMindMapButton onOpenFile={requestOpenFile} />}
-          {/* The cards in memory, not the file on disk — see ExportMapButton. */}
-          {!quizActive && <ExportMapButton filePath={loadedPath} cards={cards} />}
-          {!quizActive && <QuizButton />}
+          {/*
+            The whole toolbar is gone for the duration of a quiz, like the file
+            tree beside it: every action on it edits the map, and no card may
+            change under a quiz in progress. The commands it registers go with
+            it, so their shortcuts stop firing too.
+
+            The cards handed to it are the ones in memory, not the file on disk:
+            those are what the user is looking at, and they are already
+            validated (nothing reaches the canvas otherwise).
+          */}
           {!quizActive && (
-            <SettingsButton updateCheck={{ status: updateStatus, checkNow: checkForUpdates }} />
+            <AppToolbar
+              filePath={loadedPath}
+              cards={cards}
+              onOpenFile={requestOpenFile}
+              flush={flush}
+              updateCheck={{ status: updateStatus, checkNow: checkForUpdates }}
+            />
           )}
-          {!quizActive && <ThemeToggleButton />}
           <span title={currentFilePath ?? undefined} style={{ fontSize: 13, fontWeight: 500 }}>
             {currentFileName ?? 'Aucun fichier ouvert'}
           </span>

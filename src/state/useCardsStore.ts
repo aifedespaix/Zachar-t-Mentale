@@ -18,6 +18,11 @@ import {
   moveCardToParent as moveCardToParentOp,
   moveCard as moveCardOp,
   detachCard as detachCardOp,
+  duplicateCard as duplicateCardOp,
+  pasteBranch as pasteBranchOp,
+  extractBranch,
+  branchToText,
+  type CardBranch,
   countDescendants,
   flattenedCardCount,
   overflowingCardCount,
@@ -26,7 +31,17 @@ import {
 
 interface CardsState {
   history: History<Card[]>
+  /** The user's own lock, toggled from the header — see `toggleLock`. */
   locked: boolean
+  /**
+   * The open map belongs to someone else (see the sync feature's `meta.author`).
+   *
+   * Distinct from `locked` because it is not the user's decision and they may
+   * not lift it: unlocking would let them edit a file that is about to be
+   * overwritten by the next pull. `selectEditsBlocked` is what the UI reads, so
+   * neither reason has to be checked twice.
+   */
+  readOnly: boolean
   addChild: (parentId: string) => string
   addSibling: (siblingId: string, position: 'above' | 'below') => string
   addFloatingCard: () => string
@@ -45,6 +60,18 @@ interface CardsState {
   /** Reparents a card (any level) and returns the ids detached past level 4. */
   moveCard: (id: string, newParentId: string, index?: number) => string[]
   detachCard: (id: string) => void
+  /** A deep copy of the branch rooted at `id`, for the card clipboard. */
+  copyBranch: (id: string) => CardBranch | null
+  /** The branch rooted at `id` as an indented plain-text outline. */
+  branchText: (id: string) => string
+  /** Copies the branch in place, right after the original. Returns the copy's root id. */
+  duplicateCard: (id: string) => string
+  /**
+   * Pastes a copied branch under `parentId` (or into the floating zone when
+   * `null`). Returns the pasted root's id and the copies that had to become
+   * floating cards because they fell past level 4.
+   */
+  pasteBranch: (branch: CardBranch, parentId: string | null, index?: number) => { newCardId: string; detachedIds: string[] }
   /** How many cards `detachCard` would turn into floating cards (the card included). */
   flattenedCount: (id: string) => number
   /** How many cards `moveCard` would detach past level 4 — 0 means the move fits. */
@@ -52,15 +79,29 @@ interface CardsState {
   undo: () => void
   redo: () => void
   toggleLock: () => void
+  setReadOnly: (readOnly: boolean) => void
   loadCards: (cards: Card[]) => void
 }
 
 export type CardsStore = UseBoundStore<StoreApi<CardsState>>
 
+/**
+ * Every reason the map may not be edited right now, in one selector.
+ *
+ * The two reasons arrive from opposite directions — the user locked the map, or
+ * the map is someone else's — and each new editing affordance would otherwise
+ * have to remember to check both. Missing one is how a keyboard shortcut ends
+ * up editing a read-only file that the canvas overlay only blocked the mouse
+ * from reaching.
+ */
+export const selectEditsBlocked = (state: { locked: boolean; readOnly: boolean }): boolean =>
+  state.locked || state.readOnly
+
 export function createCardsStore(): CardsStore {
   return create<CardsState>((set, get) => ({
     history: createHistory<Card[]>([createRootCard('Nouveau chapitre')]),
     locked: false,
+    readOnly: false,
     addChild: parentId => {
       const { cards: next, newCardId } = addChildOp(get().history.present, parentId)
       set(state => ({ history: pushState(state.history, next) }))
@@ -127,11 +168,24 @@ export function createCardsStore(): CardsStore {
       const next = detachCardOp(get().history.present, id)
       set(state => ({ history: pushState(state.history, next) }))
     },
+    copyBranch: id => extractBranch(get().history.present, id),
+    branchText: id => branchToText(get().history.present, id),
+    duplicateCard: id => {
+      const { cards: next, newCardId } = duplicateCardOp(get().history.present, id)
+      set(state => ({ history: pushState(state.history, next) }))
+      return newCardId
+    },
+    pasteBranch: (branch, parentId, index) => {
+      const { cards: next, newCardId, detachedIds } = pasteBranchOp(get().history.present, branch, parentId, index)
+      set(state => ({ history: pushState(state.history, next) }))
+      return { newCardId, detachedIds }
+    },
     flattenedCount: id => flattenedCardCount(get().history.present, id),
     overflowCount: (id, newParentId) => overflowingCardCount(get().history.present, id, newParentId),
     undo: () => set(state => ({ history: undoHistory(state.history) })),
     redo: () => set(state => ({ history: redoHistory(state.history) })),
     toggleLock: () => set(state => ({ locked: !state.locked })),
+    setReadOnly: readOnly => set(state => (state.readOnly === readOnly ? state : { readOnly })),
     // Reconciled on the way in: `content` is authoritative and `definition` is
     // its mirror, so a file whose two fields disagree is made consistent
     // before anything reads it. See `reconcileCards`.

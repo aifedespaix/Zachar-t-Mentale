@@ -44,15 +44,25 @@ describe('SettingsDialog', () => {
     expect(checkNow).toHaveBeenCalled()
   })
 
-  it('offers the three sections as tabs so the header only needs one button', () => {
+  it('offers every section as a tab so the header only needs one button', () => {
     render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 
     expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual([
       expect.stringContaining('Général'),
       expect.stringContaining('Apparence'),
       expect.stringContaining('Quiz'),
+      expect.stringContaining('Raccourcis'),
       expect.stringContaining('Synchronisation'),
     ])
+  })
+
+  it('opens straight on the tab it was asked for', () => {
+    render(
+      <SettingsDialog open initialTab="shortcuts" onOpenChange={() => {}} updateCheck={updateCheckStub} />
+    )
+
+    expect(screen.getByRole('tab', { name: /Raccourcis/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('Rechercher un raccourci')).toBeInTheDocument()
   })
 
   it('switches panels when another tab is picked', async () => {
