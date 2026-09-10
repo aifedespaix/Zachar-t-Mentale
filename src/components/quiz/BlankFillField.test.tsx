@@ -46,16 +46,24 @@ describe('BlankFillField', () => {
     expect(screen.getByLabelText('Réponse').closest('div')).toHaveTextContent('B')
   })
 
-  it('caps typing at the number of missing letters, so the answer cannot overflow', () => {
+  it('caps typing at the number of missing letters, so the answer cannot overflow', async () => {
+    const user = userEvent.setup()
     render(<Harness target="Bonsoir" />)
-    // Six letters hidden behind the conceded "B".
-    expect(screen.getByLabelText('Réponse')).toHaveAttribute('maxLength', '6')
+
+    // Six letters are hidden behind the conceded "B"; a seventh has no box.
+    await user.type(screen.getByLabelText('Réponse'), 'onsoirx')
+
+    expect(screen.getByLabelText('Réponse')).toHaveValue('onsoir')
   })
 
-  it('asks only for the letters that are missing, not for spaces or punctuation', () => {
+  it('asks only for the letters that are missing, not for spaces or punctuation', async () => {
+    const user = userEvent.setup()
     render(<Harness target="le mot" />)
-    // "le mot" has 5 letters; the first is revealed, the space is free.
-    expect(screen.getByLabelText('Réponse')).toHaveAttribute('maxLength', '4')
+
+    // "l" is given and the space is free, so four keystrokes fill the rest.
+    await user.type(screen.getByLabelText('Réponse'), 'emotx')
+
+    expect(screen.getByLabelText('Réponse')).toHaveValue('emot')
   })
 
   it('accepts typed letters into the blanks', async () => {
@@ -67,9 +75,14 @@ describe('BlankFillField', () => {
     expect(screen.getByLabelText('Réponse')).toHaveValue('onsoir')
   })
 
-  it('shrinks the field as help is handed over, so given letters are not retyped', () => {
+  it('shrinks the field as help is handed over, so given letters are not retyped', async () => {
+    const user = userEvent.setup()
     render(<Harness target="Bonsoir" extraReveals={2} />)
-    expect(screen.getByLabelText('Réponse')).toHaveAttribute('maxLength', '4')
+
+    // Two more letters are given, so only the four middle ones remain.
+    await user.type(screen.getByLabelText('Réponse'), 'onoix')
+
+    expect(screen.getByLabelText('Réponse')).toHaveValue('onoi')
   })
 
   it('submits on Enter', async () => {
@@ -156,6 +169,35 @@ describe('BlankFillField', () => {
     expect(input.selectionStart).toBe(2)
   })
 
+  it('overwrites the box you go back to instead of shifting the rest of the title', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<Harness target="Bonsoir" />)
+    const input = screen.getByLabelText('Réponse') as HTMLInputElement
+
+    await user.type(input, 'onjour')
+    const boxes = container.querySelectorAll('[aria-hidden] > span')
+    await user.click(boxes[3]) // the "s" box — editable position 2, holding the wrong "j"
+    await user.keyboard('x')
+
+    // "onjour" with the wrong "j" corrected: nothing after it moved along.
+    expect(input).toHaveValue('onxour')
+  })
+
+  it('steps to the next box after a correction, so a wrong run can be fixed left to right', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<Harness target="Bonsoir" />)
+    const input = screen.getByLabelText('Réponse') as HTMLInputElement
+
+    await user.type(input, 'onjour')
+    const boxes = container.querySelectorAll('[aria-hidden] > span')
+    await user.click(boxes[3]) // the "s" box, holding "j"
+    await user.keyboard('xs')
+
+    // "x" corrects that box, then the caret has moved on and the "s" corrects
+    // the one after it — the tail stays put throughout.
+    expect(input).toHaveValue('onxsur')
+  })
+
   it('absorbs a keystroke that only repeats a letter the field just skipped', async () => {
     function BarbeHarness() {
       const [typed, setTyped] = useState<string[]>([])
@@ -200,8 +242,12 @@ describe('BlankFillField', () => {
     expect(screen.getByLabelText('Réponse')).toHaveValue('')
   })
 
-  it('leaves nothing to type when every letter has been revealed', () => {
+  it('leaves nothing to type when every letter has been revealed', async () => {
+    const user = userEvent.setup()
     render(<Harness target="Bonsoir" extraReveals={99} />)
-    expect(screen.getByLabelText('Réponse')).toHaveAttribute('maxLength', '0')
+
+    await user.type(screen.getByLabelText('Réponse'), 'ons')
+
+    expect(screen.getByLabelText('Réponse')).toHaveValue('')
   })
 })

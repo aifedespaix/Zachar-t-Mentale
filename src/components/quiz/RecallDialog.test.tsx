@@ -102,6 +102,23 @@ describe('RecallDialog', () => {
     expect(colors).toContain('rgb(220, 38, 38)')
   })
 
+  it('lets the user go back and overwrite a wrong letter without shifting the rest', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    const input = screen.getByLabelText('Réponse') as HTMLInputElement
+
+    await user.type(input, 'onjour')
+    await user.click(screen.getByRole('button', { name: 'Valider' }))
+
+    // Go back to the wrong "j" (third editable box) and correct it: "s" takes
+    // its place and the letters after it stay exactly where they were.
+    const boxes = document.body.querySelectorAll('[aria-hidden] > span')
+    await user.click(boxes[3])
+    await user.keyboard('s')
+
+    expect(input).toHaveValue('onsour')
+  })
+
   it('reveals the extra letter the moment the store grants it — no button to press for it', async () => {
     const user = userEvent.setup()
     const { withProgress } = renderDialog()
@@ -112,7 +129,9 @@ describe('RecallDialog', () => {
     // the field must follow immediately — there is no "Réessayer" gate left.
     withProgress({ ...EMPTY_RECALL_PROGRESS, attempts: 1, extraReveals: 1 })
 
-    expect(screen.getByLabelText('Réponse')).toHaveAttribute('maxLength', '5')
+    // One box fewer than before: a sixth letter now has nowhere to land.
+    await user.type(screen.getByLabelText('Réponse'), 'x')
+    expect(screen.getByLabelText('Réponse')).toHaveValue('onjou')
   })
 
   it('carries the typed letters across that reveal so a near miss is not retyped', async () => {

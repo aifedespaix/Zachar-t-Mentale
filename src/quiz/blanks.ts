@@ -145,35 +145,60 @@ export function matchesTarget(typedChar: string, targetChar: string): boolean {
 }
 
 /**
- * Absorbs a keystroke that only repeats the letter the field just skipped.
+ * Turns the browser's edit into the letters the field should now hold.
  *
- * Structure and revealed letters are never typed — they are shown for free
- * and the next editable box comes right after them. But a user spelling the
- * word naturally still "says" that letter as they go, and if it lands in the
- * box meant for something else, it would be graded as a wrong guess for the
- * wrong reason. So: when the newly typed letter matches the one just skipped
- * AND does not answer the current box, the keystroke is dropped rather than
- * filed as a mistake. It must NOT fire when the skipped letter and the
- * current box's answer happen to be the same letter (e.g. a double letter
- * around a reveal) — there, the keystroke genuinely answers the box.
+ * Beyond « it grew by one » two things need deciding.
+ *
+ * WHERE the keystroke landed comes first. The caller hands over the caret the
+ * browser left behind — one past the inserted letter — because that is the
+ * only reliable answer when the title repeats a letter: diffing the two arrays
+ * finds the first place they diverge, which is not where a duplicate was
+ * inserted. Without a caret (the unit tests, or an exotic edit) we fall back
+ * to that diff.
+ *
+ * Then WHAT it means. The field has exactly one box per missing letter, so a
+ * keystroke on an already-filled box OVERWRITES it: coming back to fix a
+ * letter must not shunt the rest of the title right and leave a hole at the
+ * end. Only a keystroke on the first empty box (the frontier) extends the
+ * answer. An overwrite that repeats the letter already there is simply a
+ * no-op.
+ *
+ * A frontier keystroke can further be swallowed when it only repeats the
+ * letter the field just skipped. Structure and revealed letters are never
+ * typed — they are shown for free and the next editable box comes right after
+ * them. But a user spelling the word naturally still "says" that letter as
+ * they go, and if it lands in the box meant for something else, it would be
+ * graded as a wrong guess for the wrong reason. So: when the newly typed
+ * letter matches the one just skipped AND does not answer the current box, the
+ * keystroke is dropped rather than filed as a mistake. It must NOT fire when
+ * the skipped letter and the current box's answer happen to be the same letter
+ * (e.g. a double letter around a reveal) — there, the keystroke genuinely
+ * answers the box.
  *
  * Only handles the common case of one character typed forward (`nextTyped`
- * one longer than `previousTyped`); a deletion, a paste, or an in-place
- * replacement passes through untouched.
+ * one longer than `previousTyped`); a deletion or a paste passes through
+ * untouched.
  */
 export function resolveTypedInsert(
   target: string,
   revealed: ReadonlySet<number>,
   previousTyped: readonly string[],
-  nextTyped: readonly string[]
+  nextTyped: readonly string[],
+  caretPosition?: number
 ): string[] {
   if (nextTyped.length !== previousTyped.length + 1) return [...nextTyped]
 
-  let position = 0
-  while (position < previousTyped.length && previousTyped[position] === nextTyped[position]) position++
-  const insertedChar = nextTyped[position]
+  const position = insertionPosition(previousTyped, nextTyped, caretPosition)
+  if (position < 0 || position >= nextTyped.length) return [...nextTyped]
+
+  // Ahead of the frontier: correct the box under the caret. Dropping the
+  // letter the insertion pushed right is what makes it a replacement.
+  if (position < previousTyped.length) {
+    return [...nextTyped.slice(0, position + 1), ...nextTyped.slice(position + 2)]
+  }
 
   const editable = editableIndices(target, revealed)
+  const insertedChar = nextTyped[position]
   const targetIndex = editable[position]
   const previousTargetIndex = position > 0 ? editable[position - 1] : -1
   const justSkipped = targetIndex - previousTargetIndex > 1 ? target[targetIndex - 1] : null
@@ -182,6 +207,24 @@ export function resolveTypedInsert(
     return [...previousTyped]
   }
   return [...nextTyped]
+}
+
+/**
+ * The index a one-character-bigger edit inserted at. The caret the browser
+ * left — one past the inserted letter — wins when it is usable; diffing is the
+ * fallback, and is ambiguous exactly when the title repeats a letter.
+ */
+function insertionPosition(
+  previousTyped: readonly string[],
+  nextTyped: readonly string[],
+  caretPosition?: number
+): number {
+  if (caretPosition !== undefined && caretPosition > 0 && caretPosition <= nextTyped.length) {
+    return caretPosition - 1
+  }
+  let position = 0
+  while (position < previousTyped.length && previousTyped[position] === nextTyped[position]) position++
+  return position
 }
 
 /**

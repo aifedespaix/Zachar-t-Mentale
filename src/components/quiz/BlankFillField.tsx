@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { editableIndices, matchesTarget, resolveTypedInsert, slotsOf } from '../../quiz/blanks'
 
 const CORRECT_COLOR = '#16a34a'
@@ -35,6 +35,11 @@ interface BlankFillFieldProps {
  * the shape of the word — its length, its spaces, its hyphens — is scaffolding
  * you type into rather than a caption you read.
  *
+ * There is no "insert" here, only "fill the next box" and "overwrite the box
+ * you went back to" — the answer has a fixed length, so a keystroke in the
+ * middle of what is already written replaces that letter instead of pushing
+ * the rest of the title along.
+ *
  * Structural characters and revealed letters are drawn but never typed: the
  * user only ever supplies what is genuinely missing, which is what makes a
  * half-revealed word (« B_n_o_r ») answerable in four keystrokes instead of
@@ -65,6 +70,17 @@ export function BlankFillField({
   // but a click on an already-answered box moves it there instead, so typing
   // corrects that one letter without retyping everything after it.
   const [cursorPosition, setCursorPosition] = useState(value.length)
+  // Where the resolved edit wants the caret, applied once React has rewritten
+  // the input's value. Overwriting a box changes that value under the caret,
+  // and assigning `value` drops the selection to the end — without this the
+  // caret would jump past the letters the user still means to correct.
+  const pendingSelection = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    const selection = pendingSelection.current
+    if (selection === null) return
+    pendingSelection.current = null
+    inputRef.current?.setSelectionRange(selection, selection)
+  }, [typed])
 
   return (
     <div
@@ -174,18 +190,31 @@ export function BlankFillField({
         spellCheck={false}
         disabled={disabled}
         value={value}
-        maxLength={editable.length}
         onChange={event => {
-          const raw = Array.from(event.target.value).slice(0, editable.length)
-          const resolved = resolveTypedInsert(target, revealed, typed, raw)
+          const input = event.target
+          const raw = Array.from(input.value)
+          const nativeCursor = input.selectionStart ?? raw.length
+          // The resolver gets the caret along with the untruncated value: a
+          // middle edit on a full field briefly overflows, and that extra
+          // letter is exactly what says which box was corrected. Truncating
+          // first would hide it and reintroduce the shift.
+          const resolved = resolveTypedInsert(target, revealed, typed, raw, nativeCursor).slice(
+            0,
+            editable.length
+          )
           onTypedChange(resolved)
 
-          const nativeCursor = event.target.selectionStart ?? resolved.length
-          // A swallowed keystroke (resolved is shorter than what the browser
-          // actually produced) must not leave the caret past the letter that
-          // got dropped — it belongs right back where it was.
-          const swallowed = resolved.length !== raw.length
-          setCursorPosition(swallowed ? Math.max(0, nativeCursor - 1) : nativeCursor)
+          // A swallowed keystroke — an echo of a letter the field just
+          // skipped, or an overflow past the last box — leaves the answer
+          // untouched, so the caret must stay on the box the user was working
+          // in rather than step past it. Anything else follows the browser.
+          const grown = raw.length === typed.length + 1
+          const swallowed =
+            grown && resolved.length === typed.length && resolved.every((char, i) => char === typed[i])
+          const caret = swallowed ? nativeCursor - 1 : nativeCursor
+          const nextCursor = Math.max(0, Math.min(caret, resolved.length))
+          pendingSelection.current = nextCursor
+          setCursorPosition(nextCursor)
         }}
         onSelect={event => setCursorPosition(event.currentTarget.selectionStart ?? value.length)}
         onFocus={() => setFocused(true)}

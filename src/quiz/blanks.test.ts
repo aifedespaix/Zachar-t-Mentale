@@ -252,4 +252,37 @@ describe('resolveTypedInsert', () => {
     const revealed = new Set<number>()
     expect(resolveTypedInsert('chat', revealed, ['c'], ['c', 'h', 'a'])).toEqual(['c', 'h', 'a'])
   })
+
+  it('overwrites the box the caret went back to instead of shifting the rest of the title', () => {
+    // "Bonsoir" with "o n s" typed, then a click back on the "s" box (editable
+    // position 2) and an "x": the field is a fixed shape, so "x" corrects THAT
+    // box and leaves the following letters where they were.
+    const revealed = new Set([0])
+    expect(resolveTypedInsert('Bonsoir', revealed, ['o', 'n', 's'], ['o', 'n', 'x', 's'], 3)).toEqual([
+      'o',
+      'n',
+      'x',
+    ])
+  })
+
+  it('falls back to the first difference when no caret is handed over', () => {
+    const revealed = new Set([0])
+    expect(resolveTypedInsert('Bonsoir', revealed, ['o', 'n', 's'], ['o', 'n', 'x', 's'])).toEqual(['o', 'n', 'x'])
+  })
+
+  it('trusts the caret where a repeated letter makes the diff ambiguous', () => {
+    // Inserting an "a" before the existing one is invisible to a first-
+    // difference scan — both arrays start with "a". The caret places it at 0.
+    expect(resolveTypedInsert('chat', new Set(), ['a', 'b'], ['a', 'a', 'b'], 1)).toEqual(['a', 'b'])
+  })
+
+  it('replaces the first box when the caret goes back to the start', () => {
+    const revealed = new Set([0])
+    expect(resolveTypedInsert('Bonsoir', revealed, ['o', 'n'], ['x', 'o', 'n'], 1)).toEqual(['x', 'n'])
+  })
+
+  it('appends rather than overwrites when the keystroke lands on the first empty box', () => {
+    const revealed = new Set([0])
+    expect(resolveTypedInsert('Bonsoir', revealed, ['o', 'n'], ['o', 'n', 's'], 3)).toEqual(['o', 'n', 's'])
+  })
 })
