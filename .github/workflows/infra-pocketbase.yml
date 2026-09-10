@@ -1,0 +1,101 @@
+name: infra-pocketbase
+
+# Le script d'installation parle l'API REST de PocketBase, et rien ne garantit
+# qu'il y reste valide : le champ `username` a disparu des collections par défaut
+# en 0.23 sans que personne ne s'en aperçoive, et toutes les instructions
+# manuelles qui l'utilisaient étaient devenues fausses. Ce workflow lance donc un
+# PocketBase ÉPHÉMÈRE — à la version exacte épinglée dans le compose — et exige
+# que le script le configure, que le second passage ne change rien, que les règles
+# acceptent un vrai trafic, et qu'une sauvegarde se télécharge.
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - 'src/sync/**'
+      - 'src/persistence/**'
+      - '.github/workflows/infra-pocketbase.yml'
+  workflow_dispatch:
+
+jobs:
+  setup-script:
+    runs-on: ubuntu-latest
+    env:
+      PB_URL: http://127.0.0.1:8090
+      PB_ADMIN_EMAIL: admin@test.local
+      PB_ADMIN_PASSWORD: MotDePasse1234!
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: install frontend dependencies
+        run: bun install
+
+      # La version n'est PAS réécrite ici : elle est lue dans le compose, pour
+      # que la CI prouve la version réellement déployée et pas une autre.
+      - name: read the pinned PocketBase version
+        id: pocketbase
+        run: |
+          version=$(grep -oP 'pocketbase:\K[0-9.]+' infra/docker-compose.yml)
+          echo "Version épinglée : $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: start PocketBase
+        run: |
+          docker run -d --name pocketbase -p 8090:8090 \
+            -e PB_ADMIN_EMAIL \
+            -e PB_ADMIN_PASSWORD \
+            ghcr.io/muchobien/pocketbase:${{ steps.pocketbase.outputs.version }}
+
+      - name: wait for the API to answer
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -sf "$PB_URL/api/health" > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::PocketBase n'a pas répondu dans le délai imparti"
+          docker logs pocketbase
+          exit 1
+
+      - name: a fresh server is NOT conform yet (exit code 1)
+        run: |
+          if bun run infra/setup-pocketbase.mjs --check; then
+            echo "::error::--check aurait dû signaler un serveur non configuré"
+            exit 1
+          fi
+
+      - name: configure the server
+        run: bun run infra/setup-pocketbase.mjs
+
+      - name: a second run is a no-op
+        run: |
+          output=$(bun run infra/setup-pocketbase.mjs)
+          echo "$output"
+          grep -q "déjà à jour" <<< "$output"
+          grep -q "Rien à faire" <<< "$output"
+
+      - name: the server is conform now (exit code 0)
+        run: bun run infra/setup-pocketbase.mjs --check
+
+      - name: export the applied schema
+        run: |
+          bun run infra/setup-pocketbase.mjs --export /tmp/schema-applied.json
+          bun run infra/setup-pocketbase.mjs --export /tmp/schema-applied-2.json
+          # Deux exports du même serveur doivent être identiques : le diff d'une
+          # PR ne doit montrer qu'une vraie dérive de configuration.
+          diff /tmp/schema-applied.json /tmp/schema-applied-2.json
+
+      - name: an ordinary account can publish, read and delete its file
+        run: |
+          bun run infra/setup-pocketbase.mjs --add-user 'eleve1:eleve:MotDePasse1234!'
+          bun run infra/setup-pocketbase.mjs --verify 'eleve1:MotDePasse1234!'
+
+      - name: a backup can be taken and downloaded
+        run: |
+          bun run infra/backup-pocketbase.mjs --out /tmp/backups
+          ls -l /tmp/backups/*.zip
+
+      - name: show the server log when something failed
+        if: failure()
+        run: docker logs pocketbase || true
