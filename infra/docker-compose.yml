@@ -1,7 +1,20 @@
 services:
   pocketbase:
-    image: ghcr.io/muchobien/pocketbase:latest
+    # ÉPINGLÉ, jamais :latest — le script infra/setup-pocketbase.mjs parle l'API
+    # des collections de PocketBase >= 0.23, et le SDK JS embarqué dans l'app
+    # (pocketbase@0.28) vise exactement cette série. Mettez à jour les deux
+    # ensemble : nouvelle image + vérification du script.
+    image: ghcr.io/muchobien/pocketbase:0.40.3
     restart: unless-stopped
+    environment:
+      # L'image crée (ou met à jour) ce superutilisateur au démarrage via
+      # `pocketbase superuser upsert` : c'est le compte avec lequel le script
+      # s'authentifie, et celui qui ouvre le tableau de bord /_/.
+      # Les valeurs viennent de infra/.env (voir infra/.env.example), jamais du dépôt.
+      PB_ADMIN_EMAIL: ${PB_ADMIN_EMAIL:?Renseignez PB_ADMIN_EMAIL dans infra/.env}
+      PB_ADMIN_PASSWORD: ${PB_ADMIN_PASSWORD:?Renseignez PB_ADMIN_PASSWORD dans infra/.env}
+    # Décommentez pour exposer le port en direct (test local) ; en production
+    # c'est le tunnel Cloudflare qui publie le service.
     # ports:
     # - "8090:8090"
     volumes:

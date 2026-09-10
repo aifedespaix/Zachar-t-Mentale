@@ -5,11 +5,13 @@ vi.mock('../persistence/syncState', () => ({ loadSyncState: vi.fn(), saveSyncSta
 vi.mock('../persistence/pocketbaseClient', () => ({ createPocketBaseClient: vi.fn() }))
 vi.mock('../sync/pocketBaseAdapter', () => ({ createSyncClient: vi.fn().mockReturnValue({}) }))
 vi.mock('../sync/syncService', () => ({ sync: vi.fn() }))
+vi.mock('../persistence/syncLog', () => ({ logSyncEvent: vi.fn().mockResolvedValue(undefined) }))
 
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { loadSyncState, saveSyncState } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { sync } from '../sync/syncService'
+import { logSyncEvent } from '../persistence/syncLog'
 import { createSyncStore, type SyncStore } from './useSyncStore'
 
 function fakePocketBase(authWithPassword: (username: string, password: string) => Promise<{ record: { username: string; role: string } }>) {
@@ -47,6 +49,7 @@ describe('useSyncStore', () => {
     vi.mocked(saveSyncState).mockReset().mockResolvedValue(undefined)
     vi.mocked(createPocketBaseClient).mockReset()
     vi.mocked(sync).mockReset()
+    vi.mocked(logSyncEvent).mockReset().mockResolvedValue(undefined)
     store = createSyncStore()
   })
 
@@ -163,5 +166,100 @@ describe('useSyncStore', () => {
     )
     expect(store.getState().lastResult).toEqual({ pushed: 2, pulled: 1, errors: [] })
     expect(saveSyncState).toHaveBeenCalled()
+  })
+
+  it('syncNow() writes the run and its counters to the debug log', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(sync).mockResolvedValue({ pushed: 2, pulled: 1, errors: [] })
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+    vi.mocked(logSyncEvent).mockClear()
+
+    await store.getState().syncNow()
+
+    const lines = vi.mocked(logSyncEvent).mock.calls.map(call => `${call[0]} ${call[1]}`)
+    expect(lines.some(line => line.startsWith('info') && line.includes('synchronisation demandée'))).toBe(true)
+    expect(lines.some(line => line.includes('2 envoyé(s), 1 reçu(s)'))).toBe(true)
+  })
+
+  it('syncNow() logs the raw failure, status included, when the server is unreachable', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    const failure = Object.assign(new Error('Failed to fetch'), { name: 'ClientResponseError', status: 0 })
+    vi.mocked(sync).mockRejectedValue(failure)
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+    vi.mocked(logSyncEvent).mockClear()
+
+    await store.getState().syncNow()
+
+    expect(logSyncEvent).toHaveBeenCalledWith(
+      'error',
+      expect.stringContaining('Serveur injoignable'),
+      failure
+    )
+  })
+
+  it('syncNow() logs the per-file failures of an otherwise successful batch', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    const errors = [{ fileId: 'file-1', message: 'réseau coupé' }]
+    vi.mocked(sync).mockResolvedValue({ pushed: 1, pulled: 0, errors })
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+    vi.mocked(logSyncEvent).mockClear()
+
+    await store.getState().syncNow()
+
+    expect(logSyncEvent).toHaveBeenCalledWith('error', expect.stringContaining('fichiers en erreur'), errors)
+  })
+
+  it('login() logs the attempt that failed, with the raw error for the bug report', async () => {
+    const authWithPassword = vi.fn().mockRejectedValue(Object.assign(new Error('Failed to fetch'), { status: 0 }))
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    await store.getState().setServerUrl('https://pi.local')
+
+    await store.getState().login('aife', 'wrong')
+
+    expect(logSyncEvent).toHaveBeenCalledWith(
+      'error',
+      expect.stringContaining('« aife »'),
+      expect.any(Error)
+    )
+  })
+
+  it('syncNow() drops a second call while the first is still running', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    // Held open, so the store is observed in its 'syncing' state rather than
+    // between two instantaneous runs.
+    let releaseSync: (() => void) | undefined
+    vi.mocked(sync).mockImplementation(
+      () =>
+        new Promise(resolve => {
+          releaseSync = () => resolve({ pushed: 0, pulled: 0, errors: [] })
+        })
+    )
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+
+    const first = store.getState().syncNow()
+    expect(store.getState().status).toBe('syncing')
+    // The second call returns without touching the algorithm at all. It MUST be
+    // issued here, while the first run is parked inside `sync`.
+    await store.getState().syncNow()
+
+    await vi.waitFor(() => expect(sync).toHaveBeenCalledTimes(1))
+    releaseSync?.()
+    await first
+    // The proof: had the guard not dropped it, the second call would have been
+    // a second `sync` invocation once the first one completed.
+    expect(sync).toHaveBeenCalledTimes(1)
+    expect(store.getState().status).toBe('idle')
   })
 })

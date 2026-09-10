@@ -5,8 +5,10 @@ import { DEFAULT_SYNC_SETTINGS } from '../types/syncSettings'
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { loadSyncState, saveSyncState } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
+import { logSyncEvent } from '../persistence/syncLog'
 import { createSyncClient } from '../sync/pocketBaseAdapter'
 import { sync, type SyncResult } from '../sync/syncService'
+import { syncResultLabel } from '../sync/syncResultLabel'
 
 export interface SyncUser {
   username: string
@@ -115,9 +117,20 @@ export function createSyncStore(): SyncStore {
         try {
           const pb = clientFor(get().serverUrl)
           await pb.collection<RawUserRecord>('users').authWithPassword(username, password)
-          set({ currentUser: userFromClient(pb), status: 'idle' })
+          const user = userFromClient(pb)
+          // The username only — never the password, which is not even read here.
+          await logSyncEvent('info', `connexion réussie : « ${user?.username ?? username} » sur ${get().serverUrl}`)
+          set({ currentUser: user, status: 'idle' })
         } catch (error) {
-          set({ status: 'idle', error: describeSyncStoreError(error), currentUser: null })
+          const message = describeSyncStoreError(error)
+          // The French message is for the user, the raw error for whoever reads
+          // the log afterwards.
+          await logSyncEvent(
+            'error',
+            `connexion échouée pour « ${username} » sur ${get().serverUrl} : ${message}`,
+            error
+          )
+          set({ status: 'idle', error: message, currentUser: null })
         }
       },
 
@@ -127,12 +140,29 @@ export function createSyncStore(): SyncStore {
       },
 
       syncNow: async () => {
+        // Two callers now reach this — the button in the sidebar footer and the
+        // one in the settings panel — and a manual sync is a whole folder's
+        // worth of network round-trips. Re-entering would push and pull the same
+        // files twice in parallel for no benefit, so the second caller is
+        // dropped rather than queued.
+        if (get().status === 'syncing') return
+
         const { serverUrl, syncFolderPath, currentUser } = get()
         if (syncFolderPath === null || currentUser === null) {
-          set({ error: 'Connectez-vous et choisissez un dossier de synchronisation avant de synchroniser.' })
+          const message = 'Connectez-vous et choisissez un dossier de synchronisation avant de synchroniser.'
+          set({ error: message })
+          // Logged rather than dropped: "I clicked and nothing happened" is the
+          // report this line answers.
+          await logSyncEvent('info', `synchronisation ignorée : ${message}`)
           return
         }
         set({ status: 'syncing', error: null })
+        // Written BEFORE the network work: if the app dies mid-sync, the log
+        // still shows a run was under way.
+        await logSyncEvent(
+          'info',
+          `synchronisation demandée par « ${currentUser.username} » sur ${serverUrl}`
+        )
         try {
           const pb = clientFor(serverUrl)
           const state = await loadSyncState()
@@ -143,9 +173,16 @@ export function createSyncStore(): SyncStore {
             state,
           })
           await saveSyncState(state)
+          await logSyncEvent('info', `synchronisation terminée : ${syncResultLabel(result)}`)
+          if (result.errors.length > 0) {
+            // The per-file detail, which is what a bug report actually needs.
+            await logSyncEvent('error', 'fichiers en erreur pendant la synchronisation', result.errors)
+          }
           set({ status: 'idle', lastResult: result })
         } catch (error) {
-          set({ status: 'idle', error: describeSyncStoreError(error) })
+          const message = describeSyncStoreError(error)
+          await logSyncEvent('error', `synchronisation échouée : ${message}`, error)
+          set({ status: 'idle', error: message })
         }
       },
     }

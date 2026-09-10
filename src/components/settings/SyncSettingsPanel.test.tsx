@@ -3,8 +3,10 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SyncSettingsPanel } from './SyncSettingsPanel'
 import { useSyncStore } from '../../state/useSyncStore'
+import { revealSyncLog } from '../../persistence/syncLog'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
+vi.mock('../../persistence/syncLog', () => ({ revealSyncLog: vi.fn() }))
 
 function resetSyncStore() {
   useSyncStore.setState({
@@ -20,6 +22,7 @@ function resetSyncStore() {
 describe('SyncSettingsPanel', () => {
   beforeEach(() => {
     resetSyncStore()
+    vi.mocked(revealSyncLog).mockReset().mockResolvedValue('/config/sync-debug.log')
   })
 
   it('shows the login form when nobody is connected', () => {
@@ -72,6 +75,34 @@ describe('SyncSettingsPanel', () => {
     render(<SyncSettingsPanel />)
     expect(screen.getByText(/f1/)).toBeInTheDocument()
     expect(screen.getByText(/un message de test/)).toBeInTheDocument()
+  })
+})
+
+describe('SyncSettingsPanel — journal de débogage', () => {
+  beforeEach(() => {
+    resetSyncStore()
+    vi.mocked(revealSyncLog).mockReset().mockResolvedValue('/config/sync-debug.log')
+  })
+
+  it('opens the log from its button, and prints where it is', async () => {
+    const user = userEvent.setup()
+    render(<SyncSettingsPanel />)
+
+    await user.click(screen.getByRole('button', { name: /ouvrir le dossier des logs/i }))
+
+    expect(revealSyncLog).toHaveBeenCalledTimes(1)
+    // The path, so it can be copied into a bug report written elsewhere.
+    expect(await screen.findByText('/config/sync-debug.log')).toBeInTheDocument()
+  })
+
+  it('says so when the log cannot be opened, instead of looking like it worked', async () => {
+    const user = userEvent.setup()
+    vi.mocked(revealSyncLog).mockRejectedValue(new Error('explorateur indisponible'))
+    render(<SyncSettingsPanel />)
+
+    await user.click(screen.getByRole('button', { name: /ouvrir le dossier des logs/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/explorateur indisponible/)
   })
 })
 

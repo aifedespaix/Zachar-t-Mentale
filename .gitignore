@@ -42,3 +42,6 @@ src-tauri/gen/schemas
 # Personal course material (source PDFs + generated mind maps) — user data, not versioned
 .cours/
 .cartes-mentales/
+
+# PocketBase deployment credentials (superuser email/password) — see infra/.env.example
+infra/.env

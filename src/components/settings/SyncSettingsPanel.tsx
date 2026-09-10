@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { RefreshCw, LogIn, LogOut } from 'lucide-react'
+import { CloudSync, FolderOpen, LogIn, LogOut } from 'lucide-react'
 import { useSyncStore } from '../../state/useSyncStore'
+import { describeError } from '../../state/useWorkspaceStore'
+import { syncResultLabel } from '../../sync/syncResultLabel'
+import { revealSyncLog } from '../../persistence/syncLog'
 import { SettingsSection } from './SettingsSection'
 import { Button } from '../ui/button'
 
@@ -35,13 +38,35 @@ export function SyncSettingsPanel() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [serverUrlDraft, setServerUrlDraft] = useState(serverUrl)
+  const [logPath, setLogPath] = useState<string | null>(null)
+  const [logError, setLogError] = useState<string | null>(null)
+  const [openingLogs, setOpeningLogs] = useState(false)
   useEffect(() => {
     setServerUrlDraft(serverUrl)
   }, [serverUrl])
-
   async function pickSyncFolder() {
     const selected = await open({ directory: true })
     if (typeof selected === 'string') await setSyncFolderPath(selected)
+  }
+
+  /**
+   * Opens the log for the user — the file itself, or the folder that holds it
+   * when nothing has been logged yet — and prints the path it revealed, so it
+   * can be copied into a bug report.
+   *
+   * A failure is REPORTED, unlike the silent logging path: this one was asked
+   * for by a click, and a button that does nothing is worse than an error.
+   */
+  async function openLogs() {
+    setOpeningLogs(true)
+    setLogError(null)
+    try {
+      setLogPath(await revealSyncLog())
+    } catch (error) {
+      setLogError(`Impossible d’ouvrir le dossier des logs : ${describeError(error)}`)
+    } finally {
+      setOpeningLogs(false)
+    }
   }
 
   return (
@@ -115,12 +140,11 @@ export function SyncSettingsPanel() {
       <SettingsSection title="Synchronisation">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Button onClick={() => void syncNow()} disabled={status === 'syncing' || !currentUser || !syncFolderPath}>
-            <RefreshCw size={14} /> {status === 'syncing' ? 'Synchronisation…' : 'Synchroniser'}
+            <CloudSync size={14} /> {status === 'syncing' ? 'Synchronisation…' : 'Synchroniser'}
           </Button>
           {lastResult && (
             <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)' }}>
-              {lastResult.pushed} envoyé(s), {lastResult.pulled} reçu(s)
-              {lastResult.errors.length > 0 ? `, ${lastResult.errors.length} erreur(s)` : ''}
+              {syncResultLabel(lastResult)}
             </span>
           )}
         </div>
@@ -134,6 +158,32 @@ export function SyncSettingsPanel() {
         {error && (
           <p role="alert" style={{ fontSize: 12.5, color: 'var(--warning-fg)', marginTop: 8 }}>
             ⚠ {error}
+          </p>
+        )}
+      </SettingsSection>
+
+      {/*
+        « Ça ne marche pas » is answered by the log, so the screen that
+        configures sync is the one that opens it — with the exact path printed
+        beside the button, for a bug report written from another machine.
+      */}
+      <SettingsSection
+        title="Journal"
+        description="Chaque connexion et chaque synchronisation y laisse une ligne, réussie ou non."
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <Button variant="outline" onClick={() => void openLogs()} disabled={openingLogs}>
+            <FolderOpen size={14} /> Ouvrir le dossier des logs
+          </Button>
+          {logPath && (
+            <span title={logPath} style={{ fontSize: 12, color: 'var(--muted-foreground)', wordBreak: 'break-all' }}>
+              {logPath}
+            </span>
+          )}
+        </div>
+        {logError && (
+          <p role="alert" style={{ fontSize: 12.5, color: 'var(--warning-fg)', marginTop: 8 }}>
+            ⚠ {logError}
           </p>
         )}
       </SettingsSection>
