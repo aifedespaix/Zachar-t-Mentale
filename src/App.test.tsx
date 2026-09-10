@@ -1,4 +1,4 @@
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import App from './App'
@@ -13,6 +13,7 @@ vi.mock('./persistence/fileStore', () => ({
   mindMapExists: vi.fn(),
   loadMindMapMeta: vi.fn().mockResolvedValue(null),
 }))
+vi.mock('./persistence/fileOps', () => ({ duplicateMap: vi.fn() }))
 vi.mock('./persistence/workspaceConfig', () => ({
   loadWorkspaceConfig: vi.fn(),
   saveWorkspaceConfig: vi.fn(),
@@ -40,7 +41,9 @@ vi.mock('./persistence/sessionState', () => ({
 }))
 vi.mock('./hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
 
-import { loadMindMap, saveMindMap, mindMapExists } from './persistence/fileStore'
+import { loadMindMap, saveMindMap, mindMapExists, loadMindMapMeta } from './persistence/fileStore'
+import { duplicateMap } from './persistence/fileOps'
+import { useSyncStore } from './state/useSyncStore'
 import { CORRUPTED_MAP_MESSAGE } from './components/CorruptedMapDialog'
 import { loadWorkspaceConfig } from './persistence/workspaceConfig'
 import { scanFolder } from './persistence/fileTree'
@@ -612,5 +615,53 @@ describe('App update banner', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 
     expect(screen.queryByText('Mise à jour prête')).not.toBeInTheDocument()
+  })
+})
+
+describe('App — verrouillage lecture seule', () => {
+  const PATH = '/cours/chapitre-a.zmap'
+  const cardsA: Card[] = [{ id: 'root', level: 1, title: 'Chapitre A', parentId: null, order: 0 }]
+  const metaFromSomeoneElse = { id: 'f1', author: 'aife', role: 'prof' as const, lastModified: 'x' }
+
+  beforeEach(() => {
+    vi.mocked(loadMindMap).mockReset()
+    vi.mocked(loadMindMapMeta).mockReset()
+    vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
+    vi.mocked(duplicateMap).mockReset()
+    useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
+  })
+
+  it('shows the read-only overlay when the open file is authored by someone else', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
+    render(<App />)
+    useWorkspaceStore.getState().setCurrentFile(PATH)
+
+    expect(await screen.findByText(/Fichier de aife — lecture seule/)).toBeInTheDocument()
+  })
+
+  it('shows no overlay for a file with no meta, or authored by the current user', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(null)
+    render(<App />)
+    useWorkspaceStore.getState().setCurrentFile(PATH)
+
+    await waitFor(() => expect(loadMindMap).toHaveBeenCalled())
+    expect(screen.queryByText(/lecture seule/)).not.toBeInTheDocument()
+  })
+
+  it('Personnaliser duplicates the map and opens the copy', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
+    vi.mocked(duplicateMap).mockResolvedValue('/cours/chapitre-a (copie).zmap')
+    render(<App />)
+    useWorkspaceStore.getState().setCurrentFile(PATH)
+    await screen.findByText(/lecture seule/)
+
+    await user.click(screen.getByRole('button', { name: /personnaliser/i }))
+
+    expect(duplicateMap).toHaveBeenCalledWith(PATH, 'eleve1', 'eleve')
+    await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre-a (copie).zmap'))
   })
 })
