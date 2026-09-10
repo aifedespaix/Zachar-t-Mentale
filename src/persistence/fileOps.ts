@@ -138,7 +138,7 @@ export async function duplicatePath(sourcePath: string, destPath: string, isFold
  */
 export async function duplicateMap(sourcePath: string, author: string, role: UserRole): Promise<string> {
   const cards = await loadMindMap(sourcePath)
-  if (cards === null) throw new Error(`« ${fileNameOf(sourcePath)} » n'existe plus.`)
+  if (cards === null) throw new Error(`« ${fileNameOf(sourcePath)} » n’existe plus.`)
 
   const meta: MindMapMeta = { id: crypto.randomUUID(), author, role, lastModified: new Date().toISOString() }
   const destPath = await freeMindMapPath(parentDirOf(sourcePath), `${mindMapBaseName(sourcePath)} (copie)`)

@@ -702,7 +702,9 @@ describe('createPocketBaseClient', () => {
 
   it('creates a client pointed at the given server URL', () => {
     const pb = createPocketBaseClient('https://pi.local')
-    expect(pb.baseUrl).toBe('https://pi.local')
+    // `buildURL` is the SDK's own documented way to read back the configured
+    // base URL — an instance property name for it is not documented/stable.
+    expect(pb.buildURL('/api/health')).toBe('https://pi.local/api/health')
   })
 
   it('persists auth changes to a file under appConfigDir', async () => {
@@ -2363,6 +2365,12 @@ Run: `bun run test -- src/components/ReadOnlyMapOverlay.test.tsx`
 Expected: PASS
 
 - [ ] **Step 5: Write the failing tests for App.tsx wiring**
+
+`src/App.test.tsx`'s top import is `import { render, screen, act } from '@testing-library/react'` — it does not import `waitFor` yet (grepped: zero existing uses). Change it to:
+
+```ts
+import { render, screen, act, waitFor } from '@testing-library/react'
+```
 
 Add to the mock block near the top of `src/App.test.tsx` — extend the existing `vi.mock('./persistence/fileStore', () => ({ loadMindMap: vi.fn(), saveMindMap: vi.fn() }))` to:
 
