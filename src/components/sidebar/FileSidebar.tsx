@@ -349,9 +349,16 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
     syncError === null && lastResult !== null && !syncFeedbackDismissed && !syncRunning
   // The per-file failures are far too long to list in a 240 px column; they stay
   // readable in the tooltip, and in full in Réglages → Synchronisation.
+  // Both lists are far too long for a 240 px column, and both are detailed in
+  // Réglages → Synchronisation: the tooltip is the summary's memory aid.
   const syncResultDetail =
-    showSyncResult && lastResult.errors.length > 0
-      ? lastResult.errors.map(error => `${error.fileId} : ${error.message}`).join('\n')
+    showSyncResult && (lastResult.conflicts.length > 0 || lastResult.errors.length > 0)
+      ? [
+          ...lastResult.conflicts.map(
+            conflict => `conflit : ${conflict.path} (ici ${conflict.localModified}, serveur ${conflict.remoteUpdated})`
+          ),
+          ...lastResult.errors.map(error => `${error.fileId} : ${error.message}`),
+        ].join('\n')
       : undefined
 
   /**
@@ -480,7 +487,11 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
             {showSyncResult && (
               <div
                 role="status"
-                className={lastResult.errors.length > 0 ? 'status-banner' : 'status-banner status-banner--info'}
+                className={
+                  lastResult.conflicts.length > 0 || lastResult.errors.length > 0
+                    ? 'status-banner'
+                    : 'status-banner status-banner--info'
+                }
                 style={{ margin: 0 }}
                 title={syncResultDetail}
               >

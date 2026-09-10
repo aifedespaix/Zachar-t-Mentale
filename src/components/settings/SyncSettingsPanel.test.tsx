@@ -78,6 +78,32 @@ describe('SyncSettingsPanel', () => {
     expect(screen.getByText(/2 envoyé\(s\), 1 reçu\(s\)/)).toBeInTheDocument()
   })
 
+  it('lists the files the two sides disagree on, and says nothing was overwritten', () => {
+    useSyncStore.setState({
+      currentUser: { username: 'aife', role: 'prof' },
+      syncFolderPath: '/cours',
+      lastResult: {
+        pushed: 0,
+        pulled: 0,
+        errors: [],
+        cancelled: false,
+        conflicts: [
+          {
+            fileId: 'f1',
+            path: 'chapitre1.zmap',
+            localModified: '2026-02-01T10:00:00.000Z',
+            remoteUpdated: '2026-02-01 09:00:00.000Z',
+          },
+        ],
+      },
+    })
+    render(<SyncSettingsPanel />)
+
+    expect(screen.getByText(/chapitre1.zmap/)).toBeInTheDocument()
+    // The whole point: nothing was overwritten, so the user is told so.
+    expect(screen.getByText(/rien n’a été écrasé/)).toBeInTheDocument()
+  })
+
   it('lists per-file sync errors under the summary, so the safety guards are visible', () => {
     useSyncStore.setState({
       currentUser: { username: 'aife', role: 'prof' },

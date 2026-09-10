@@ -382,6 +382,106 @@ describe('sync — progression et annulation', () => {
   })
 })
 
+describe('sync — conflits', () => {
+  const CACHED: SyncState = {
+    'file-1': { lastSyncedModified: '2026-01-01T00:00:00.000Z', lastSyncedUpdated: '2026-01-01 00:00:00.000Z' },
+  }
+
+  function localFile(lastModified: string) {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, lastModified })
+    vi.mocked(loadMindMap).mockResolvedValue([])
+  }
+
+  function remoteFile(updated: string): RemoteMindMapRecord {
+    return {
+      id: 'rec-1',
+      file_id: 'file-1',
+      author: 'aife',
+      path: 'a.zmap',
+      content: '[]',
+      updated,
+    }
+  }
+
+  it('detects the one case the fork model cannot rule out: both sides moved', async () => {
+    localFile('2026-02-01T00:00:00.000Z')
+    const client = fakeClient({
+      mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
+    })
+
+    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: { ...CACHED } })
+
+    expect(client.mindMaps.update).not.toHaveBeenCalled()
+    expect(client.mindMaps.create).not.toHaveBeenCalled()
+    expect(result.pushed).toBe(0)
+    expect(result.conflicts).toEqual([
+      {
+        fileId: 'file-1',
+        path: 'a.zmap',
+        localModified: '2026-02-01T00:00:00.000Z',
+        remoteUpdated: '2026-02-01 10:00:00.000Z',
+      },
+    ])
+  })
+
+  it('is not a conflict when only we moved — that is an ordinary push', async () => {
+    localFile('2026-02-01T00:00:00.000Z')
+    const client = fakeClient({
+      mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-01-01 00:00:00.000Z')]) } as any,
+    })
+
+    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: { ...CACHED } })
+
+    expect(result.conflicts).toEqual([])
+    expect(result.pushed).toBe(1)
+  })
+
+  it('is not a conflict when only the server moved — the pull pass handles it', async () => {
+    localFile(AIFE.lastModified)
+    const client = fakeClient({
+      mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
+    })
+
+    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: { ...CACHED } })
+
+    expect(result.conflicts).toEqual([])
+  })
+
+  it('is never a conflict on a first push — nothing to disagree with', async () => {
+    localFile('2026-02-01T00:00:00.000Z')
+    const client = fakeClient({
+      mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
+    })
+
+    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+
+    expect(result.conflicts).toEqual([])
+    expect(result.pushed).toBe(1)
+  })
+
+  it('does not let one conflicted file stop the others', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
+      { type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' },
+    ])
+    vi.mocked(loadMindMapMeta).mockImplementation(async path => ({
+      ...AIFE,
+      id: path.includes('a.zmap') ? 'file-1' : 'file-2',
+      lastModified: '2026-02-01T00:00:00.000Z',
+    }))
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const client = fakeClient({
+      mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
+    })
+
+    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: { ...CACHED } })
+
+    expect(result.conflicts).toHaveLength(1)
+    expect(result.pushed).toBe(1) // b.zmap went through
+  })
+})
+
 describe('sync — pull', () => {
   const record: RemoteMindMapRecord = {
     id: 'rec-2',

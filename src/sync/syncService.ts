@@ -117,6 +117,28 @@ export function isPushPending(
 }
 
 /**
+ * Whether the two sides disagree about a file: the server record moved since
+ * the last time we saw it AND our local file moved too.
+ *
+ * That is the one case the fork model cannot rule out — the same account on two
+ * machines — and the only safe reaction is to touch nothing: pushing would
+ * erase what the other machine sent, pulling would erase the local edit.
+ *
+ * A file we have never pushed (`stateEntry === undefined`) is not a conflict:
+ * there is nothing to disagree with.
+ */
+export function isConflict(
+  meta: MindMapMeta,
+  stateEntry: SyncStateEntry | undefined,
+  remote: RemoteMindMapRecord | undefined
+): remote is RemoteMindMapRecord {
+  if (stateEntry === undefined || remote === undefined) return false
+  return (
+    remote.updated > stateEntry.lastSyncedUpdated && meta.lastModified > stateEntry.lastSyncedModified
+  )
+}
+
+/**
  * How many maps a sync would push right now.
  *
  * Reads one header per `.zmap` under the sync folder — the same walk the sync
@@ -276,6 +298,18 @@ export async function sync({
 
     const known = state[meta.id]
     if (!isPushPending(meta, currentUser, known)) return
+
+    const remote = remoteByFileId.get(meta.id)
+    if (isConflict(meta, known, remote)) {
+      // Reported, never resolved here: both versions hold work someone did.
+      result.conflicts.push({
+        fileId: meta.id,
+        path: relativeTo(syncFolderPath, path),
+        localModified: meta.lastModified,
+        remoteUpdated: remote.updated,
+      })
+      return
+    }
 
     try {
       const cards = await loadMindMap(path)

@@ -423,6 +423,28 @@ describe('FileSidebar', () => {
     expect(tooltip).toHaveTextContent(/dernière synchro il y a 12 min/)
   })
 
+  it('announces a conflict rather than letting an overwrite go unspoken', async () => {
+    useSyncStore.setState({
+      lastResult: {
+        pushed: 0,
+        pulled: 0,
+        errors: [],
+        cancelled: false,
+        conflicts: [
+          {
+            fileId: 'f1',
+            path: 'chapitre1.zmap',
+            localModified: '2026-02-01T10:00:00.000Z',
+            remoteUpdated: '2026-02-01 09:00:00.000Z',
+          },
+        ],
+      },
+    })
+    render(<FileSidebar onOpenFile={() => {}} />)
+
+    expect(await screen.findByText(/1 conflit\(s\)/)).toBeInTheDocument()
+  })
+
   it('shows how far the run has got, and lets the user stop it', async () => {
     const user = userEvent.setup()
     const cancelSync = vi.spyOn(useSyncStore.getState(), 'cancelSync')

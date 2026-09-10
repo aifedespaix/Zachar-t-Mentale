@@ -8,6 +8,16 @@ import { revealSyncLog } from '../../persistence/syncLog'
 import { SettingsSection } from './SettingsSection'
 import { Button } from '../ui/button'
 
+/**
+ * A date a human can compare two of. PocketBase writes its own `updated` as
+ * `2026-09-10 19:00:00.000Z` — a space instead of the `T` some engines refuse
+ * to parse — so it is normalised before being handed to `Date`.
+ */
+function formatMoment(value: string): string {
+  const parsed = new Date(value.replace(' ', 'T'))
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('fr-FR')
+}
+
 const inputStyle = {
   padding: '8px 10px',
   borderRadius: 8,
@@ -160,6 +170,16 @@ export function SyncSettingsPanel() {
             </span>
           )}
         </div>
+        {lastResult && lastResult.conflicts.length > 0 && (
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--warning-fg)' }}>
+            {lastResult.conflicts.map(conflict => (
+              <li key={conflict.fileId}>
+                {conflict.path} : modifié ici le {formatMoment(conflict.localModified)} et sur le serveur le{' '}
+                {formatMoment(conflict.remoteUpdated)} — rien n’a été écrasé, choisissez la version à garder.
+              </li>
+            ))}
+          </ul>
+        )}
         {lastResult && lastResult.errors.length > 0 && (
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--warning-fg)' }}>
             {lastResult.errors.map(err => (
