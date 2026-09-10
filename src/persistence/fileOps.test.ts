@@ -284,7 +284,7 @@ describe('duplicateMap', () => {
 
     const destPath = await duplicateMap('/cours/Chapitre 1.zmap', 'eleve1', 'eleve')
 
-    expect(destPath).toBe('/cours/Chapitre 1 (copie).zmap')
+    expect(destPath).toBe('/cours/Chapitre 1 (eleve1).zmap')
     const [writtenPath, content] = vi.mocked(writeTextFile).mock.calls[0]
     expect(writtenPath).toBe(destPath)
     const written = JSON.parse(content as string)
@@ -304,10 +304,10 @@ describe('duplicateMap', () => {
 
     await duplicateMap('/cours/Chapitre 1.zmap', 'eleve1', 'eleve')
 
-    expect(mkdir).toHaveBeenCalledWith('/cours/Chapitre 1 (copie).assets')
+    expect(mkdir).toHaveBeenCalledWith('/cours/Chapitre 1 (eleve1).assets')
     expect(copyFile).toHaveBeenCalledWith(
       '/cours/Chapitre 1.assets/abc123.png',
-      '/cours/Chapitre 1 (copie).assets/abc123.png'
+      '/cours/Chapitre 1 (eleve1).assets/abc123.png'
     )
   })
 

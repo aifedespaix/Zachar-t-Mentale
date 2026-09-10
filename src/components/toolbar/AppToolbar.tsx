@@ -68,6 +68,11 @@ interface AppToolbarProps {
   meta: MindMapMeta | null
   /** The app's guarded file-switch, the only way a map is opened. */
   onOpenFile: (path: string) => void
+  /**
+   * Asked for instead of unlocking when the open map belongs to someone else:
+   * App answers with the fork offer, the only way such a map becomes editable.
+   */
+  onRequestFork: () => void
   /** Writes a pending autosave immediately — what « Enregistrer » actually does. */
   flush: () => Promise<void>
   updateCheck: { status: UpdateCheckStatus; checkNow: () => Promise<void> }
@@ -89,7 +94,7 @@ type PendingNaming = { kind: 'rename' | 'duplicate'; initialName: string }
  * button: a command triggered from the keyboard has no button to open its
  * dialog for it.
  */
-export function AppToolbar({ filePath, cards, meta, onOpenFile, flush, updateCheck }: AppToolbarProps) {
+export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, flush, updateCheck }: AppToolbarProps) {
   const [newMapOpen, setNewMapOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [quizOpen, setQuizOpen] = useState(false)
@@ -100,9 +105,10 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, flush, updateChe
   const [busy, setBusy] = useState(false)
 
   const locked = useCardsStore(s => s.locked)
-  // A map that is someone else's is not the user's to lock or unlock — the
-  // « Personnaliser » copy on the canvas is the way in.
+  // A map that is someone else's is shown locked like any other, but the lock is
+  // not the user's to lift: reaching for it opens the fork offer instead.
   const readOnly = useCardsStore(s => s.readOnly)
+  const editsBlocked = locked || readOnly
   const toggleLock = useCardsStore(s => s.toggleLock)
   const openFicheCount = useCardDetailStore(s => s.open.length)
   const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
@@ -202,9 +208,18 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, flush, updateChe
 
   useCommand(
     'view.toggleLock',
-    toggleLock,
-    !readOnly,
-    locked ? 'Déverrouiller la carte' : 'Verrouiller la carte'
+    () => {
+      // Someone else's map cannot simply be unlocked — that would let the next
+      // pull overwrite the edits. The offer to fork it is the way in, and
+      // declining it leaves the map read-only.
+      if (readOnly) {
+        onRequestFork()
+        return
+      }
+      toggleLock()
+    },
+    true,
+    editsBlocked ? 'Déverrouiller la carte' : 'Verrouiller la carte'
   )
 
   useCommand(
@@ -328,8 +343,8 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, flush, updateChe
 
         <CommandButton
           command="view.toggleLock"
-          icon={locked ? Lock : LockOpen}
-          variant={locked ? 'default' : 'outline'}
+          icon={editsBlocked ? Lock : LockOpen}
+          variant={editsBlocked ? 'default' : 'outline'}
         />
         <CommandButton command="card.closeFiches" icon={PanelRightClose} />
         <CommandButton command="app.palette" icon={Command} />

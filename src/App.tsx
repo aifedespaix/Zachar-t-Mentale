@@ -16,7 +16,7 @@ import { useAutosave } from './persistence/useAutosave'
 import { loadMindMap, saveMindMap, mindMapExists, loadMindMapMeta } from './persistence/fileStore'
 import { duplicateMap } from './persistence/fileOps'
 import { useSyncStore } from './state/useSyncStore'
-import { ReadOnlyMapOverlay } from './components/ReadOnlyMapOverlay'
+import { ReadOnlyMapDialog } from './components/ReadOnlyMapDialog'
 import { fileNameOf, parentDirOf, repairedCopyPath } from './persistence/paths'
 import { repairCards, validateCards, type CardIssue } from './validation/cardsValidation'
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts'
@@ -75,6 +75,9 @@ function App() {
   const [saveFailed, setSaveFailed] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [pendingRepair, setPendingRepair] = useState<PendingRepair | null>(null)
+  // The read-only fork offer is opened on demand — when the user reaches for a
+  // locked map's lock — rather than blocking the map the moment it is opened.
+  const [forkPromptOpen, setForkPromptOpen] = useState(false)
   const [repairing, setRepairing] = useState(false)
   const [repairError, setRepairError] = useState<string | null>(null)
   // The path whose cards are actually in the canvas right now. `currentFilePath`
@@ -166,6 +169,9 @@ function App() {
     // aim every card shortcut at a card that is no longer on screen — or, worse,
     // at whatever card of the new map happens to share its id.
     useCardSelectionStore.getState().reset()
+    // The fork offer belongs to the map that raised it: a copy that just opened
+    // must not land with the previous file's offer still on screen.
+    setForkPromptOpen(false)
   }, [loadedPath])
 
   /**
@@ -332,6 +338,7 @@ function App() {
               cards={cards}
               meta={loadedMeta}
               onOpenFile={requestOpenFile}
+              onRequestFork={() => setForkPromptOpen(true)}
               flush={flush}
               updateCheck={{ status: updateStatus, checkNow: checkForUpdates }}
             />
@@ -409,15 +416,17 @@ function App() {
               Aucun fichier ouvert. Sélectionnez ou créez une carte mentale dans la barre latérale.
             </div>
           )}
-          {isReadOnly && !quizActive && loadedPath && loadedMeta && (
-            <ReadOnlyMapOverlay
+          {forkPromptOpen && isReadOnly && loadedPath && loadedMeta && (
+            <ReadOnlyMapDialog
               author={loadedMeta.author}
+              onContinue={() => setForkPromptOpen(false)}
               onDuplicate={
                 currentUser === null
                   ? null
                   : async () => {
                       const newPath = await duplicateMap(loadedPath, currentUser.username, currentUser.role)
                       await refreshFolder(parentDirOf(loadedPath))
+                      setForkPromptOpen(false)
                       setCurrentFile(newPath)
                     }
               }

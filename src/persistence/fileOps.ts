@@ -177,13 +177,19 @@ export async function duplicatePath(sourcePath: string, destPath: string, isFold
  * Forks a map: a full local copy, stamped as authored by `author` under a
  * fresh id, so the copy is immediately and exclusively editable by them —
  * this is the entire "Personnaliser / Faire ma copie" action.
+ *
+ * The copy KEEPS the original's name: it is the same course under a new
+ * owner, and renaming it « (copie) » lost the only thing that told two
+ * students' copies of one shared map apart. The author's username goes in
+ * the suffix instead — « Chapitre 1 (eleve1) » — so the file says whose copy
+ * it is without the user having to rename it back by hand.
  */
 export async function duplicateMap(sourcePath: string, author: string, role: UserRole): Promise<string> {
   const cards = await loadMindMap(sourcePath)
   if (cards === null) throw new Error(`« ${fileNameOf(sourcePath)} » n’existe plus.`)
 
   const meta: MindMapMeta = { id: crypto.randomUUID(), author, role, lastModified: new Date().toISOString() }
-  const destPath = await freeMindMapPath(parentDirOf(sourcePath), `${mindMapBaseName(sourcePath)} (copie)`)
+  const destPath = await freeMindMapPath(parentDirOf(sourcePath), `${mindMapBaseName(sourcePath)} (${author})`)
   await writeTextFile(destPath, serializeMindMap(meta, cards))
 
   const sourceSidecar = sidecarDirOf(sourcePath)

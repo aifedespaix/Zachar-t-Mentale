@@ -26,6 +26,7 @@ function renderToolbar(overrides: Partial<React.ComponentProps<typeof AppToolbar
     cards: CARDS,
     meta: null,
     onOpenFile: vi.fn(),
+    onRequestFork: vi.fn(),
     flush: vi.fn(async () => {}),
     updateCheck: updateCheckStub,
     ...overrides,
@@ -109,12 +110,22 @@ describe('AppToolbar', () => {
     expect(screen.getByRole('button', { name: 'Déverrouiller la carte' })).toBeInTheDocument()
   })
 
-  it('will not let the user unlock a map that is not theirs', async () => {
-    // « Personnaliser / Faire ma copie », on the canvas, is the way in — an
-    // unlock here would only let them edit a file the next pull overwrites.
+  it('offers the fork dialog instead of unlocking a map that is not theirs', async () => {
+    // The lock on a colleague's map is shown engaged, but lifting it is not the
+    // user's to do: the offer to make their own copy is the only way in.
+    const user = userEvent.setup()
     act(() => useCardsStore.getState().setReadOnly(true))
-    renderToolbar()
-    expect(screen.getByRole('button', { name: 'Verrouiller la carte' })).toBeDisabled()
+    const onRequestFork = vi.fn()
+    renderToolbar({ onRequestFork })
+
+    const lock = screen.getByRole('button', { name: 'Déverrouiller la carte' })
+    expect(lock).toBeEnabled()
+    await user.click(lock)
+
+    expect(onRequestFork).toHaveBeenCalledTimes(1)
+    // Declining the offer leaves the map read-only: the lock never actually moved.
+    expect(useCardsStore.getState().locked).toBe(false)
+    expect(useCardsStore.getState().readOnly).toBe(true)
   })
 
   it('switches the theme', async () => {

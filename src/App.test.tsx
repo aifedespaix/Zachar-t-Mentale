@@ -74,7 +74,7 @@ function resetStores() {
     workspaceError: workspace.workspaceError,
   })
   const cards = createCardsStore().getState()
-  useCardsStore.setState({ history: cards.history, locked: cards.locked })
+  useCardsStore.setState({ history: cards.history, locked: cards.locked, readOnly: cards.readOnly })
   // An active quiz now hides the file sidebar and frames the canvas, so a quiz
   // left running by one test would change what every later test can even see.
   const quiz = createQuizStore().getState()
@@ -666,57 +666,68 @@ describe('App — verrouillage lecture seule', () => {
     useQuizStore.setState({ active: false })
   })
 
-  it('shows the read-only overlay when the open file is authored by someone else', async () => {
+  it('opens a map authored by someone else with its lock engaged, and nothing in the way', async () => {
     vi.mocked(loadMindMap).mockResolvedValue(cardsA)
     vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
     render(<App />)
-    useWorkspaceStore.getState().setCurrentFile(PATH)
-
-    expect(await screen.findByText(/Fichier de aife — lecture seule/)).toBeInTheDocument()
-  })
-
-  it('hides the read-only overlay while a quiz is active, even for a locked file', async () => {
-    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
-    vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
-    render(<App />)
-    useWorkspaceStore.getState().setCurrentFile(PATH)
-    await screen.findByText(/Fichier de aife — lecture seule/)
-
     await act(async () => {
-      useQuizStore.setState({
-        active: true,
-        questions: [{ cardId: 'root', type: 'recall' }],
-        results: { root: 'unanswered' },
-      })
+      useWorkspaceStore.getState().setCurrentFile(PATH)
     })
 
-    expect(screen.queryByText(/lecture seule/)).not.toBeInTheDocument()
-    // Not just hidden — the quiz frame is what took its place.
-    expect(screen.getByTestId('quiz-frame')).toBeInTheDocument()
+    // The map is on screen like any other, shown locked: reading it asks nothing.
+    expect(await screen.findByRole('button', { name: 'Déverrouiller la carte' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // And the editing block is real, not just visual.
+    expect(useCardsStore.getState().readOnly).toBe(true)
   })
 
-  it('shows no overlay for a file with no meta, or authored by the current user', async () => {
+  it('offers to copy only when the user reaches for the lock, and refusing keeps it read-only', async () => {
+    const user = userEvent.setup()
     vi.mocked(loadMindMap).mockResolvedValue(cardsA)
-    vi.mocked(loadMindMapMeta).mockResolvedValue(null)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
     render(<App />)
     useWorkspaceStore.getState().setCurrentFile(PATH)
 
-    await waitFor(() => expect(loadMindMap).toHaveBeenCalled())
-    expect(screen.queryByText(/lecture seule/)).not.toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: 'Déverrouiller la carte' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Carte de aife — lecture seule')
+
+    await user.click(screen.getByRole('button', { name: /continuer en lecture seule/i }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // The lock never actually moved: still shown locked, still refusing edits.
+    expect(screen.getByRole('button', { name: 'Déverrouiller la carte' })).toBeInTheDocument()
+    expect(useCardsStore.getState().readOnly).toBe(true)
   })
 
   it('Personnaliser duplicates the map and opens the copy', async () => {
     const user = userEvent.setup()
     vi.mocked(loadMindMap).mockResolvedValue(cardsA)
     vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
-    vi.mocked(duplicateMap).mockResolvedValue('/cours/chapitre-a (copie).zmap')
+    vi.mocked(duplicateMap).mockResolvedValue('/cours/chapitre-a (eleve1).zmap')
     render(<App />)
     useWorkspaceStore.getState().setCurrentFile(PATH)
-    await screen.findByText(/lecture seule/)
 
-    await user.click(screen.getByRole('button', { name: /personnaliser/i }))
+    await user.click(await screen.findByRole('button', { name: 'Déverrouiller la carte' }))
+    await user.click(await screen.findByRole('button', { name: 'Faire ma copie' }))
 
     expect(duplicateMap).toHaveBeenCalledWith(PATH, 'eleve1', 'eleve')
-    await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre-a (copie).zmap'))
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre-a (eleve1).zmap')
+    )
+  })
+
+  it('shows the map unlocked for a file with no meta, or authored by the current user', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(null)
+    render(<App />)
+    await act(async () => {
+      useWorkspaceStore.getState().setCurrentFile(PATH)
+    })
+
+    await waitFor(() => expect(loadMindMap).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: 'Verrouiller la carte' })).toBeInTheDocument()
+    expect(useCardsStore.getState().readOnly).toBe(false)
   })
 })
