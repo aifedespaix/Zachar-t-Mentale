@@ -149,6 +149,7 @@ function App() {
   useEffect(() => {
     useQuizSettingsStore.getState().init()
     useAppearanceSettingsStore.getState().init()
+    useSyncStore.getState().init()
   }, [])
 
   /**
@@ -375,7 +376,7 @@ function App() {
               Aucun fichier ouvert. Sélectionnez ou créez une carte mentale dans la barre latérale.
             </div>
           )}
-          {isReadOnly && loadedPath && loadedMeta && (
+          {isReadOnly && !quizActive && loadedPath && loadedMeta && (
             <ReadOnlyMapOverlay
               author={loadedMeta.author}
               onDuplicate={

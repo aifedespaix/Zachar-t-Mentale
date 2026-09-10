@@ -62,4 +62,37 @@ describe('SyncSettingsPanel', () => {
     render(<SyncSettingsPanel />)
     expect(screen.getByText(/2 envoyé\(s\), 1 reçu\(s\)/)).toBeInTheDocument()
   })
+
+  it('lists per-file sync errors under the summary, so the safety guards are visible', () => {
+    useSyncStore.setState({
+      currentUser: { username: 'aife', role: 'prof' },
+      syncFolderPath: '/cours',
+      lastResult: { pushed: 0, pulled: 0, errors: [{ fileId: 'f1', message: 'un message de test' }] },
+    })
+    render(<SyncSettingsPanel />)
+    expect(screen.getByText(/f1/)).toBeInTheDocument()
+    expect(screen.getByText(/un message de test/)).toBeInTheDocument()
+  })
+})
+
+describe('SyncSettingsPanel — champ URL du serveur', () => {
+  beforeEach(() => {
+    resetSyncStore()
+  })
+
+  it('does not commit the server URL until the field loses focus', async () => {
+    const user = userEvent.setup()
+    const setServerUrl = vi.fn().mockResolvedValue(undefined)
+    useSyncStore.setState({ setServerUrl })
+    render(<SyncSettingsPanel />)
+
+    const input = screen.getByLabelText('URL du serveur')
+    await user.type(input, 'https://pi.local')
+
+    expect(setServerUrl).not.toHaveBeenCalled()
+
+    await user.tab()
+
+    expect(setServerUrl).toHaveBeenCalledWith('https://pi.local')
+  })
 })

@@ -35,9 +35,23 @@ interface RawUserRecord {
   role: UserRole
 }
 
+/**
+ * PocketBase's `ClientResponseError` carries English SDK text (e.g. "Failed
+ * to authenticate.") that a French-speaking student would not understand —
+ * unlike `useWorkspaceStore`'s `describeError`, this one never surfaces the
+ * raw message. `status` is the SDK's own field (see `ClientResponseError` in
+ * `pocketbase`'s type definitions): 0 means the request never reached the
+ * server (network/DNS failure), 400 covers both bad-request payloads and a
+ * failed `authWithPassword` — PocketBase uses the same code for wrong
+ * username/password as for a malformed request.
+ */
 function describeSyncStoreError(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message
-  return 'erreur inconnue'
+  if (error && typeof error === 'object' && 'status' in error) {
+    const status = (error as { status: unknown }).status
+    if (status === 0) return 'Serveur injoignable. Vérifiez l’adresse et votre connexion.'
+    if (status === 400) return 'Identifiant ou mot de passe incorrect.'
+  }
+  return 'Une erreur est survenue. Réessayez plus tard.'
 }
 
 export function createSyncStore(): SyncStore {

@@ -100,15 +100,35 @@ describe('useSyncStore', () => {
     expect(store.getState().status).toBe('idle')
   })
 
-  it('login() sets a French error and no user on failure', async () => {
-    const authWithPassword = vi.fn().mockRejectedValue(new Error('mot de passe invalide'))
+  it('login() falls back to a generic French message for a plain Error with no status (never the raw English text)', async () => {
+    const authWithPassword = vi.fn().mockRejectedValue(new Error('Failed to authenticate.'))
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
     await store.getState().setServerUrl('https://pi.local')
 
     await store.getState().login('aife', 'wrong')
 
     expect(store.getState().currentUser).toBeNull()
-    expect(store.getState().error).toBe('mot de passe invalide')
+    expect(store.getState().error).toBe('Une erreur est survenue. Réessayez plus tard.')
+  })
+
+  it('login() reports an unreachable server in French for a status-0 ClientResponseError-shaped failure', async () => {
+    const authWithPassword = vi.fn().mockRejectedValue(Object.assign(new Error('Failed to fetch'), { status: 0 }))
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    await store.getState().setServerUrl('https://pi.local')
+
+    await store.getState().login('aife', 'wrong')
+
+    expect(store.getState().error).toBe('Serveur injoignable. Vérifiez l’adresse et votre connexion.')
+  })
+
+  it('login() reports a wrong identifier/password in French for a status-400 ClientResponseError-shaped failure', async () => {
+    const authWithPassword = vi.fn().mockRejectedValue(Object.assign(new Error('Failed to authenticate.'), { status: 400 }))
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    await store.getState().setServerUrl('https://pi.local')
+
+    await store.getState().login('aife', 'wrong')
+
+    expect(store.getState().error).toBe('Identifiant ou mot de passe incorrect.')
   })
 
   it('logout() clears currentUser', async () => {

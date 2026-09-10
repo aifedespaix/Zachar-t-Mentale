@@ -40,6 +40,16 @@ vi.mock('./persistence/sessionState', () => ({
   saveSessionState: vi.fn(),
 }))
 vi.mock('./hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
+// `useSyncStore.init()` is now called from App's bootstrap effect on every
+// render. Left unmocked, it would make real Tauri fs calls (via
+// `loadSyncSettings`) on every single test in this file, regardless of
+// whether that test cares about sync at all — this keeps it inert with a
+// default-settings resolution, matching `init()`'s own "stay at defaults"
+// behaviour for a load it can't make.
+vi.mock('./persistence/syncSettings', () => ({
+  loadSyncSettings: vi.fn().mockResolvedValue({ serverUrl: '', syncFolderPath: null }),
+  saveSyncSettings: vi.fn().mockResolvedValue(undefined),
+}))
 
 import { loadMindMap, saveMindMap, mindMapExists, loadMindMapMeta } from './persistence/fileStore'
 import { duplicateMap } from './persistence/fileOps'
@@ -94,6 +104,27 @@ async function openFile(path: string) {
   })
   await settle()
 }
+
+describe('App sync bootstrap', () => {
+  beforeEach(() => {
+    resetStores()
+    vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(scanFolder).mockReset().mockResolvedValue([])
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('restores the persisted sync session by calling useSyncStore.init() on mount', async () => {
+    const initSpy = vi.spyOn(useSyncStore.getState(), 'init').mockResolvedValue(undefined)
+
+    render(<App />)
+    await act(async () => {})
+
+    expect(initSpy).toHaveBeenCalled()
+  })
+})
 
 describe('App file switching', () => {
   beforeEach(() => {
@@ -629,6 +660,10 @@ describe('App — verrouillage lecture seule', () => {
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(duplicateMap).mockReset()
     useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
+    useQuizStore.setState({ active: false })
+  })
+  afterEach(() => {
+    useQuizStore.setState({ active: false })
   })
 
   it('shows the read-only overlay when the open file is authored by someone else', async () => {
@@ -638,6 +673,26 @@ describe('App — verrouillage lecture seule', () => {
     useWorkspaceStore.getState().setCurrentFile(PATH)
 
     expect(await screen.findByText(/Fichier de aife — lecture seule/)).toBeInTheDocument()
+  })
+
+  it('hides the read-only overlay while a quiz is active, even for a locked file', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
+    render(<App />)
+    useWorkspaceStore.getState().setCurrentFile(PATH)
+    await screen.findByText(/Fichier de aife — lecture seule/)
+
+    await act(async () => {
+      useQuizStore.setState({
+        active: true,
+        questions: [{ cardId: 'root', type: 'recall' }],
+        results: { root: 'unanswered' },
+      })
+    })
+
+    expect(screen.queryByText(/lecture seule/)).not.toBeInTheDocument()
+    // Not just hidden — the quiz frame is what took its place.
+    expect(screen.getByTestId('quiz-frame')).toBeInTheDocument()
   })
 
   it('shows no overlay for a file with no meta, or authored by the current user', async () => {

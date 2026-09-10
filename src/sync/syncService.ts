@@ -73,6 +73,13 @@ function describeSyncError(error: unknown): string {
   return 'erreur inconnue'
 }
 
+/** Rejects anything but a plain, relative, single-directory-tree path — a record's `path` field is untrusted remote input. */
+function isSafeRelativePath(path: string): boolean {
+  if (path === '' || path.startsWith('/') || path.startsWith('\\')) return false
+  if (/^[a-zA-Z]:/.test(path)) return false
+  return path.split(/[/\\]/).every(segment => segment !== '' && segment !== '.' && segment !== '..')
+}
+
 /** Every local `.assets` file the app wrote for this map — no need to parse card content, only content ever written is ever present. */
 async function pushAssetsFor(client: SyncClient, mindMapPath: string, knownHashes: Set<string>): Promise<void> {
   const sidecar = sidecarDirOf(mindMapPath)
@@ -181,6 +188,11 @@ export async function sync({ client, currentUser, syncFolderPath, state }: SyncP
     if (record.author === currentUser) continue
     const known = state[record.file_id]
     if (known && known.lastSyncedUpdated >= record.updated) continue
+
+    if (!isSafeRelativePath(record.path)) {
+      result.errors.push({ fileId: record.file_id, message: 'chemin distant invalide, fichier ignoré' })
+      continue
+    }
 
     try {
       const { meta, cards } = deserializeMindMap(record.content)

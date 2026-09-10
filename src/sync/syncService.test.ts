@@ -270,6 +270,18 @@ describe('sync — pull', () => {
     expect(writeAsset).toHaveBeenCalledWith('/cours/b.zmap', new Uint8Array([1, 2, 3]), 'png')
   })
 
+  it('refuses to pull a record whose path escapes the sync folder', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const traversal = { ...record, path: '../../evil.zmap' }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([traversal]) } as any })
+
+    const result = await sync({ client, currentUser: 'eleve1', syncFolderPath: '/cours', state: {} })
+
+    expect(writeTextFile).not.toHaveBeenCalled()
+    expect(result.pulled).toBe(0)
+    expect(result.errors).toEqual([{ fileId: 'file-2', message: 'chemin distant invalide, fichier ignoré' }])
+  })
+
   it('refuses to overwrite a local file already at the target path that is not this record', async () => {
     vi.mocked(scanFolder).mockResolvedValue([])
     vi.mocked(exists).mockImplementation(async path => path === '/cours/b.zmap')

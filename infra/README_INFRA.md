@@ -62,8 +62,22 @@ Créez une collection de type **Base**, nommée `assets`, avec les champs :
 - **Update rule**: *(laisser sur "Superusers only" — un asset content-adressé n'est jamais modifié)*
 - **Delete rule**: *(laisser sur "Superusers only" — pas de nettoyage automatisé en v1)*
 
-## 5. Dans l'application
+## 5. Créer un compte élève ou prof
+
+L'application n'a pas d'écran d'inscription : les comptes se créent depuis le
+tableau de bord d'administration PocketBase.
+
+1. Ouvrez `https://cartes.mon-domaine.fr/_/` et connectez-vous avec le
+   compte administrateur créé à l'étape 1.
+2. Ouvrez la collection `users`, puis « New record ».
+3. Renseignez `username`, `password` (et sa confirmation), et `role`
+   (`eleve` ou `prof`). Enregistrez.
+
+Répétez pour chaque élève ou professeur qui doit synchroniser des cartes.
+
+## 6. Dans l'application
 
 Dans Réglages → Synchronisation, entrez l'URL de votre serveur
-(`https://cartes.mon-domaine.fr`), créez un compte élève ou prof, choisissez
-le dossier local à synchroniser, puis cliquez sur « Synchroniser ».
+(`https://cartes.mon-domaine.fr`), connectez-vous avec le compte créé
+ci-dessus, choisissez le dossier local à synchroniser, puis cliquez sur
+« Synchroniser ».

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { RefreshCw, LogIn, LogOut } from 'lucide-react'
 import { useSyncStore } from '../../state/useSyncStore'
@@ -34,6 +34,10 @@ export function SyncSettingsPanel() {
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [serverUrlDraft, setServerUrlDraft] = useState(serverUrl)
+  useEffect(() => {
+    setServerUrlDraft(serverUrl)
+  }, [serverUrl])
 
   async function pickSyncFolder() {
     const selected = await open({ directory: true })
@@ -45,8 +49,11 @@ export function SyncSettingsPanel() {
       <SettingsSection title="Serveur" description="L’adresse de votre serveur PocketBase auto-hébergé.">
         <input
           aria-label="URL du serveur"
-          value={serverUrl}
-          onChange={e => void setServerUrl(e.target.value)}
+          value={serverUrlDraft}
+          onChange={e => setServerUrlDraft(e.target.value)}
+          onBlur={() => {
+            if (serverUrlDraft !== serverUrl) void setServerUrl(serverUrlDraft)
+          }}
           placeholder="https://cartes.mon-domaine.fr"
           style={{ ...inputStyle, width: '100%' }}
         />
@@ -117,6 +124,13 @@ export function SyncSettingsPanel() {
             </span>
           )}
         </div>
+        {lastResult && lastResult.errors.length > 0 && (
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--warning-fg)' }}>
+            {lastResult.errors.map(err => (
+              <li key={err.fileId}>{err.fileId} : {err.message}</li>
+            ))}
+          </ul>
+        )}
         {error && (
           <p role="alert" style={{ fontSize: 12.5, color: 'var(--warning-fg)', marginTop: 8 }}>
             ⚠ {error}
