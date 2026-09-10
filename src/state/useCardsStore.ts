@@ -31,7 +31,17 @@ import {
 
 interface CardsState {
   history: History<Card[]>
+  /** The user's own lock, toggled from the header — see `toggleLock`. */
   locked: boolean
+  /**
+   * The open map belongs to someone else (see the sync feature's `meta.author`).
+   *
+   * Distinct from `locked` because it is not the user's decision and they may
+   * not lift it: unlocking would let them edit a file that is about to be
+   * overwritten by the next pull. `selectEditsBlocked` is what the UI reads, so
+   * neither reason has to be checked twice.
+   */
+  readOnly: boolean
   addChild: (parentId: string) => string
   addSibling: (siblingId: string, position: 'above' | 'below') => string
   addFloatingCard: () => string
@@ -69,15 +79,29 @@ interface CardsState {
   undo: () => void
   redo: () => void
   toggleLock: () => void
+  setReadOnly: (readOnly: boolean) => void
   loadCards: (cards: Card[]) => void
 }
 
 export type CardsStore = UseBoundStore<StoreApi<CardsState>>
 
+/**
+ * Every reason the map may not be edited right now, in one selector.
+ *
+ * The two reasons arrive from opposite directions — the user locked the map, or
+ * the map is someone else's — and each new editing affordance would otherwise
+ * have to remember to check both. Missing one is how a keyboard shortcut ends
+ * up editing a read-only file that the canvas overlay only blocked the mouse
+ * from reaching.
+ */
+export const selectEditsBlocked = (state: { locked: boolean; readOnly: boolean }): boolean =>
+  state.locked || state.readOnly
+
 export function createCardsStore(): CardsStore {
   return create<CardsState>((set, get) => ({
     history: createHistory<Card[]>([createRootCard('Nouveau chapitre')]),
     locked: false,
+    readOnly: false,
     addChild: parentId => {
       const { cards: next, newCardId } = addChildOp(get().history.present, parentId)
       set(state => ({ history: pushState(state.history, next) }))
@@ -161,6 +185,7 @@ export function createCardsStore(): CardsStore {
     undo: () => set(state => ({ history: undoHistory(state.history) })),
     redo: () => set(state => ({ history: redoHistory(state.history) })),
     toggleLock: () => set(state => ({ locked: !state.locked })),
+    setReadOnly: readOnly => set(state => (state.readOnly === readOnly ? state : { readOnly })),
     // Reconciled on the way in: `content` is authoritative and `definition` is
     // its mirror, so a file whose two fields disagree is made consistent
     // before anything reads it. See `reconcileCards`.

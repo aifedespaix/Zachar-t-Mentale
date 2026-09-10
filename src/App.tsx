@@ -13,7 +13,10 @@ import { useWorkspaceStore, describeError } from './state/useWorkspaceStore'
 import { useQuizStore } from './state/useQuizStore'
 import { useCardDetailStore } from './state/useCardDetailStore'
 import { useAutosave } from './persistence/useAutosave'
-import { loadMindMap, saveMindMap, mindMapExists } from './persistence/fileStore'
+import { loadMindMap, saveMindMap, mindMapExists, loadMindMapMeta } from './persistence/fileStore'
+import { duplicateMap } from './persistence/fileOps'
+import { useSyncStore } from './state/useSyncStore'
+import { ReadOnlyMapOverlay } from './components/ReadOnlyMapOverlay'
 import { fileNameOf, parentDirOf, repairedCopyPath } from './persistence/paths'
 import { repairCards, validateCards, type CardIssue } from './validation/cardsValidation'
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts'
@@ -34,7 +37,7 @@ import { useAppliedFontFamily } from './hooks/useAppliedFontFamily'
 import { useAppUpdater } from './hooks/useAppUpdater'
 import { UpdateReadyBanner } from './components/update/UpdateReadyBanner'
 import { CardDetailPanel } from './components/detail/CardDetailPanel'
-import type { Card } from './types/card'
+import type { Card, MindMapMeta } from './types/card'
 
 /** A map that failed validation, held until the user decides what to do with it. */
 interface PendingRepair {
@@ -79,6 +82,8 @@ function App() {
   // and gated on, and what autosave writes to — so nothing can ever render, or
   // be written, for a file the app has not fully loaded.
   const [loadedPath, setLoadedPath] = useState<string | null>(null)
+  const [loadedMeta, setLoadedMeta] = useState<MindMapMeta | null>(null)
+  const currentUser = useSyncStore(s => s.currentUser)
   const mainRef = useRef<HTMLElement | null>(null)
   useGlobalShortcuts()
   useWindowTitle(currentFilePath)
@@ -105,6 +110,8 @@ function App() {
     async (cardId: string, path: string) => {
       const mapPath = useWorkspaceStore.getState().currentFilePath
       if (mapPath === null) return
+      const meta = await loadMindMapMeta(mapPath).catch(() => null)
+      if (meta !== null && meta.author !== useSyncStore.getState().currentUser?.username) return
       try {
         const source = { bytes: await readFile(path), mime: mimeForPath(path), name: fileNameOf(path) }
         // Re-checked AFTER the read: a large file takes long enough for the
@@ -140,6 +147,7 @@ function App() {
     useQuizSettingsStore.getState().init()
     useAppearanceSettingsStore.getState().init()
     useShortcutSettingsStore.getState().init()
+    useSyncStore.getState().init()
   }, [])
 
   /**
@@ -181,6 +189,7 @@ function App() {
   useEffect(() => {
     if (!currentFilePath) {
       setLoadedPath(null)
+      setLoadedMeta(null)
       return
     }
     // Already the file on screen — this run is a revert below landing, or the
@@ -204,8 +213,8 @@ function App() {
       setCurrentFile(previousPath)
     }
 
-    loadMindMap(currentFilePath)
-      .then(result => {
+    Promise.all([loadMindMap(currentFilePath), loadMindMapMeta(currentFilePath)])
+      .then(([result, meta]) => {
         if (cancelled) return
         if (result === null) {
           // With file switching, `null` no longer means "first run, nothing on
@@ -230,6 +239,7 @@ function App() {
           return
         }
         loadCards(result)
+        setLoadedMeta(meta)
         setLoadedPath(currentFilePath)
       })
       .catch(err => {
@@ -275,6 +285,21 @@ function App() {
   }, [pendingRepair, refreshFolder, setCurrentFile])
 
   const currentFileName = currentFilePath ? fileNameOf(currentFilePath) : null
+  const isReadOnly = loadedMeta !== null && loadedMeta.author !== currentUser?.username
+
+  /**
+   * Publishes "this map is someone else's" to the store every editing
+   * affordance already consults.
+   *
+   * The canvas overlay only blocks the POINTER. The header's buttons sit above
+   * it, and a keyboard shortcut never touches it at all — so without this, a
+   * `Suppr` or a `Ctrl+V` would happily edit a file the user was just told is
+   * read-only, and autosave would write the result to disk.
+   */
+  useEffect(() => {
+    useCardsStore.getState().setReadOnly(isReadOnly)
+  }, [isReadOnly])
+
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
@@ -379,6 +404,20 @@ function App() {
             <div style={{ padding: 24, color: 'var(--muted-foreground)' }}>
               Aucun fichier ouvert. Sélectionnez ou créez une carte mentale dans la barre latérale.
             </div>
+          )}
+          {isReadOnly && !quizActive && loadedPath && loadedMeta && (
+            <ReadOnlyMapOverlay
+              author={loadedMeta.author}
+              onDuplicate={
+                currentUser === null
+                  ? null
+                  : async () => {
+                      const newPath = await duplicateMap(loadedPath, currentUser.username, currentUser.role)
+                      await refreshFolder(parentDirOf(loadedPath))
+                      setCurrentFile(newPath)
+                    }
+              }
+            />
           )}
           <QuizSummaryModal />
         </main>

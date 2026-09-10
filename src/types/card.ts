@@ -4,6 +4,21 @@ export type CardLevel = 1 | 2 | 3 | 4
 
 export type CardKind = 'definition' | 'media'
 
+export type UserRole = 'eleve' | 'prof'
+
+/**
+ * Present only once a `.zmap` has been synced at least once. `null` (the
+ * field is simply absent from the file) is the normal, permanent state for
+ * anyone who never uses sync — the file stays a bare array on disk and stays
+ * fully editable locally forever.
+ */
+export interface MindMapMeta {
+  id: string
+  author: string
+  role: UserRole
+  lastModified: string
+}
+
 export interface Card {
   id: string
   level: CardLevel

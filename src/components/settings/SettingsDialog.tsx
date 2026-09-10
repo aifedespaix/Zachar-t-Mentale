@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SlidersHorizontal, Palette, GraduationCap, Keyboard, type LucideIcon } from 'lucide-react'
+import { SlidersHorizontal, Palette, GraduationCap, Keyboard, RefreshCw, type LucideIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
@@ -11,16 +11,18 @@ import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { AppearanceSettingsPanel } from './AppearanceSettingsPanel'
 import { QuizSettingsPanel } from './QuizSettingsPanel'
 import { ShortcutSettingsPanel } from './ShortcutSettingsPanel'
+import { SyncSettingsPanel } from './SyncSettingsPanel'
 import { useShortcutSettingsStore } from '../../state/useShortcutSettingsStore'
 import type { ShortcutSettings } from '../../types/shortcutSettings'
 
-export type SettingsTab = 'general' | 'appearance' | 'quiz' | 'shortcuts'
+export type SettingsTab = 'general' | 'appearance' | 'quiz' | 'shortcuts' | 'sync'
 
 const TABS: { id: SettingsTab; label: string; icon: LucideIcon; hint: string }[] = [
   { id: 'general', label: 'Général', icon: SlidersHorizontal, hint: 'Thème et police' },
   { id: 'appearance', label: 'Apparence', icon: Palette, hint: 'Couleurs des niveaux' },
   { id: 'quiz', label: 'Quiz', icon: GraduationCap, hint: 'Correction et aides' },
   { id: 'shortcuts', label: 'Raccourcis', icon: Keyboard, hint: 'Toutes les actions' },
+  { id: 'sync', label: 'Synchronisation', icon: RefreshCw, hint: 'Compte et serveur' },
 ]
 
 interface SettingsDialogProps {
@@ -200,6 +202,7 @@ export function SettingsDialog({ open, onOpenChange, updateCheck, initialTab = '
             {tab === 'appearance' && <AppearanceSettingsPanel settings={appearance} onChange={editAppearance} />}
             {tab === 'quiz' && <QuizSettingsPanel settings={quiz} onChange={editQuiz} />}
             {tab === 'shortcuts' && <ShortcutSettingsPanel />}
+            {tab === 'sync' && <SyncSettingsPanel />}
           </div>
         </div>
 

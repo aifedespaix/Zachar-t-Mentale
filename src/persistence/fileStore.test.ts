@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { loadMindMap, saveMindMap } from './fileStore'
-import type { Card } from '../types/card'
+import { loadMindMap, saveMindMap, loadMindMapMeta } from './fileStore'
+import type { Card, MindMapMeta } from '../types/card'
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
   exists: vi.fn(),
@@ -47,8 +47,68 @@ describe('loadMindMap', () => {
 })
 
 describe('saveMindMap', () => {
+  beforeEach(() => {
+    vi.mocked(exists).mockReset()
+    vi.mocked(readTextFile).mockReset()
+    vi.mocked(writeTextFile).mockReset()
+  })
+
   it('serializes and writes to the given path', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
     await saveMindMap('/fake/path.json', sample)
     expect(writeTextFile).toHaveBeenCalledWith('/fake/path.json', JSON.stringify(sample, null, 2))
+  })
+})
+
+const meta: MindMapMeta = { id: 'abc-123', author: 'aife', role: 'prof', lastModified: '2026-01-01T00:00:00.000Z' }
+
+describe('loadMindMapMeta', () => {
+  beforeEach(() => {
+    vi.mocked(exists).mockReset()
+    vi.mocked(readTextFile).mockReset()
+  })
+
+  it('returns null for a file that does not exist', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    expect(await loadMindMapMeta('/fake/path.zmap')).toBeNull()
+  })
+
+  it('returns null for a legacy bare-array file', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify(sample))
+    expect(await loadMindMapMeta('/fake/path.zmap')).toBeNull()
+  })
+
+  it('returns the meta of an enveloped file', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta, cards: sample }))
+    expect(await loadMindMapMeta('/fake/path.zmap')).toEqual(meta)
+  })
+})
+
+describe('saveMindMap meta preservation', () => {
+  beforeEach(() => {
+    vi.mocked(exists).mockReset()
+    vi.mocked(readTextFile).mockReset()
+    vi.mocked(writeTextFile).mockReset()
+  })
+
+  it('keeps writing a bare array when the file has no existing meta', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    await saveMindMap('/fake/path.zmap', sample)
+    expect(writeTextFile).toHaveBeenCalledWith('/fake/path.zmap', JSON.stringify(sample, null, 2))
+  })
+
+  it('preserves author/id/role and bumps lastModified when the file already has meta', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta, cards: sample }))
+    const before = Date.now()
+    await saveMindMap('/fake/path.zmap', sample)
+    const [, written] = vi.mocked(writeTextFile).mock.calls[0]
+    const savedMeta = JSON.parse(written as string).meta as MindMapMeta
+    expect(savedMeta.id).toBe(meta.id)
+    expect(savedMeta.author).toBe(meta.author)
+    expect(savedMeta.role).toBe(meta.role)
+    expect(new Date(savedMeta.lastModified).getTime()).toBeGreaterThanOrEqual(before)
   })
 })

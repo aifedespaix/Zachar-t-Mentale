@@ -96,6 +96,9 @@ export function AppToolbar({ filePath, cards, onOpenFile, flush, updateCheck }: 
   const [busy, setBusy] = useState(false)
 
   const locked = useCardsStore(s => s.locked)
+  // A map that is someone else's is not the user's to lock or unlock — the
+  // « Personnaliser » copy on the canvas is the way in.
+  const readOnly = useCardsStore(s => s.readOnly)
   const toggleLock = useCardsStore(s => s.toggleLock)
   const openFicheCount = useCardDetailStore(s => s.open.length)
   const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
@@ -182,7 +185,12 @@ export function AppToolbar({ filePath, cards, onOpenFile, flush, updateCheck }: 
   // (« Annuler »/« Rétablir » are registered by the canvas, which owns the card
   // history; the buttons below only reference them.)
 
-  useCommand('view.toggleLock', toggleLock, true, locked ? 'Déverrouiller la carte' : 'Verrouiller la carte')
+  useCommand(
+    'view.toggleLock',
+    toggleLock,
+    !readOnly,
+    locked ? 'Déverrouiller la carte' : 'Verrouiller la carte'
+  )
 
   useCommand(
     'view.toggleTheme',

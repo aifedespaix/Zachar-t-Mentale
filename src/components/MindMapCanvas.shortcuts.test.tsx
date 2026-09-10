@@ -48,7 +48,7 @@ function cards(): Card[] {
 describe('MindMapCanvas — clavier', () => {
   beforeEach(() => {
     useCardsStore.getState().loadCards([root, a, b, a1])
-    useCardsStore.setState({ locked: false })
+    useCardsStore.setState({ locked: false, readOnly: false })
     useCardSelectionStore.getState().reset()
     useCardClipboardStore.getState().clear()
     useCardDetailStore.getState().closeAll()
@@ -169,6 +169,25 @@ describe('MindMapCanvas — clavier', () => {
     expect(cards()).toHaveLength(4)
 
     // Reading is still allowed: a locked map is read-only, not inert.
+    pressOnCanvas(container, { key: 'ArrowDown' })
+    expect(useCardSelectionStore.getState().selectedCardId).toBe('b')
+  })
+
+  it('refuses every editing shortcut on a map that belongs to someone else', () => {
+    // The read-only overlay only blocks the POINTER. Without the same flag
+    // reaching the commands, a keystroke would edit a file the user was just
+    // told is read-only — and autosave would write the result to disk.
+    const { container } = render(<Harness />)
+    act(() => useCardsStore.getState().setReadOnly(true))
+    select('a')
+
+    pressOnCanvas(container, { key: 'Tab' })
+    pressOnCanvas(container, { key: 'Delete' })
+    pressOnCanvas(container, { key: 'd', ctrlKey: true })
+    pressOnCanvas(container, { key: 'Insert' })
+    expect(cards()).toHaveLength(4)
+
+    // Reading a colleague's map is the whole point of opening it.
     pressOnCanvas(container, { key: 'ArrowDown' })
     expect(useCardSelectionStore.getState().selectedCardId).toBe('b')
   })

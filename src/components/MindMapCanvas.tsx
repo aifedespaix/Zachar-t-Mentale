@@ -34,7 +34,7 @@ import { useCardSelectionStore } from '../state/useCardSelectionStore'
 import { useWorkspaceStore } from '../state/useWorkspaceStore'
 import { quickExport, type QuickExportFormat } from '../export/quickExport'
 import { describeExportError } from '../export/describeExportError'
-import { useCardsStore } from '../state/useCardsStore'
+import { useCardsStore, selectEditsBlocked } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
 import { useCardDetailStore } from '../state/useCardDetailStore'
 import type { Card } from '../types/card'
@@ -322,7 +322,7 @@ interface PendingMove {
 
 function MindMapCanvasInner() {
   const cards = useCardsStore(s => s.history.present)
-  const locked = useCardsStore(s => s.locked)
+  const locked = useCardsStore(selectEditsBlocked)
   const moveCard = useCardsStore(s => s.moveCard)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const [exportError, setExportError] = useState<string | null>(null)

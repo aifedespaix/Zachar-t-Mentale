@@ -13,10 +13,10 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 vi.mock('@tauri-apps/api/path', () => ({
   join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
 }))
-vi.mock('./fileStore', () => ({ mindMapExists: vi.fn() }))
+vi.mock('./fileStore', () => ({ mindMapExists: vi.fn(), loadMindMap: vi.fn() }))
 
 import { mkdir, remove, rename, writeTextFile, exists, readDir, copyFile } from '@tauri-apps/plugin-fs'
-import { mindMapExists } from './fileStore'
+import { mindMapExists, loadMindMap } from './fileStore'
 
 describe('createMindMapFile', () => {
   beforeEach(() => vi.mocked(writeTextFile).mockReset())
@@ -213,5 +213,52 @@ describe('duplicatePath', () => {
       '/cours/chimie/sous-dossier/liaisons.json',
       '/cours/chimie (copie)/sous-dossier/liaisons.json'
     )
+  })
+})
+
+import { duplicateMap } from './fileOps'
+
+describe('duplicateMap', () => {
+  beforeEach(() => {
+    vi.mocked(writeTextFile).mockReset()
+    vi.mocked(exists).mockReset()
+    vi.mocked(loadMindMap).mockReset()
+    vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
+  })
+
+  it('writes a new file stamped with a fresh id and the given author/role', async () => {
+    const cards = [{ id: 'root', level: 1 as const, title: 'Chapitre', parentId: null, order: 0 }]
+    vi.mocked(loadMindMap).mockResolvedValue(cards)
+    vi.mocked(exists).mockResolvedValue(false) // no sidecar to copy
+
+    const destPath = await duplicateMap('/cours/Chapitre 1.zmap', 'eleve1', 'eleve')
+
+    expect(destPath).toBe('/cours/Chapitre 1 (copie).zmap')
+    const [writtenPath, content] = vi.mocked(writeTextFile).mock.calls[0]
+    expect(writtenPath).toBe(destPath)
+    const written = JSON.parse(content as string)
+    expect(written.cards).toEqual(cards)
+    expect(written.meta.author).toBe('eleve1')
+    expect(written.meta.role).toBe('eleve')
+    expect(written.meta.id).toBeTruthy()
+  })
+
+  it('copies the asset sidecar when one exists', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    vi.mocked(exists).mockImplementation(async path => path === '/cours/Chapitre 1.assets')
+    vi.mocked(readDir).mockResolvedValue([{ name: 'abc123.png', isDirectory: false, isFile: true, isSymlink: false }])
+
+    await duplicateMap('/cours/Chapitre 1.zmap', 'eleve1', 'eleve')
+
+    expect(mkdir).toHaveBeenCalledWith('/cours/Chapitre 1 (copie).assets')
+    expect(copyFile).toHaveBeenCalledWith(
+      '/cours/Chapitre 1.assets/abc123.png',
+      '/cours/Chapitre 1 (copie).assets/abc123.png'
+    )
+  })
+
+  it('throws a French error when the source file no longer exists', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(null)
+    await expect(duplicateMap('/cours/Gone.zmap', 'eleve1', 'eleve')).rejects.toThrow('Gone.zmap')
   })
 })

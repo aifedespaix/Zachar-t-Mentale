@@ -33,7 +33,7 @@ function renderToolbar(overrides: Partial<React.ComponentProps<typeof AppToolbar
 describe('AppToolbar', () => {
   beforeEach(() => {
     const pristine = createCardsStore().getState()
-    useCardsStore.setState({ history: pristine.history, locked: pristine.locked })
+    useCardsStore.setState({ history: pristine.history, locked: pristine.locked, readOnly: false })
     useCardDetailStore.getState().closeAll()
     useWorkspaceStore.setState({ currentFilePath: null, workspaceError: null })
     useShortcutSettingsStore.getState().resetAll()
@@ -73,6 +73,14 @@ describe('AppToolbar', () => {
     await user.click(screen.getByRole('button', { name: 'Verrouiller la carte' }))
     expect(useCardsStore.getState().locked).toBe(true)
     expect(screen.getByRole('button', { name: 'Déverrouiller la carte' })).toBeInTheDocument()
+  })
+
+  it('will not let the user unlock a map that is not theirs', async () => {
+    // « Personnaliser / Faire ma copie », on the canvas, is the way in — an
+    // unlock here would only let them edit a file the next pull overwrites.
+    act(() => useCardsStore.getState().setReadOnly(true))
+    renderToolbar()
+    expect(screen.getByRole('button', { name: 'Verrouiller la carte' })).toBeDisabled()
   })
 
   it('switches the theme', async () => {

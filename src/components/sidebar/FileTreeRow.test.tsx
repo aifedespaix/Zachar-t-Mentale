@@ -25,6 +25,7 @@ vi.mock('../../persistence/fileStore', () => ({ loadMindMap: vi.fn(), saveMindMa
 vi.mock('../../persistence/exportIO', () => ({ pickXmindFile: vi.fn(), readBinaryFile: vi.fn() }))
 vi.mock('../../xmind/importXmind', () => ({ readXmindFile: vi.fn() }))
 vi.mock('../../hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
+vi.mock('../../hooks/useMindMapAuthor', () => ({ useMindMapAuthor: vi.fn() }))
 
 import {
   createMindMapFile,
@@ -39,6 +40,8 @@ import { loadMindMap, saveMindMap, mindMapExists } from '../../persistence/fileS
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
 import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
+import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
+import { useSyncStore } from '../../state/useSyncStore'
 
 function resetWorkspaceStore() {
   const pristine = createWorkspaceStore().getState()
@@ -71,6 +74,8 @@ describe('FileTreeRow', () => {
     vi.mocked(readBinaryFile).mockReset()
     vi.mocked(readXmindFile).mockReset()
     vi.mocked(useMindMapFormatValid).mockReset()
+    vi.mocked(useMindMapAuthor).mockReset().mockReturnValue(null)
+    useSyncStore.setState({ currentUser: null })
     // The naming modal's pre-filled default always comes from `freeSiblingPath` —
     // most tests care about the name the user actually submits, not this
     // default, so simulate "always free" (no numbered suffix) unless a test
@@ -788,5 +793,34 @@ describe('FileTreeRow', () => {
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/1 carte.*mentale.*déjà importée/))
     expect(scanFolder).toHaveBeenCalledWith('/cours')
+  })
+})
+
+describe('FileTreeRow — verrouillage non-auteur', () => {
+  beforeEach(() => {
+    resetWorkspaceStore()
+    vi.mocked(useMindMapFormatValid).mockReturnValue(true)
+  })
+
+  const node: FileTreeNode = { type: 'mindmap', name: 'Chapitre 1.zmap', path: '/cours/Chapitre 1.zmap' }
+
+  it('shows no lock when the file has no meta', () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue(null)
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+    expect(screen.queryByLabelText(/lecture seule/)).not.toBeInTheDocument()
+  })
+
+  it('shows no lock when the current user is the author', () => {
+    useSyncStore.setState({ currentUser: { username: 'aife', role: 'prof' } })
+    vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+    expect(screen.queryByLabelText(/lecture seule/)).not.toBeInTheDocument()
+  })
+
+  it('shows a lock when the file is authored by someone else', () => {
+    useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
+    vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+    expect(screen.getByLabelText(/aife.*lecture seule/)).toBeInTheDocument()
   })
 })

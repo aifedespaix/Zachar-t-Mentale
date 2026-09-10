@@ -1,6 +1,6 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useRef, useState } from 'react'
-import { Folder, FolderOpen, FolderPlus, FileJson, FilePlus, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, FileUp, Copy } from 'lucide-react'
+import { Folder, FolderOpen, FolderPlus, FileJson, FilePlus, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, FileUp, Copy, Lock } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
@@ -26,6 +26,8 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, C
 import { ExportDialog } from './ExportDialog'
 import { NameDialog } from './NameDialog'
 import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
+import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
+import { useSyncStore } from '../../state/useSyncStore'
 
 interface FileTreeRowProps {
   node: FileTreeNode
@@ -100,6 +102,9 @@ export function FileTreeRow({
   const renamingViaMenuRef = useRef(false)
 
   const formatValid = useMindMapFormatValid(node.type === 'mindmap' ? node.path : null)
+  const currentUser = useSyncStore(s => s.currentUser)
+  const meta = useMindMapAuthor(node.type === 'mindmap' ? node.path : null)
+  const isLocked = meta !== null && meta.author !== currentUser?.username
 
   const indent = { paddingLeft: 8 + depth * 16 }
 
@@ -443,13 +448,19 @@ export function FileTreeRow({
                     alignItems: 'center',
                     gap: 6,
                     flex: 1,
-                    background: isActive ? 'var(--muted)' : 'transparent',
+                    background: isLocked
+                      ? 'color-mix(in oklch, var(--primary), transparent 92%)'
+                      : isActive
+                        ? 'var(--muted)'
+                        : 'transparent',
                     border: 'none',
                     textAlign: 'left',
                     cursor: 'pointer',
                   }}
                 >
-                  {formatValid ? (
+                  {isLocked ? (
+                    <Lock size={16} aria-label={`Fichier de ${meta?.author}, lecture seule`} />
+                  ) : formatValid ? (
                     <img src="/favicon.svg" width={16} height={16} alt="" />
                   ) : (
                     <FileJson size={16} />

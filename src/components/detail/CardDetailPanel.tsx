@@ -7,7 +7,7 @@ import {
 } from 'react'
 import { ChevronDown, ChevronRight, Eraser, Layers, Pencil, Pin, PinOff, Plus, Trash2, X } from 'lucide-react'
 import type { Card } from '../../types/card'
-import { useCardsStore } from '../../state/useCardsStore'
+import { useCardsStore, selectEditsBlocked } from '../../state/useCardsStore'
 import { useCardDetailStore } from '../../state/useCardDetailStore'
 import { useWorkspaceStore } from '../../state/useWorkspaceStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
@@ -239,7 +239,7 @@ function CardFiche({
   onToggleCollapsed: () => void
   onEdit: () => void
 }) {
-  const locked = useCardsStore(s => s.locked)
+  const locked = useCardsStore(selectEditsBlocked)
   const updateContent = useCardsStore(s => s.updateContent)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const theme = useResolvedTheme()

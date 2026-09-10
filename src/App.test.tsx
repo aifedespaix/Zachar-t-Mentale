@@ -1,4 +1,4 @@
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import App from './App'
@@ -11,7 +11,9 @@ vi.mock('./persistence/fileStore', () => ({
   loadMindMap: vi.fn(),
   saveMindMap: vi.fn(),
   mindMapExists: vi.fn(),
+  loadMindMapMeta: vi.fn().mockResolvedValue(null),
 }))
+vi.mock('./persistence/fileOps', () => ({ duplicateMap: vi.fn() }))
 vi.mock('./persistence/workspaceConfig', () => ({
   loadWorkspaceConfig: vi.fn(),
   saveWorkspaceConfig: vi.fn(),
@@ -38,8 +40,20 @@ vi.mock('./persistence/sessionState', () => ({
   saveSessionState: vi.fn(),
 }))
 vi.mock('./hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
+// `useSyncStore.init()` is now called from App's bootstrap effect on every
+// render. Left unmocked, it would make real Tauri fs calls (via
+// `loadSyncSettings`) on every single test in this file, regardless of
+// whether that test cares about sync at all — this keeps it inert with a
+// default-settings resolution, matching `init()`'s own "stay at defaults"
+// behaviour for a load it can't make.
+vi.mock('./persistence/syncSettings', () => ({
+  loadSyncSettings: vi.fn().mockResolvedValue({ serverUrl: '', syncFolderPath: null }),
+  saveSyncSettings: vi.fn().mockResolvedValue(undefined),
+}))
 
-import { loadMindMap, saveMindMap, mindMapExists } from './persistence/fileStore'
+import { loadMindMap, saveMindMap, mindMapExists, loadMindMapMeta } from './persistence/fileStore'
+import { duplicateMap } from './persistence/fileOps'
+import { useSyncStore } from './state/useSyncStore'
 import { CORRUPTED_MAP_MESSAGE } from './components/CorruptedMapDialog'
 import { loadWorkspaceConfig } from './persistence/workspaceConfig'
 import { scanFolder } from './persistence/fileTree'
@@ -90,6 +104,27 @@ async function openFile(path: string) {
   })
   await settle()
 }
+
+describe('App sync bootstrap', () => {
+  beforeEach(() => {
+    resetStores()
+    vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(scanFolder).mockReset().mockResolvedValue([])
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('restores the persisted sync session by calling useSyncStore.init() on mount', async () => {
+    const initSpy = vi.spyOn(useSyncStore.getState(), 'init').mockResolvedValue(undefined)
+
+    render(<App />)
+    await act(async () => {})
+
+    expect(initSpy).toHaveBeenCalled()
+  })
+})
 
 describe('App file switching', () => {
   beforeEach(() => {
@@ -611,5 +646,77 @@ describe('App update banner', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 
     expect(screen.queryByText('Mise à jour prête')).not.toBeInTheDocument()
+  })
+})
+
+describe('App — verrouillage lecture seule', () => {
+  const PATH = '/cours/chapitre-a.zmap'
+  const cardsA: Card[] = [{ id: 'root', level: 1, title: 'Chapitre A', parentId: null, order: 0 }]
+  const metaFromSomeoneElse = { id: 'f1', author: 'aife', role: 'prof' as const, lastModified: 'x' }
+
+  beforeEach(() => {
+    vi.mocked(loadMindMap).mockReset()
+    vi.mocked(loadMindMapMeta).mockReset()
+    vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
+    vi.mocked(duplicateMap).mockReset()
+    useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
+    useQuizStore.setState({ active: false })
+  })
+  afterEach(() => {
+    useQuizStore.setState({ active: false })
+  })
+
+  it('shows the read-only overlay when the open file is authored by someone else', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
+    render(<App />)
+    useWorkspaceStore.getState().setCurrentFile(PATH)
+
+    expect(await screen.findByText(/Fichier de aife — lecture seule/)).toBeInTheDocument()
+  })
+
+  it('hides the read-only overlay while a quiz is active, even for a locked file', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
+    render(<App />)
+    useWorkspaceStore.getState().setCurrentFile(PATH)
+    await screen.findByText(/Fichier de aife — lecture seule/)
+
+    await act(async () => {
+      useQuizStore.setState({
+        active: true,
+        questions: [{ cardId: 'root', type: 'recall' }],
+        results: { root: 'unanswered' },
+      })
+    })
+
+    expect(screen.queryByText(/lecture seule/)).not.toBeInTheDocument()
+    // Not just hidden — the quiz frame is what took its place.
+    expect(screen.getByTestId('quiz-frame')).toBeInTheDocument()
+  })
+
+  it('shows no overlay for a file with no meta, or authored by the current user', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(null)
+    render(<App />)
+    useWorkspaceStore.getState().setCurrentFile(PATH)
+
+    await waitFor(() => expect(loadMindMap).toHaveBeenCalled())
+    expect(screen.queryByText(/lecture seule/)).not.toBeInTheDocument()
+  })
+
+  it('Personnaliser duplicates the map and opens the copy', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(metaFromSomeoneElse)
+    vi.mocked(duplicateMap).mockResolvedValue('/cours/chapitre-a (copie).zmap')
+    render(<App />)
+    useWorkspaceStore.getState().setCurrentFile(PATH)
+    await screen.findByText(/lecture seule/)
+
+    await user.click(screen.getByRole('button', { name: /personnaliser/i }))
+
+    expect(duplicateMap).toHaveBeenCalledWith(PATH, 'eleve1', 'eleve')
+    await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre-a (copie).zmap'))
   })
 })

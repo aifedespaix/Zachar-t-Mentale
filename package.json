@@ -1,7 +1,7 @@
 {
   "name": "zachart-mentale",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -29,6 +29,7 @@
     "lucide-react": "^1.41.0",
     "mathlive": "^0.110.0",
     "motion": "^13.2.0",
+    "pocketbase": "^0.28.1",
     "radix-ui": "^1.6.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

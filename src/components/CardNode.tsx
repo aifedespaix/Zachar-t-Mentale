@@ -21,7 +21,7 @@ import type { CardBlock, CardBlockKind } from '../types/cardBlock'
 import { isRootCard } from '../types/card'
 import type { QuizQuestionType, QuizResult } from '../types/quiz'
 import { EMPTY_RECALL_PROGRESS } from '../types/quiz'
-import { useCardsStore } from '../state/useCardsStore'
+import { useCardsStore, selectEditsBlocked } from '../state/useCardsStore'
 import { useQuizStore } from '../state/useQuizStore'
 import { useQuizSettingsStore } from '../state/useQuizSettingsStore'
 import { revealedSet, slotsOf } from '../quiz/blanks'
@@ -310,7 +310,7 @@ export function CardNode({ data }: CardNodeProps) {
   const flattenedCount = useCardsStore(s => s.flattenedCount)
   const descendantCount = useCardsStore(s => s.descendantCount)
   const hasChildren = useCardsStore(s => s.hasChildren)
-  const locked = useCardsStore(s => s.locked)
+  const locked = useCardsStore(selectEditsBlocked)
   const titleInputRef = useRef<HTMLTextAreaElement>(null)
   const [titleFocused, setTitleFocused] = useState(false)
   const [draftTitle, setDraftTitle] = useState(card.title)
