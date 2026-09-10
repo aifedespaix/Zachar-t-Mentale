@@ -495,7 +495,13 @@ export function FileTreeRow({
                   }}
                 >
                   {isLocked ? (
-                    <Lock size={16} aria-label={`Fichier de ${meta?.author}, lecture seule`} />
+                    // The `<title>` child is the badge's tooltip: Lucide's own props
+                    // type has no `title`, and an SVG one is what a browser renders
+                    // on hover. The aria-label stays, since it is what names the
+                    // badge for assistive tech (and for the tests).
+                    <Lock size={16} aria-label={`Fichier de ${meta?.author}, lecture seule`}>
+                      <title>{`Fichier de ${meta?.author}, lecture seule`}</title>
+                    </Lock>
                   ) : formatValid ? (
                     <img src="/favicon.svg" width={16} height={16} alt="" />
                   ) : (

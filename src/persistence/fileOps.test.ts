@@ -13,10 +13,10 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 vi.mock('@tauri-apps/api/path', () => ({
   join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
 }))
-vi.mock('./fileStore', () => ({ mindMapExists: vi.fn(), loadMindMap: vi.fn() }))
+vi.mock('./fileStore', () => ({ mindMapExists: vi.fn(), loadMindMap: vi.fn(), stripMindMapSyncMeta: vi.fn() }))
 
 import { mkdir, remove, rename, writeTextFile, exists, readDir, copyFile } from '@tauri-apps/plugin-fs'
-import { mindMapExists, loadMindMap } from './fileStore'
+import { mindMapExists, loadMindMap, stripMindMapSyncMeta } from './fileStore'
 
 describe('createMindMapFile', () => {
   beforeEach(() => vi.mocked(writeTextFile).mockReset())
@@ -188,12 +188,29 @@ describe('duplicatePath', () => {
     vi.mocked(mkdir).mockReset().mockResolvedValue(undefined)
     vi.mocked(readDir).mockReset()
     vi.mocked(exists).mockReset().mockResolvedValue(false)
+    vi.mocked(stripMindMapSyncMeta).mockReset().mockResolvedValue(true)
   })
 
   it('copies a single mind map file with no sidecar', async () => {
     await duplicatePath('/cours/chapitre.json', '/cours/chapitre (copie).json', false)
     expect(copyFile).toHaveBeenCalledWith('/cours/chapitre.json', '/cours/chapitre (copie).json')
     expect(mkdir).not.toHaveBeenCalled()
+  })
+
+  it('strips the sync metadata from the copy, so it cannot claim the original\'s remote record', async () => {
+    await duplicatePath('/cours/chapitre.zmap', '/cours/chapitre (copie).zmap', false)
+
+    expect(stripMindMapSyncMeta).toHaveBeenCalledWith('/cours/chapitre (copie).zmap')
+    // Order matters to the reader, not to correctness: the strip rewrites the
+    // COPY, never the original the user still has open.
+    expect(stripMindMapSyncMeta).not.toHaveBeenCalledWith('/cours/chapitre.zmap')
+  })
+
+  it('leaves a non-mind-map file untouched — nothing there carries sync metadata', async () => {
+    await duplicatePath('/cours/notes.pdf', '/cours/notes (copie).pdf', false)
+
+    expect(copyFile).toHaveBeenCalled()
+    expect(stripMindMapSyncMeta).not.toHaveBeenCalled()
   })
 
   it('copies the asset sidecar alongside a duplicated mind map', async () => {
@@ -231,6 +248,22 @@ describe('duplicatePath', () => {
       '/cours/chimie (copie)/sous-dossier/liaisons.json'
     )
   })
+
+  it('strips the sync metadata of every mind map a duplicated folder contains, however deep', async () => {
+    vi.mocked(readDir)
+      .mockResolvedValueOnce([
+        { name: 'atomes.json', isDirectory: false, isFile: true, isSymlink: false },
+        { name: 'schema.png', isDirectory: false, isFile: true, isSymlink: false },
+        { name: 'sous-dossier', isDirectory: true, isFile: false, isSymlink: false },
+      ])
+      .mockResolvedValueOnce([{ name: 'liaisons.json', isDirectory: false, isFile: true, isSymlink: false }])
+
+    await duplicatePath('/cours/chimie', '/cours/chimie (copie)', true)
+
+    expect(stripMindMapSyncMeta).toHaveBeenCalledWith('/cours/chimie (copie)/atomes.json')
+    expect(stripMindMapSyncMeta).toHaveBeenCalledWith('/cours/chimie (copie)/sous-dossier/liaisons.json')
+    expect(stripMindMapSyncMeta).toHaveBeenCalledTimes(2) // not the .png
+  })
 })
 
 import { duplicateMap } from './fileOps'
@@ -241,6 +274,7 @@ describe('duplicateMap', () => {
     vi.mocked(exists).mockReset()
     vi.mocked(loadMindMap).mockReset()
     vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
+    vi.mocked(stripMindMapSyncMeta).mockReset()
   })
 
   it('writes a new file stamped with a fresh id and the given author/role', async () => {
@@ -258,6 +292,9 @@ describe('duplicateMap', () => {
     expect(written.meta.author).toBe('eleve1')
     expect(written.meta.role).toBe('eleve')
     expect(written.meta.id).toBeTruthy()
+    // « Personnaliser » is the ADOPTION path: it stamps a fresh identity, so it
+    // must never be confused with the generic duplicate's purge above.
+    expect(stripMindMapSyncMeta).not.toHaveBeenCalled()
   })
 
   it('copies the asset sidecar when one exists', async () => {

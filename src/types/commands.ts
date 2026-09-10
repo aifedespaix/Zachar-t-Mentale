@@ -455,6 +455,16 @@ export const COMMANDS = [
     category: 'app',
     defaultBinding: 'Mod+Shift+Q',
   },
+  {
+    id: 'sync.now',
+    label: 'Synchroniser',
+    description: 'Envoie vos cartes au serveur et récupère celles des autres, tout de suite.',
+    category: 'app',
+    // Deliberately unbound, like « Supprimer la carte mentale »: a manual sync
+    // is a deliberate action, and inventing a chord for it would risk taking
+    // one the user expects elsewhere. They may bind it from the settings.
+    defaultBinding: null,
+  },
 ] as const satisfies readonly CommandDefinition[]
 
 export type CommandId = (typeof COMMANDS)[number]['id']

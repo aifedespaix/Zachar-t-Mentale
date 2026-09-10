@@ -26,6 +26,38 @@ export async function loadMindMapMeta(path: string): Promise<MindMapMeta | null>
 }
 
 /**
+ * Drops a `.zmap`'s sync metadata, rewriting it as a bare array of cards.
+ *
+ * The generic « Dupliquer » copies a file byte for byte, so the copy would
+ * carry the original's `meta.id` — which is the `file_id`, unique server-side,
+ * of the remote record. Two local files publishing to one remote row is
+ * exactly the corruption the fork model forbids, and the copy is meant to be a
+ * purely local draft: a file with no `meta` is invisible to the push loop and
+ * editable by anyone, so it is ready to be made someone's own.
+ *
+ * BEST-EFFORT AND SILENT BY CONTRACT: every caller is a duplicate whose byte
+ * copy has already succeeded, so throwing here would report a failure for an
+ * operation that half-happened. A file with no `meta` is left untouched (no
+ * write at all — no needless mtime churn), and an unreadable or corrupt one
+ * cannot be parsed to begin with: leaving it alone keeps duplicating a broken
+ * file working exactly as it did before. The residual risk is contained by the
+ * sync service's own duplicate-`file_id` guard, which reports the shared id
+ * instead of pushing it.
+ *
+ * @returns whether the file was rewritten (i.e. it did have a `meta`).
+ */
+export async function stripMindMapSyncMeta(path: string): Promise<boolean> {
+  try {
+    const { meta, cards } = deserializeMindMap(await readTextFile(path))
+    if (meta === null) return false
+    await writeTextFile(path, serializeMindMap(null, cards))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Whether a mind map file is already there. Used before writing a repaired
  * copy: the repair flow's whole promise is that nothing existing is
  * overwritten, the broken original least of all.

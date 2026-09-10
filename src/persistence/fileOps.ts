@@ -2,7 +2,7 @@ import { mkdir, remove, rename, writeTextFile, exists, readDir, copyFile } from 
 import { join } from '@tauri-apps/api/path'
 import { createRootCard } from '../state/cardsReducer'
 import { serializeMindMap } from './serialization'
-import { loadMindMap, mindMapExists } from './fileStore'
+import { loadMindMap, mindMapExists, stripMindMapSyncMeta } from './fileStore'
 import { isMindMapPath, sanitizeFileName, withMindMapExtension, mindMapBaseName, parentDirOf, fileNameOf } from './paths'
 import { titleCase } from '../utils/titleCase'
 import { sidecarDirOf } from './assets'
@@ -106,35 +106,63 @@ export async function freeMindMapPath(folderPath: string, baseName: string): Pro
   return freeSiblingPath(folderPath, baseName, false)
 }
 
-async function copyDirRecursive(sourceDir: string, destDir: string): Promise<void> {
+/**
+ * A byte-for-byte copy of one directory tree.
+ *
+ * `stripSyncMeta` is for the one caller that is duplicating USER CONTENT
+ * (`duplicatePath`): a mind map copied verbatim would keep the original's sync
+ * identity and publish to the same remote record. It defaults to `false`
+ * because the other caller is `duplicateMap`, which copies an asset sidecar —
+ * files minted by the app, with no `meta` header to strip.
+ */
+async function copyDirRecursive(sourceDir: string, destDir: string, stripSyncMeta = false): Promise<void> {
   await mkdir(destDir)
   const entries = await readDir(sourceDir)
   for (const entry of entries) {
     const sourcePath = await join(sourceDir, entry.name)
     const destPath = await join(destDir, entry.name)
     if (entry.isDirectory) {
-      await copyDirRecursive(sourcePath, destPath)
+      await copyDirRecursive(sourcePath, destPath, stripSyncMeta)
     } else {
       await copyFile(sourcePath, destPath)
+      if (stripSyncMeta && isMindMapPath(entry.name)) await stripMindMapSyncMeta(destPath)
     }
   }
 }
 
 /**
  * Duplicates a file or folder onto a new sibling path, carrying a mind
- * map's asset sidecar with it.
+ * map's asset sidecar with it — and WITHOUT its sync metadata.
  *
- * The sidecar copy is best-effort ON PURPOSE, same rationale as
- * `renamePath`: the primary copy has already succeeded by then, and
- * throwing here would report a failure for an operation that half-happened.
+ * This is the generic « Dupliquer », not « Personnaliser / Faire ma copie »
+ * (that one is `duplicateMap`, which deliberately stamps a fresh identity): a
+ * copy that kept the original's `meta` would carry the same `file_id` as the
+ * remote record, and two local files publishing to one server row is precisely
+ * the corruption the fork model rules out. Every map copied — including inside
+ * a duplicated folder — comes out as a plain local file, invisible to sync and
+ * editable by whoever opens it next.
+ *
+ * The sidecar copy, like the metadata strip, is best-effort ON PURPOSE, same
+ * rationale as `renamePath`: the primary copy has already succeeded by then,
+ * and throwing here would report a failure for an operation that half-happened.
  */
 export async function duplicatePath(sourcePath: string, destPath: string, isFolder: boolean): Promise<void> {
   if (isFolder) {
-    await copyDirRecursive(sourcePath, destPath)
+    // A nested map is exactly as sync-identified as a top-level one, so the
+    // whole copy is walked rather than only the file the user right-clicked.
+    await copyDirRecursive(sourcePath, destPath, true)
     return
   }
   await copyFile(sourcePath, destPath)
   if (!isMindMapPath(sourcePath)) return
+
+  // The copy must NOT carry the original's `meta`: its `id` is the `file_id` of
+  // the remote record, and two local files claiming one remote row is the exact
+  // corruption the fork model rules out. The duplicate becomes a purely local
+  // draft — invisible to the push loop, editable by anyone, with no history.
+  // Deliberately not awaited-fail-hard: `stripMindMapSyncMeta` is best-effort,
+  // and the copy this leaves behind is a complete, usable file either way.
+  await stripMindMapSyncMeta(destPath)
 
   try {
     const sourceSidecar = sidecarDirOf(sourcePath)

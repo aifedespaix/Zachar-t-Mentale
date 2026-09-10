@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { loadMindMap, saveMindMap, loadMindMapMeta } from './fileStore'
+import { loadMindMap, saveMindMap, loadMindMapMeta, stripMindMapSyncMeta } from './fileStore'
 import type { Card, MindMapMeta } from '../types/card'
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
@@ -83,6 +83,46 @@ describe('loadMindMapMeta', () => {
     vi.mocked(exists).mockResolvedValue(true)
     vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta, cards: sample }))
     expect(await loadMindMapMeta('/fake/path.zmap')).toEqual(meta)
+  })
+})
+
+describe('stripMindMapSyncMeta', () => {
+  beforeEach(() => {
+    vi.mocked(readTextFile).mockReset()
+    vi.mocked(writeTextFile).mockReset()
+  })
+
+  it('rewrites an enveloped file as a bare array of cards, and says it did', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta, cards: sample }))
+
+    expect(await stripMindMapSyncMeta('/cours/chapitre (copie).zmap')).toBe(true)
+
+    expect(writeTextFile).toHaveBeenCalledWith('/cours/chapitre (copie).zmap', JSON.stringify(sample, null, 2))
+  })
+
+  it('leaves a file with no meta byte-for-byte alone — no pointless rewrite', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify(sample))
+
+    expect(await stripMindMapSyncMeta('/cours/chapitre (copie).zmap')).toBe(false)
+
+    expect(writeTextFile).not.toHaveBeenCalled()
+  })
+
+  it('never throws on an unreadable or corrupt copy — the duplicate itself already succeeded', async () => {
+    vi.mocked(readTextFile).mockRejectedValue(new Error('permission denied'))
+    expect(await stripMindMapSyncMeta('/cours/chapitre (copie).zmap')).toBe(false)
+
+    vi.mocked(readTextFile).mockResolvedValue('{ not json')
+    expect(await stripMindMapSyncMeta('/cours/chapitre (copie).zmap')).toBe(false)
+
+    expect(writeTextFile).not.toHaveBeenCalled()
+  })
+
+  it('never throws when the rewrite itself fails', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta, cards: sample }))
+    vi.mocked(writeTextFile).mockRejectedValue(new Error('disque plein'))
+
+    await expect(stripMindMapSyncMeta('/cours/chapitre (copie).zmap')).resolves.toBe(false)
   })
 })
 

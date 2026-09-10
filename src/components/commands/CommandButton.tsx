@@ -15,6 +15,13 @@ interface CommandButtonProps {
   size?: ComponentProps<typeof Button>['size']
   /** Shows the label beside the icon, for the few actions that deserve the width. */
   showLabel?: boolean
+  /**
+   * Animates the icon, for an action that is currently running. The label stays
+   * the caller's business: it publishes the in-progress wording through
+   * `useCommand`'s contextual label, so the button, the tooltip and the screen
+   * reader all say the same thing.
+   */
+  spinning?: boolean
 }
 
 /**
@@ -36,6 +43,7 @@ export function CommandButton({
   variant = 'outline',
   size,
   showLabel = false,
+  spinning = false,
 }: CommandButtonProps) {
   const definition = commandById(command)
   const enabled = useCommandEnabled(command)
@@ -57,7 +65,7 @@ export function CommandButton({
           disabled={!enabled}
           onClick={() => runCommand(command)}
         >
-          <Icon />
+          <Icon className={spinning ? 'animate-spin' : undefined} />
           {showLabel && <span>{name}</span>}
         </Button>
       </TooltipTrigger>

@@ -8,6 +8,7 @@ import {
   MIN_SIDEBAR_WIDTH,
 } from '../../persistence/sidebarWidth'
 import { useWorkspaceStore, createWorkspaceStore } from '../../state/useWorkspaceStore'
+import { useSyncStore } from '../../state/useSyncStore'
 
 vi.mock('../../persistence/workspaceConfig', () => ({
   loadWorkspaceConfig: vi.fn(),
@@ -45,12 +46,29 @@ function resetWorkspaceStore() {
   })
 }
 
+/**
+ * The sync store is a module singleton too, and its `syncNow` is stubbed: the
+ * real one would reach the network, which no unit test of this panel should.
+ */
+function resetSyncStore() {
+  useSyncStore.setState({
+    serverUrl: '',
+    syncFolderPath: null,
+    currentUser: null,
+    status: 'idle',
+    error: null,
+    lastResult: null,
+    syncNow: vi.fn().mockResolvedValue(undefined),
+  })
+}
+
 describe('FileSidebar', () => {
   beforeEach(() => {
     // The remembered sidebar width lives in localStorage, so each test starts
     // from "never resized" rather than from whatever the previous one left.
     localStorage.clear()
     resetWorkspaceStore()
+    resetSyncStore()
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
     vi.mocked(saveWorkspaceConfig).mockReset().mockResolvedValue(undefined)
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
@@ -71,7 +89,7 @@ describe('FileSidebar', () => {
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('Aucun dossier configuré.')
 
-    await user.click(screen.getByRole('button', { name: 'Ajouter un dossier' }))
+    await user.click(screen.getByRole('button', { name: 'Ajouter un dossier de travail' }))
 
     expect(await screen.findByText('cours-svt')).toBeInTheDocument()
     expect(saveWorkspaceConfig).toHaveBeenCalledWith({ rootFolders: ['/cours-svt'] })
@@ -83,7 +101,7 @@ describe('FileSidebar', () => {
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('Aucun dossier configuré.')
 
-    await user.click(screen.getByRole('button', { name: 'Ajouter un dossier' }))
+    await user.click(screen.getByRole('button', { name: 'Ajouter un dossier de travail' }))
 
     expect(saveWorkspaceConfig).not.toHaveBeenCalled()
   })
@@ -146,12 +164,12 @@ describe('FileSidebar', () => {
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('Aucun dossier configuré.')
 
-    await user.click(screen.getByRole('button', { name: 'Ajouter un dossier' }))
+    await user.click(screen.getByRole('button', { name: 'Ajouter un dossier de travail' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/sélecteur indisponible/)
   })
 
-  it('re-scans every root folder from the "Rafraîchir" button', async () => {
+  it('re-scans every root folder from the "Actualiser l’arborescence" button', async () => {
     const user = userEvent.setup()
     vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours-svt'] })
     vi.mocked(scanFolder).mockResolvedValue([])
@@ -164,7 +182,7 @@ describe('FileSidebar', () => {
     vi.mocked(scanFolder).mockResolvedValue([
       { type: 'mindmap', name: 'ajouté-dehors.json', path: '/cours-svt/ajouté-dehors.json' },
     ])
-    await user.click(screen.getByRole('button', { name: 'Rafraîchir' }))
+    await user.click(screen.getByRole('button', { name: 'Actualiser l’arborescence' }))
 
     expect(await screen.findByText('ajouté-dehors')).toBeInTheDocument()
   })
@@ -286,5 +304,102 @@ describe('FileSidebar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Déplier la barre latérale' }))
     expect(screen.getByText('Cartes mentales')).toBeInTheDocument()
+  })
+
+  it('runs a full manual sync from the footer button', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    await user.click(screen.getByRole('button', { name: 'Synchroniser' }))
+
+    expect(useSyncStore.getState().syncNow).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the sync in progress: spinning icon, in-progress wording, disabled button', async () => {
+    useSyncStore.setState({ status: 'syncing' })
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    const button = screen.getByRole('button', { name: 'Synchronisation…' })
+
+    expect(button).toBeDisabled()
+    expect(button.querySelector('svg')).toHaveClass('animate-spin')
+  })
+
+  it('reports a failed sync in a dismissible banner instead of crashing', async () => {
+    const user = userEvent.setup()
+    useSyncStore.setState({ error: 'Serveur injoignable. Vérifiez l’adresse et votre connexion.' })
+    render(<FileSidebar onOpenFile={() => {}} />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Serveur injoignable/)
+
+    await user.click(screen.getByRole('button', { name: 'Masquer le message de synchronisation' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('summarises the last sync, and re-reads the tree when chapters were received', async () => {
+    const user = userEvent.setup()
+    useSyncStore.setState({ syncFolderPath: '/cours-svt' })
+    vi.mocked(useSyncStore.getState().syncNow).mockImplementation(async () => {
+      useSyncStore.setState({ lastResult: { pushed: 2, pulled: 1, errors: [] } })
+    })
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    await user.click(screen.getByRole('button', { name: 'Synchroniser' }))
+
+    expect(await screen.findByText(/2 envoyé\(s\), 1 reçu\(s\)/)).toBeInTheDocument()
+    // A pull writes files on disk behind the app's back: without this re-scan
+    // the chapter the student just received would be invisible in the tree.
+    expect(scanFolder).toHaveBeenCalledWith('/cours-svt')
+  })
+
+  it('opens a tooltip on a command-backed icon of the action bar', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    await user.hover(screen.getByRole('button', { name: 'Actualiser l’arborescence' }))
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Actualiser l’arborescence')
+  })
+
+  it('opens a tooltip on the one action bar icon that is not a command', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    await user.hover(screen.getByRole('button', { name: 'Afficher les fichiers non lisibles' }))
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Fichiers que l’application ne peut pas ouvrir')
+  })
+
+  it('gathers every action into one bar BELOW the tree, instead of the header', async () => {
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    const panel = sidebarPanel()
+    const tree = panel.children[1]
+    // The tooltip trigger renders the button directly, so the button's parent
+    // IS the action bar — reached through the button rather than by index.
+    const bar = screen.getByRole('button', { name: 'Synchroniser' }).parentElement as HTMLElement
+
+    expect(panel.children[0]).toHaveTextContent('Cartes mentales')
+    expect(tree).not.toHaveTextContent('Synchroniser')
+    // Under the tree, not in the heading above it.
+    expect(tree.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(bar.style.borderTop).toContain('solid')
+
+    for (const name of [
+      'Ajouter un dossier de travail',
+      'Actualiser l’arborescence',
+      'Afficher les fichiers non lisibles',
+      'Synchroniser',
+      'Replier la barre latérale',
+    ]) {
+      expect(bar.contains(screen.getByRole('button', { name }))).toBe(true)
+    }
   })
 })
