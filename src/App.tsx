@@ -35,6 +35,7 @@ import { useCardSelectionStore } from './state/useCardSelectionStore'
 import { useThemeDomSync } from './hooks/useResolvedTheme'
 import { useAppliedFontFamily } from './hooks/useAppliedFontFamily'
 import { useAppUpdater } from './hooks/useAppUpdater'
+import { useAutoSync } from './hooks/useAutoSync'
 import { UpdateReadyBanner } from './components/update/UpdateReadyBanner'
 import { CardDetailPanel } from './components/detail/CardDetailPanel'
 import type { Card, MindMapMeta } from './types/card'
@@ -86,6 +87,8 @@ function App() {
   const currentUser = useSyncStore(s => s.currentUser)
   const mainRef = useRef<HTMLElement | null>(null)
   useGlobalShortcuts()
+  // Only does anything when the user turned automatic sync on.
+  useAutoSync()
   useWindowTitle(currentFilePath)
   useThemeDomSync()
   useAppliedFontFamily()
@@ -327,6 +330,7 @@ function App() {
             <AppToolbar
               filePath={loadedPath}
               cards={cards}
+              meta={loadedMeta}
               onOpenFile={requestOpenFile}
               flush={flush}
               updateCheck={{ status: updateStatus, checkNow: checkForUpdates }}

@@ -34,6 +34,39 @@ export const MAX_ASSET_BYTES = 10 * 1024 * 1024
  */
 export const TEXT_MAX = 5_000_000
 
+/**
+ * PocketBase's own defaults are `cron: ""` — NO automatic backup at all — and
+ * `cronMaxKeep: 3`. A self-hosted school server that nobody tends therefore has
+ * nothing to restore from until someone thinks about it, which is exactly the
+ * kind of thing a setup script should settle once.
+ */
+export const DEFAULT_BACKUP_CRON = '0 3 * * *'
+export const DEFAULT_BACKUP_KEEP = 7
+
+/**
+ * What it would take to make the backup settings match. Everything not named
+ * here (the S3 destination above all) is the operator's and is carried over.
+ *
+ * @returns {{ update?: object, changes: string[] }}
+ */
+export function planBackups(current, desired = {}) {
+  const wanted = {
+    cron: desired.cron ?? DEFAULT_BACKUP_CRON,
+    cronMaxKeep: desired.cronMaxKeep ?? DEFAULT_BACKUP_KEEP,
+  }
+  const changes = []
+  if ((current?.cron ?? '') !== wanted.cron) {
+    changes.push(
+      `planification « ${current?.cron || 'désactivées'} » → « ${wanted.cron} »`
+    )
+  }
+  if ((current?.cronMaxKeep ?? 0) !== wanted.cronMaxKeep) {
+    changes.push(`conservées : ${current?.cronMaxKeep ?? 0} → ${wanted.cronMaxKeep}`)
+  }
+  if (changes.length === 0) return { changes: [] }
+  return { update: { backups: { ...current, ...wanted } }, changes }
+}
+
 /** The rules the app's traffic needs. Empty string = public, `null` = superusers only. */
 export const MIND_MAP_RULES = {
   // Reading is public: the whole point is that every account on the server can

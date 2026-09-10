@@ -15,6 +15,7 @@ import { CommandButton } from '../commands/CommandButton'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useSyncStore } from '../../state/useSyncStore'
 import { syncResultLabel } from '../../sync/syncResultLabel'
+import { formatRelativeTime } from '../../utils/relativeTime'
 import { FileTreeRow } from './FileTreeRow'
 import {
   clampSidebarWidth,
@@ -99,6 +100,16 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const syncError = useSyncStore(s => s.error)
   const lastResult = useSyncStore(s => s.lastResult)
   const syncNow = useSyncStore(s => s.syncNow)
+  const syncProgress = useSyncStore(s => s.progress)
+  const cancelSync = useSyncStore(s => s.cancelSync)
+  const pendingCount = useSyncStore(s => s.pendingCount)
+  const localOnlyCount = useSyncStore(s => s.localOnlyCount)
+  const lastSuccessAt = useSyncStore(s => s.lastSuccessAt)
+  const refreshPendingCount = useSyncStore(s => s.refreshPendingCount)
+  // The username, not the object: a fresh `{username, role}` on every auth tick
+  // would make the effect below walk the sync folder for nothing.
+  const syncUserName = useSyncStore(s => s.currentUser?.username ?? null)
+  const syncFolderPath = useSyncStore(s => s.syncFolderPath)
   const [collapsed, setCollapsed] = useState(false)
   /** The folder « Nouveau dossier » is about to create in — `null` when the dialog is closed. */
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null)
@@ -122,6 +133,14 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   useEffect(() => {
     setSyncFeedbackDismissed(false)
   }, [syncError, lastResult])
+
+  useEffect(() => {
+    // Recompute the « à envoyer » count on the events that can change it: the
+    // account, the folder, a re-scanned tree, a finished sync. The walk reads
+    // one header per .zmap, so it is deliberately NOT run on every render —
+    // publishing refreshes it itself, from the hook that changed the file.
+    void refreshPendingCount()
+  }, [refreshPendingCount, syncFolderPath, syncUserName, rootFolders, lastResult])
 
   // Writing on every pointer move would hammer `localStorage` a hundred times
   // per drag for a value only the NEXT launch reads, so the width is persisted
@@ -324,14 +343,53 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   }
 
   const syncRunning = syncStatus === 'syncing'
-  const showSyncError = syncError !== null && !syncFeedbackDismissed
-  const showSyncResult = syncError === null && lastResult !== null && !syncFeedbackDismissed
+  // While a run is in flight, the running banner IS the message: showing last
+  // run's result beside it would describe a state that no longer holds.
+  const showSyncError = syncError !== null && !syncFeedbackDismissed && !syncRunning
+  const showSyncResult =
+    syncError === null && lastResult !== null && !syncFeedbackDismissed && !syncRunning
   // The per-file failures are far too long to list in a 240 px column; they stay
   // readable in the tooltip, and in full in Réglages → Synchronisation.
+  // Both lists are far too long for a 240 px column, and both are detailed in
+  // Réglages → Synchronisation: the tooltip is the summary's memory aid.
   const syncResultDetail =
-    showSyncResult && lastResult.errors.length > 0
-      ? lastResult.errors.map(error => `${error.fileId} : ${error.message}`).join('\n')
+    showSyncResult && (lastResult.conflicts.length > 0 || lastResult.errors.length > 0)
+      ? [
+          ...lastResult.conflicts.map(
+            conflict => `conflit : ${conflict.path} (ici ${conflict.localModified}, serveur ${conflict.remoteUpdated})`
+          ),
+          ...lastResult.errors.map(error => `${error.fileId} : ${error.message}`),
+        ].join('\n')
       : undefined
+
+  /**
+   * What the sync button's tooltip adds to its name: the two facts the footer
+   * would otherwise make the user click to discover. Each part is dropped when
+   * it cannot be known, and the count is also on the badge, for the glance that
+   * does not hover anything.
+   */
+  // « à publier » comes first and matters most: those maps need a gesture, and
+  // without them a folder full of chapters happily reports « rien à envoyer ».
+  const localOnlyDetail =
+    localOnlyCount === null || localOnlyCount === 0
+      ? null
+      : `${localOnlyCount} carte${localOnlyCount > 1 ? 's' : ''} à publier`
+  const pendingDetail =
+    pendingCount === null
+      ? null
+      : pendingCount === 0
+        ? 'rien à envoyer'
+        : `${pendingCount} carte${pendingCount > 1 ? 's' : ''} à envoyer`
+  const lastSyncDetail =
+    lastSuccessAt === null
+      ? syncUserName === null
+        ? null
+        : 'jamais synchronisé'
+      : `dernière synchro ${formatRelativeTime(lastSuccessAt) ?? 'inconnue'}`
+  const syncTooltipDetail =
+    syncRunning || (localOnlyDetail === null && pendingDetail === null && lastSyncDetail === null)
+      ? undefined
+      : [localOnlyDetail, pendingDetail, lastSyncDetail].filter(part => part !== null).join(' · ')
 
   return (
     <TooltipProvider>
@@ -388,8 +446,25 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
           sync is explained next to the button that was clicked, not at the far
           end of the panel from it.
         */}
-        {(workspaceError !== null || showSyncError || showSyncResult) && (
+        {(workspaceError !== null || syncRunning || showSyncError || showSyncResult) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 8px 6px', flexShrink: 0 }}>
+            {syncRunning && (
+              <div role="status" className="status-banner status-banner--info" style={{ margin: 0 }}>
+                <span style={{ flex: 1 }}>
+                  {syncProgress === null
+                    ? 'Synchronisation…'
+                    : `Synchronisation ${syncProgress.done}/${syncProgress.total}…`}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Annuler la synchronisation"
+                  onClick={cancelSync}
+                >
+                  <X size={14} />
+                </Button>
+              </div>
+            )}
             {workspaceError && (
               <div role="alert" className="status-banner" style={{ margin: 0 }}>
                 <span style={{ flex: 1 }}>{workspaceError}</span>
@@ -419,7 +494,11 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
             {showSyncResult && (
               <div
                 role="status"
-                className={lastResult.errors.length > 0 ? 'status-banner' : 'status-banner status-banner--info'}
+                className={
+                  lastResult.conflicts.length > 0 || lastResult.errors.length > 0
+                    ? 'status-banner'
+                    : 'status-banner status-banner--info'
+                }
                 style={{ margin: 0 }}
                 title={syncResultDetail}
               >
@@ -471,13 +550,44 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
 
           <span className="toolbar-separator" aria-hidden />
 
-          <CommandButton
-            command="sync.now"
-            icon={CloudSync}
-            variant="outline"
-            size="icon-sm"
-            spinning={syncRunning}
-          />
+          {/*
+            The badge sits OUTSIDE the button (absolutely positioned over it) so
+            the button's own hit area, its accessible name and its tooltip are
+            untouched by a number that changes on its own.
+          */}
+          <span style={{ position: 'relative', display: 'inline-flex' }}>
+            <CommandButton
+              command="sync.now"
+              icon={CloudSync}
+              variant="outline"
+              size="icon-sm"
+              spinning={syncRunning}
+              tooltipDetail={syncTooltipDetail}
+            />
+            {(pendingCount ?? 0) + (localOnlyCount ?? 0) > 0 && (
+              <span
+                role="status"
+                style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  minWidth: 14,
+                  height: 14,
+                  padding: '0 3px',
+                  borderRadius: 999,
+                  background: 'var(--primary)',
+                  color: 'var(--primary-foreground)',
+                  fontSize: 9,
+                  fontWeight: 600,
+                  lineHeight: '14px',
+                  textAlign: 'center',
+                  pointerEvents: 'none',
+                }}
+              >
+                {(pendingCount ?? 0) + (localOnlyCount ?? 0)}
+              </span>
+            )}
+          </span>
 
           <span style={{ marginLeft: 'auto' }} aria-hidden />
 

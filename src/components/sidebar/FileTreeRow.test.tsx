@@ -21,7 +21,12 @@ vi.mock('../../persistence/fileTree', async importOriginal => {
   const actual = await importOriginal<typeof import('../../persistence/fileTree')>()
   return { ...actual, scanFolder: vi.fn() }
 })
-vi.mock('../../persistence/fileStore', () => ({ loadMindMap: vi.fn(), saveMindMap: vi.fn(), mindMapExists: vi.fn() }))
+vi.mock('../../persistence/fileStore', () => ({
+  loadMindMap: vi.fn(),
+  saveMindMap: vi.fn(),
+  mindMapExists: vi.fn(),
+  stampMindMapSyncMeta: vi.fn(),
+}))
 vi.mock('../../persistence/exportIO', () => ({ pickXmindFile: vi.fn(), readBinaryFile: vi.fn() }))
 vi.mock('../../xmind/importXmind', () => ({ readXmindFile: vi.fn() }))
 vi.mock('../../hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
@@ -36,13 +41,20 @@ import {
   freeSiblingPath,
 } from '../../persistence/fileOps'
 import { scanFolder } from '../../persistence/fileTree'
-import { loadMindMap, saveMindMap, mindMapExists } from '../../persistence/fileStore'
+import { loadMindMap, saveMindMap, mindMapExists, stampMindMapSyncMeta } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
 import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
 import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
 import { useSyncStore } from '../../state/useSyncStore'
 
+/**
+ * Data fields only — never the actions: the ones a fresh `createWorkspaceStore()`
+ * returns are bound to THAT store, so copying them in would leave the singleton
+ * whose state components read. A test that needs to observe an action spies on
+ * the singleton instead (or, for `refreshFolder`, asserts on the `scanFolder`
+ * call it makes).
+ */
 function resetWorkspaceStore() {
   const pristine = createWorkspaceStore().getState()
   useWorkspaceStore.setState({
@@ -50,6 +62,7 @@ function resetWorkspaceStore() {
     expandedPaths: pristine.expandedPaths,
     currentFilePath: pristine.currentFilePath,
     workspaceError: pristine.workspaceError,
+    fileMetaRevision: pristine.fileMetaRevision,
   })
 }
 
@@ -70,6 +83,7 @@ describe('FileTreeRow', () => {
     vi.mocked(loadMindMap).mockReset()
     vi.mocked(saveMindMap).mockReset()
     vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
+    vi.mocked(stampMindMapSyncMeta).mockReset().mockResolvedValue(true)
     vi.mocked(pickXmindFile).mockReset()
     vi.mocked(readBinaryFile).mockReset()
     vi.mocked(readXmindFile).mockReset()
@@ -577,6 +591,46 @@ describe('FileTreeRow', () => {
     await waitFor(() =>
       expect(useWorkspaceStore.getState().workspaceError).toMatch(/existant\.zmap[^]*existe déjà/)
     )
+  })
+
+  it('publishes a purely local map from its context menu', async () => {
+    const user = userEvent.setup()
+    useSyncStore.setState({ syncFolderPath: '/cours', currentUser: { username: 'aife', role: 'prof' } })
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={vi.fn()} />)
+
+    openMenu('chapitre1')
+    await user.click(await screen.findByRole('menuitem', { name: /Publier pour la synchronisation/ }))
+
+    expect(stampMindMapSyncMeta).toHaveBeenCalledWith('/cours/chapitre1.json', 'aife', 'prof')
+    // The real refreshFolder re-scans the folder — the observable it already
+    // offers, rather than swapping an action on the store singleton.
+    await waitFor(() => expect(scanFolder).toHaveBeenCalledWith('/cours'))
+    expect(useWorkspaceStore.getState().fileMetaRevision).toBe(1)
+  })
+
+  it('does not offer to publish a map that already has an identity', async () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' })
+    useSyncStore.setState({ syncFolderPath: '/cours', currentUser: { username: 'aife', role: 'prof' } })
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={vi.fn()} />)
+
+    openMenu('chapitre1')
+
+    expect(await screen.findByRole('menuitem', { name: 'Dupliquer' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /Publier pour la synchronisation/ })).not.toBeInTheDocument()
+  })
+
+  it('does not offer to publish a map outside the sync folder — the push loop never walks there', async () => {
+    useSyncStore.setState({ syncFolderPath: '/cours', currentUser: { username: 'aife', role: 'prof' } })
+    const node: FileTreeNode = { type: 'mindmap', name: 'hors.json', path: '/ailleurs/hors.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={vi.fn()} />)
+
+    openMenu('hors')
+
+    expect(await screen.findByRole('menuitem', { name: 'Dupliquer' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /Publier pour la synchronisation/ })).not.toBeInTheDocument()
   })
 
   it('duplicates a mind map file and opens the copy', async () => {

@@ -5,18 +5,21 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
   mkdir: vi.fn(),
   readTextFile: vi.fn(),
   writeTextFile: vi.fn(),
+  remove: vi.fn(),
 }))
 vi.mock('@tauri-apps/api/path', () => ({
   appConfigDir: vi.fn().mockResolvedValue('/config'),
   join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
 }))
-vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir: vi.fn() }))
+vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir: vi.fn(), openPath: vi.fn() }))
 
-import { exists, mkdir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
-import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { exists, mkdir, readTextFile, remove, writeTextFile } from '@tauri-apps/plugin-fs'
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 import {
+  clearSyncLog,
   formatSyncLogLine,
   logSyncEvent,
+  openSyncLog,
   revealSyncLog,
   syncLogPath,
   trimSyncLog,
@@ -29,7 +32,9 @@ beforeEach(() => {
   vi.mocked(mkdir).mockReset().mockResolvedValue(undefined)
   vi.mocked(readTextFile).mockReset().mockResolvedValue('')
   vi.mocked(writeTextFile).mockReset().mockResolvedValue(undefined)
+  vi.mocked(remove).mockReset().mockResolvedValue(undefined)
   vi.mocked(revealItemInDir).mockReset().mockResolvedValue(undefined)
+  vi.mocked(openPath).mockReset().mockResolvedValue(undefined)
 })
 
 describe('formatSyncLogLine', () => {
@@ -37,6 +42,14 @@ describe('formatSyncLogLine', () => {
     expect(formatSyncLogLine('info', 'synchronisation terminée', undefined, AT)).toBe(
       '2026-09-10T19:45:12.345Z  INFO    synchronisation terminée\n'
     )
+  })
+
+  it('labels the three levels so a log can be skimmed', () => {
+    // Regexes rather than exact spacing: the labels are padded to line up, and
+    // a test that counts spaces would break the day one is renamed.
+    expect(formatSyncLogLine('debug', 'envoyé « a.zmap »', undefined, AT)).toMatch(/DEBUG\s+envoyé/)
+    expect(formatSyncLogLine('info', 'synchronisation', undefined, AT)).toMatch(/INFO\s+synchronisation/)
+    expect(formatSyncLogLine('error', 'échec', undefined, AT)).toMatch(/ERREUR\s+échec/)
   })
 
   it('marks a failure as such, so a log can be skimmed', () => {
@@ -136,6 +149,45 @@ describe('revealSyncLog', () => {
     vi.mocked(revealItemInDir).mockRejectedValue(new Error('explorateur indisponible'))
 
     await expect(revealSyncLog()).rejects.toThrow('explorateur indisponible')
+  })
+})
+
+describe('openSyncLog', () => {
+  it('hands the file to the system when it exists', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+
+    expect(await openSyncLog()).toBe('/config/sync-debug.log')
+    expect(openPath).toHaveBeenCalledWith('/config/sync-debug.log')
+  })
+
+  it('says the log is still empty rather than opening nothing', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+
+    await expect(openSyncLog()).rejects.toThrow(/encore vide/)
+    expect(openPath).not.toHaveBeenCalled()
+  })
+})
+
+describe('clearSyncLog', () => {
+  it('removes the file and says it did', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+
+    expect(await clearSyncLog()).toBe(true)
+    expect(remove).toHaveBeenCalledWith('/config/sync-debug.log')
+  })
+
+  it('is a no-op when there is nothing to remove', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+
+    expect(await clearSyncLog()).toBe(false)
+    expect(remove).not.toHaveBeenCalled()
+  })
+
+  it('propagates a failure: the user clicked, so silence is not an option', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(remove).mockRejectedValue(new Error('lecture seule'))
+
+    await expect(clearSyncLog()).rejects.toThrow('lecture seule')
   })
 })
 

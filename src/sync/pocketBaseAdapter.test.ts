@@ -30,13 +30,40 @@ describe('createSyncClient — mindMaps', () => {
     const client = createSyncClient(pb)
     const result = await client.mindMaps.create({ file_id: 'f2', author: 'aife', path: 'b.zmap', content: '[]' })
 
-    expect(pb.collection('cartes_mentales').create).toHaveBeenCalledWith({
-      file_id: 'f2',
-      author: 'aife',
-      path: 'b.zmap',
-      content: '[]',
-    })
+    // The options argument (`undefined` here) is the cancellation channel.
+    expect(pb.collection('cartes_mentales').create).toHaveBeenCalledWith(
+      {
+        file_id: 'f2',
+        author: 'aife',
+        path: 'b.zmap',
+        content: '[]',
+      },
+      undefined
+    )
     expect(result).toEqual(created)
+  })
+
+  it('forwards the request options, so a run can be cancelled during a request', async () => {
+    const pb = fakePb()
+    const controller = new AbortController()
+    vi.mocked(pb.collection('cartes_mentales').create).mockResolvedValue({
+      id: 'r3',
+      file_id: 'f3',
+      author: 'aife',
+      path: 'c.zmap',
+      content: '[]',
+      updated: 'u',
+    })
+    const client = createSyncClient(pb)
+
+    await client.mindMaps.create(
+      { file_id: 'f3', author: 'aife', path: 'c.zmap', content: '[]' },
+      { signal: controller.signal }
+    )
+
+    expect(pb.collection('cartes_mentales').create).toHaveBeenCalledWith(expect.anything(), {
+      signal: controller.signal,
+    })
   })
 })
 
@@ -47,7 +74,7 @@ describe('createSyncClient — assets', () => {
 
     await client.assets.upload('hash1', 'png', new Uint8Array([1, 2, 3]))
 
-    expect(pb.collection('assets').create).toHaveBeenCalledWith(expect.any(FormData))
+    expect(pb.collection('assets').create).toHaveBeenCalledWith(expect.any(FormData), undefined)
     const form = vi.mocked(pb.collection('assets').create).mock.calls[0][0] as FormData
     expect(form.get('hash')).toBe('hash1')
     expect(form.get('extension')).toBe('png')

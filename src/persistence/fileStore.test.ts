@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { loadMindMap, saveMindMap, loadMindMapMeta, stripMindMapSyncMeta } from './fileStore'
+import {
+  loadMindMap,
+  saveMindMap,
+  loadMindMapMeta,
+  stampMindMapSyncMeta,
+  stripMindMapSyncMeta,
+} from './fileStore'
 import type { Card, MindMapMeta } from '../types/card'
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
@@ -123,6 +129,44 @@ describe('stripMindMapSyncMeta', () => {
     vi.mocked(writeTextFile).mockRejectedValue(new Error('disque plein'))
 
     await expect(stripMindMapSyncMeta('/cours/chapitre (copie).zmap')).resolves.toBe(false)
+  })
+})
+
+describe('stampMindMapSyncMeta', () => {
+  beforeEach(() => {
+    vi.mocked(readTextFile).mockReset()
+    vi.mocked(writeTextFile).mockReset()
+  })
+
+  it('gives a local map a fresh identity owned by the given author', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify(sample))
+    const before = Date.now()
+
+    expect(await stampMindMapSyncMeta('/cours/chapitre.zmap', 'aife', 'prof')).toBe(true)
+
+    const [path, contents] = vi.mocked(writeTextFile).mock.calls[0]
+    expect(path).toBe('/cours/chapitre.zmap')
+    const written = JSON.parse(contents as string)
+    expect(written.cards).toEqual(sample) // the cards themselves are untouched
+    expect(written.meta.author).toBe('aife')
+    expect(written.meta.role).toBe('prof')
+    expect(written.meta.id).toBeTruthy()
+    expect(new Date(written.meta.lastModified).getTime()).toBeGreaterThanOrEqual(before)
+  })
+
+  it('refuses to overwrite an existing meta — that id points at a remote record', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta, cards: sample }))
+
+    expect(await stampMindMapSyncMeta('/cours/chapitre.zmap', 'aife', 'prof')).toBe(false)
+    expect(writeTextFile).not.toHaveBeenCalled()
+  })
+
+  it('propagates a failure, unlike the strip: this one runs from a click and must be reported', async () => {
+    vi.mocked(readTextFile).mockRejectedValue(new Error('permission denied'))
+    await expect(stampMindMapSyncMeta('/cours/chapitre.zmap', 'aife', 'prof')).rejects.toThrow('permission denied')
+
+    vi.mocked(readTextFile).mockResolvedValue('{ not json')
+    await expect(stampMindMapSyncMeta('/cours/chapitre.zmap', 'aife', 'prof')).rejects.toThrow()
   })
 })
 

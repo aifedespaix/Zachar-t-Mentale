@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   fileNameOf,
+  isInsideFolder,
   isMindMapPath,
   mindMapBaseName,
   parentDirOf,
@@ -9,6 +10,30 @@ import {
   separatorOf,
   withMindMapExtension,
 } from './paths'
+
+describe('isInsideFolder', () => {
+  it('accepts a file in the folder, whatever the separator or the case on a Windows path', () => {
+    expect(isInsideFolder('C:\\Cours\\a.zmap', 'C:\\Cours')).toBe(true)
+    expect(isInsideFolder('c:/cours/sous/b.zmap', 'C:/Cours')).toBe(true)
+    expect(isInsideFolder('/home/eleve/cours/a.zmap', '/home/eleve/cours')).toBe(true)
+    expect(isInsideFolder('C:\\Cours\\a.zmap', 'C:\\Cours\\')).toBe(true)
+  })
+
+  it('refuses a sibling folder whose name merely starts the same', () => {
+    expect(isInsideFolder('C:\\Cours2\\a.zmap', 'C:\\Cours')).toBe(false)
+    expect(isInsideFolder('/home/eleve/cours2/a.zmap', '/home/eleve/cours')).toBe(false)
+  })
+
+  it('keeps a POSIX path case-sensitive, unlike a Windows one', () => {
+    expect(isInsideFolder('/home/Eleve/cours/a.zmap', '/home/eleve/cours')).toBe(false)
+  })
+
+  it('refuses a path outside the folder, and empty inputs', () => {
+    expect(isInsideFolder('C:\\Autre\\a.zmap', 'C:\\Cours')).toBe(false)
+    expect(isInsideFolder('', 'C:\\Cours')).toBe(false)
+    expect(isInsideFolder('C:\\Cours\\a.zmap', '')).toBe(false)
+  })
+})
 
 describe('path helpers', () => {
   it('reads the file name off both separators', () => {

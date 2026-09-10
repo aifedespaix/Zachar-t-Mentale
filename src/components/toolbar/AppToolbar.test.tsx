@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir: vi.fn(async () => {}) }))
+vi.mock('../../hooks/usePublishMindMap', () => ({ usePublishMindMap: vi.fn() }))
 
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { AppToolbar } from './AppToolbar'
@@ -12,6 +13,7 @@ import { useWorkspaceStore } from '../../state/useWorkspaceStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
 import { useShortcutSettingsStore } from '../../state/useShortcutSettingsStore'
 import { useCommandRegistry } from '../../state/useCommandRegistry'
+import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import type { Card } from '../../types/card'
 
 const CARDS: Card[] = [{ id: 'root', level: 1, title: 'Racine', parentId: null, order: 0 }]
@@ -22,6 +24,7 @@ function renderToolbar(overrides: Partial<React.ComponentProps<typeof AppToolbar
   const props = {
     filePath: '/cours/chapitre1.zmap',
     cards: CARDS,
+    meta: null,
     onOpenFile: vi.fn(),
     flush: vi.fn(async () => {}),
     updateCheck: updateCheckStub,
@@ -39,6 +42,37 @@ describe('AppToolbar', () => {
     useShortcutSettingsStore.getState().resetAll()
     useCommandRegistry.setState({ registrations: {} })
     vi.mocked(revealItemInDir).mockClear()
+    // Not publishable by default: each test opts in, so a test that forgets to
+    // cannot silently pass on a hook stub that always says yes.
+    vi.mocked(usePublishMindMap).mockReturnValue({
+      canPublish: () => false,
+      publish: vi.fn(),
+      publishAll: vi.fn(),
+    })
+  })
+
+  it('publishes the open map from the Fichier menu when it is still purely local', async () => {
+    const user = userEvent.setup()
+    const publish = vi.fn().mockResolvedValue('published')
+    vi.mocked(usePublishMindMap).mockReturnValue({ canPublish: () => true, publish, publishAll: vi.fn() })
+    renderToolbar()
+
+    await user.click(screen.getByRole('button', { name: 'Fichier' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Publier pour la synchronisation/ }))
+
+    expect(publish).toHaveBeenCalledWith('/cours/chapitre1.zmap')
+  })
+
+  it('leaves Publier inert when there is nothing to publish', async () => {
+    const user = userEvent.setup()
+    const publish = vi.fn().mockResolvedValue('not-eligible')
+    vi.mocked(usePublishMindMap).mockReturnValue({ canPublish: () => false, publish, publishAll: vi.fn() })
+    renderToolbar()
+
+    await user.click(screen.getByRole('button', { name: 'Fichier' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Publier pour la synchronisation/ }))
+
+    expect(publish).not.toHaveBeenCalled()
   })
 
   it('names each button by its action and tells you the key that does the same thing', async () => {

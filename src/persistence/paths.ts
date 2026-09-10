@@ -82,6 +82,30 @@ export function repairedCopyPath(path: string, attempt = 1): string {
   return dir === '' ? name : `${dir}${separatorOf(path)}${name}`
 }
 
+/**
+ * Whether `path` sits in `folderPath` (or IS it) — the check every sync
+ * action needs before it can promise anything.
+ *
+ * Separators are normalised (a sync folder picked on Windows may reach the
+ * store with either one) and a WINDOWS drive path is compared
+ * case-insensitively, because the filesystem is. A POSIX path is compared
+ * exactly: `/home/Eleve` and `/home/eleve` are two different folders there.
+ *
+ * The trailing-separator test is what keeps `C:\\Cours2` from passing for
+ * `C:\\Cours` — a prefix comparison alone says yes to exactly that.
+ */
+export function isInsideFolder(path: string, folderPath: string): boolean {
+  if (path === '' || folderPath === '') return false
+  const normalize = (value: string) => value.replace(/[\\/]+/g, '/').replace(/\/+$/, '')
+  const windows = (value: string) => /^[a-zA-Z]:/.test(value)
+  const target = normalize(path)
+  const root = normalize(folderPath)
+  const comparable = (value: string) => (windows(value) ? value.toLowerCase() : value)
+  const left = comparable(target)
+  const right = comparable(root)
+  return left === right || left.startsWith(`${right}/`)
+}
+
 /** A sheet/topic title turned into a safe file name component: illegal characters stripped, never empty. */
 export function sanitizeFileName(name: string): string {
   const cleaned = name.replace(ILLEGAL_FILENAME_CHARS, ' ').replace(/\s+/g, ' ').trim()

@@ -1,6 +1,6 @@
 import { appConfigDir, join } from '@tauri-apps/api/path'
-import { exists, mkdir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
-import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { exists, mkdir, readTextFile, remove, writeTextFile } from '@tauri-apps/plugin-fs'
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 
 const LOG_FILE_NAME = 'sync-debug.log'
 
@@ -18,7 +18,7 @@ const KEEP_AFTER_TRIM_CHARS = 256 * 1024
 
 const TRIM_MARKER = '--- journal tronqué : seules les dernières lignes sont conservées ---\n'
 
-export type SyncLogLevel = 'info' | 'error'
+export type SyncLogLevel = 'debug' | 'info' | 'error'
 
 /** `appConfigDir()/sync-debug.log` — the file the settings screen shows and opens. */
 export async function syncLogPath(): Promise<string> {
@@ -46,7 +46,8 @@ function describeDetail(detail: unknown): string {
  * raw detail that only matters when it did not work.
  */
 export function formatSyncLogLine(level: SyncLogLevel, message: string, detail: unknown, at: Date): string {
-  const label = level === 'error' ? 'ERREUR' : 'INFO  '
+  const labels: Record<SyncLogLevel, string> = { debug: 'DEBUG ', info: 'INFO  ', error: 'ERREUR' }
+  const label = labels[level]
   const tail = detail === undefined ? '' : ` | ${describeDetail(detail)}`
   return `${at.toISOString()}  ${label}  ${message}${tail}\n`
 }
@@ -90,6 +91,36 @@ export async function logSyncEvent(level: SyncLogLevel, message: string, detail?
  * Unlike `logSyncEvent`, this DOES propagate: an "open the logs" button that
  * silently does nothing would be worse than an error message.
  */
+/**
+ * Opens the log in whatever the system uses for text files — the quickest way
+ * from « ça n'a pas marché » to reading why, without hunting for a folder.
+ *
+ * Unlike the writing side, failures PROPAGATE: a missing file gets its own
+ * sentence, because "nothing happened" is exactly what the user cannot debug.
+ */
+export async function openSyncLog(): Promise<string> {
+  const path = await syncLogPath()
+  if (!(await exists(path))) {
+    throw new Error('Le journal est encore vide : lancez une synchronisation, puis réessayez.')
+  }
+  await openPath(path)
+  return path
+}
+
+/**
+ * Empties the log, so the next attempt is read on its own rather than mixed with
+ * a week of older runs. Nothing is lost that matters: this file is a debugging
+ * aid, never a record the app reads back.
+ *
+ * @returns whether a file was actually removed.
+ */
+export async function clearSyncLog(): Promise<boolean> {
+  const path = await syncLogPath()
+  if (!(await exists(path))) return false
+  await remove(path)
+  return true
+}
+
 export async function revealSyncLog(): Promise<string> {
   const path = await syncLogPath()
   if (await exists(path)) {
