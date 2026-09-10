@@ -29,6 +29,8 @@ export function SyncSettingsPanel() {
   const status = useSyncStore(s => s.status)
   const error = useSyncStore(s => s.error)
   const lastResult = useSyncStore(s => s.lastResult)
+  const progress = useSyncStore(s => s.progress)
+  const cancelSync = useSyncStore(s => s.cancelSync)
   const setServerUrl = useSyncStore(s => s.setServerUrl)
   const setSyncFolderPath = useSyncStore(s => s.setSyncFolderPath)
   const login = useSyncStore(s => s.login)
@@ -140,8 +142,18 @@ export function SyncSettingsPanel() {
       <SettingsSection title="Synchronisation">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Button onClick={() => void syncNow()} disabled={status === 'syncing' || !currentUser || !syncFolderPath}>
-            <CloudSync size={14} /> {status === 'syncing' ? 'Synchronisation…' : 'Synchroniser'}
+            <CloudSync size={14} />{' '}
+            {status === 'syncing'
+              ? progress === null
+                ? 'Synchronisation…'
+                : `Synchronisation ${progress.done}/${progress.total}…`
+              : 'Synchroniser'}
           </Button>
+          {status === 'syncing' && (
+            <Button variant="outline" onClick={cancelSync}>
+              Annuler
+            </Button>
+          )}
           {lastResult && (
             <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)' }}>
               {syncResultLabel(lastResult)}

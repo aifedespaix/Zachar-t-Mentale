@@ -30,8 +30,12 @@ interface SyncStoreState {
    * it cannot be known (nobody signed in, no folder, folder unreadable).
    */
   pendingCount: number | null
+  /** Where the run in flight has got to, or `null` when nothing is running. */
+  progress: { done: number; total: number } | null
   /** Recomputes `pendingCount` — the one place that walks the sync folder for it. */
   refreshPendingCount: () => Promise<void>
+  /** Asks the run in flight to stop; a no-op when nothing is running. */
+  cancelSync: () => void
   init: () => Promise<void>
   setServerUrl: (url: string) => Promise<void>
   setSyncFolderPath: (path: string | null) => Promise<void>
@@ -74,6 +78,9 @@ export function createSyncStore(): SyncStore {
   // for it.
   let client: PocketBase | null = null
   let clientServerUrl: string | null = null
+  // The run in flight, so `cancelSync` has something to abort. Cleared at the
+  // end of every run, which is what keeps a finished one from being cancelled.
+  let runningSync: AbortController | null = null
 
   return create<SyncStoreState>((set, get) => {
     function clientFor(serverUrl: string): PocketBase {
@@ -107,6 +114,7 @@ export function createSyncStore(): SyncStore {
       lastResult: null,
       lastSuccessAt: null,
       pendingCount: null,
+      progress: null,
 
       init: async () => {
         const settings = await loadSyncSettings()
@@ -119,6 +127,13 @@ export function createSyncStore(): SyncStore {
         // The count depends on the session and the folder that were just
         // restored, so it is computed once here rather than on every render.
         void get().refreshPendingCount()
+      },
+
+      cancelSync: () => {
+        // Only the run in flight can be stopped: a stale controller (from a
+        // finished run) must never abort the next one.
+        if (get().status !== 'syncing') return
+        runningSync?.abort()
       },
 
       refreshPendingCount: async () => {
@@ -199,7 +214,9 @@ export function createSyncStore(): SyncStore {
           await logSyncEvent('info', `synchronisation ignorée : ${message}`)
           return
         }
-        set({ status: 'syncing', error: null })
+        const controller = new AbortController()
+        runningSync = controller
+        set({ status: 'syncing', error: null, progress: null })
         // Written BEFORE the network work: if the app dies mid-sync, the log
         // still shows a run was under way.
         await logSyncEvent(
@@ -209,28 +226,48 @@ export function createSyncStore(): SyncStore {
         try {
           const pb = clientFor(serverUrl)
           const state = await loadSyncState()
-          const result = await sync({
-            client: createSyncClient(pb),
-            currentUser: currentUser.username,
-            syncFolderPath,
-            state,
-          })
-          await saveSyncState(state)
-          await logSyncEvent('info', `synchronisation terminée : ${syncResultLabel(result)}`)
+          let result: SyncResult
+          try {
+            result = await sync({
+              client: createSyncClient(pb),
+              currentUser: currentUser.username,
+              syncFolderPath,
+              state,
+              signal: controller.signal,
+              onProgress: (done, total) => set({ progress: { done, total } }),
+            })
+          } finally {
+            // Whatever ended the run — completion, cancellation or a hard
+            // failure — the per-file cache must keep what did get through, or
+            // the next run would send it all over again.
+            await saveSyncState(state)
+          }
+
+          await logSyncEvent('info', `synchronisation : ${syncResultLabel(result)}`)
           if (result.errors.length > 0) {
             // The per-file detail, which is what a bug report actually needs.
             await logSyncEvent('error', 'fichiers en erreur pendant la synchronisation', result.errors)
           }
-          const finishedAt = new Date().toISOString()
-          // The state update comes first: the button must come back to life
-          // before the two disk writes and the folder walk below.
-          set({ status: 'idle', lastResult: result, lastSuccessAt: finishedAt })
-          await saveSyncStatus({ lastSuccessAt: finishedAt })
+          if (result.cancelled) {
+            // An interrupted run is not a success: « dernière synchro » must not
+            // claim a moment when only part of the folder went through.
+            set({ status: 'idle', lastResult: result, progress: null })
+          } else {
+            const finishedAt = new Date().toISOString()
+            // The state update comes first: the button must come back to life
+            // before the two disk writes and the folder walk below.
+            set({ status: 'idle', lastResult: result, lastSuccessAt: finishedAt, progress: null })
+            await saveSyncStatus({ lastSuccessAt: finishedAt })
+          }
           await get().refreshPendingCount()
         } catch (error) {
           const message = describeSyncStoreError(error)
           await logSyncEvent('error', `synchronisation échouée : ${message}`, error)
-          set({ status: 'idle', error: message })
+          set({ status: 'idle', error: message, progress: null })
+        } finally {
+          // Cleared only if it is still OURS: a run that finished must not
+          // disarm the controller of the one that replaced it.
+          if (runningSync === controller) runningSync = null
         }
       },
     }

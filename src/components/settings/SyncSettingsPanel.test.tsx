@@ -51,6 +51,18 @@ describe('SyncSettingsPanel', () => {
     expect(login).toHaveBeenCalledWith('aife', 'secret')
   })
 
+  it('shows the run’s progress and lets it be cancelled from here too', async () => {
+    const user = userEvent.setup()
+    const cancelSync = vi.fn()
+    useSyncStore.setState({ status: 'syncing', progress: { done: 3, total: 5 }, cancelSync })
+    render(<SyncSettingsPanel />)
+
+    expect(screen.getByRole('button', { name: /synchronisation 3\/5/i })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Annuler' }))
+
+    expect(cancelSync).toHaveBeenCalled()
+  })
+
   it('disables Synchroniser until logged in with a folder chosen', () => {
     render(<SyncSettingsPanel />)
     expect(screen.getByRole('button', { name: /synchroniser/i })).toBeDisabled()
@@ -60,7 +72,7 @@ describe('SyncSettingsPanel', () => {
     useSyncStore.setState({
       currentUser: { username: 'aife', role: 'prof' },
       syncFolderPath: '/cours',
-      lastResult: { pushed: 2, pulled: 1, errors: [] },
+      lastResult: { pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [] },
     })
     render(<SyncSettingsPanel />)
     expect(screen.getByText(/2 envoyé\(s\), 1 reçu\(s\)/)).toBeInTheDocument()
@@ -70,7 +82,7 @@ describe('SyncSettingsPanel', () => {
     useSyncStore.setState({
       currentUser: { username: 'aife', role: 'prof' },
       syncFolderPath: '/cours',
-      lastResult: { pushed: 0, pulled: 0, errors: [{ fileId: 'f1', message: 'un message de test' }] },
+      lastResult: { pushed: 0, pulled: 0, errors: [{ fileId: 'f1', message: 'un message de test' }], cancelled: false, conflicts: [] },
     })
     render(<SyncSettingsPanel />)
     expect(screen.getByText(/f1/)).toBeInTheDocument()

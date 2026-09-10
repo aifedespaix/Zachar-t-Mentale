@@ -62,6 +62,7 @@ function resetSyncStore() {
     lastResult: null,
     lastSuccessAt: null,
     pendingCount: null,
+    progress: null,
     syncNow: vi.fn().mockResolvedValue(undefined),
   })
 }
@@ -348,7 +349,7 @@ describe('FileSidebar', () => {
     const user = userEvent.setup()
     useSyncStore.setState({ syncFolderPath: '/cours-svt' })
     vi.mocked(useSyncStore.getState().syncNow).mockImplementation(async () => {
-      useSyncStore.setState({ lastResult: { pushed: 2, pulled: 1, errors: [] } })
+      useSyncStore.setState({ lastResult: { pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [] } })
     })
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('Cartes mentales')
@@ -422,6 +423,20 @@ describe('FileSidebar', () => {
     expect(tooltip).toHaveTextContent(/dernière synchro il y a 12 min/)
   })
 
+  it('shows how far the run has got, and lets the user stop it', async () => {
+    const user = userEvent.setup()
+    const cancelSync = vi.spyOn(useSyncStore.getState(), 'cancelSync')
+    useSyncStore.setState({ status: 'syncing', progress: { done: 3, total: 5 }, currentUser: { username: 'aife', role: 'prof' } })
+    render(<FileSidebar onOpenFile={() => {}} />)
+
+    expect(await screen.findByText(/Synchronisation 3\/5…/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Annuler la synchronisation' }))
+
+    expect(cancelSync).toHaveBeenCalled()
+    cancelSync.mockRestore()
+  })
+
   it('recomputes what is waiting as soon as a sync finishes', async () => {
     const user = userEvent.setup()
     useSyncStore.setState({
@@ -429,7 +444,7 @@ describe('FileSidebar', () => {
       currentUser: { username: 'aife', role: 'prof' },
     })
     vi.mocked(useSyncStore.getState().syncNow).mockImplementation(async () => {
-      useSyncStore.setState({ lastResult: { pushed: 1, pulled: 1, errors: [] } })
+      useSyncStore.setState({ lastResult: { pushed: 1, pulled: 1, errors: [], cancelled: false, conflicts: [] } })
     })
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('Cartes mentales')

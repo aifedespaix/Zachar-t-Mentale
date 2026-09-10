@@ -100,6 +100,8 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const syncError = useSyncStore(s => s.error)
   const lastResult = useSyncStore(s => s.lastResult)
   const syncNow = useSyncStore(s => s.syncNow)
+  const syncProgress = useSyncStore(s => s.progress)
+  const cancelSync = useSyncStore(s => s.cancelSync)
   const pendingCount = useSyncStore(s => s.pendingCount)
   const lastSuccessAt = useSyncStore(s => s.lastSuccessAt)
   const refreshPendingCount = useSyncStore(s => s.refreshPendingCount)
@@ -340,8 +342,11 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   }
 
   const syncRunning = syncStatus === 'syncing'
-  const showSyncError = syncError !== null && !syncFeedbackDismissed
-  const showSyncResult = syncError === null && lastResult !== null && !syncFeedbackDismissed
+  // While a run is in flight, the running banner IS the message: showing last
+  // run's result beside it would describe a state that no longer holds.
+  const showSyncError = syncError !== null && !syncFeedbackDismissed && !syncRunning
+  const showSyncResult =
+    syncError === null && lastResult !== null && !syncFeedbackDismissed && !syncRunning
   // The per-file failures are far too long to list in a 240 px column; they stay
   // readable in the tooltip, and in full in Réglages → Synchronisation.
   const syncResultDetail =
@@ -427,8 +432,25 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
           sync is explained next to the button that was clicked, not at the far
           end of the panel from it.
         */}
-        {(workspaceError !== null || showSyncError || showSyncResult) && (
+        {(workspaceError !== null || syncRunning || showSyncError || showSyncResult) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 8px 6px', flexShrink: 0 }}>
+            {syncRunning && (
+              <div role="status" className="status-banner status-banner--info" style={{ margin: 0 }}>
+                <span style={{ flex: 1 }}>
+                  {syncProgress === null
+                    ? 'Synchronisation…'
+                    : `Synchronisation ${syncProgress.done}/${syncProgress.total}…`}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Annuler la synchronisation"
+                  onClick={cancelSync}
+                >
+                  <X size={14} />
+                </Button>
+              </div>
+            )}
             {workspaceError && (
               <div role="alert" className="status-banner" style={{ margin: 0 }}>
                 <span style={{ flex: 1 }}>{workspaceError}</span>

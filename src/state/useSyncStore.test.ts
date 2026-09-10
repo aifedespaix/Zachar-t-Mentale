@@ -106,7 +106,7 @@ describe('useSyncStore', () => {
   it('a successful sync records and persists when it finished', async () => {
     const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
-    vi.mocked(sync).mockResolvedValue({ pushed: 1, pulled: 0, errors: [] })
+    vi.mocked(sync).mockResolvedValue({ pushed: 1, pulled: 0, errors: [], cancelled: false, conflicts: [] })
     await store.getState().setServerUrl('https://pi.local')
     await store.getState().setSyncFolderPath('/cours')
     await store.getState().login('aife', 'secret')
@@ -228,7 +228,7 @@ describe('useSyncStore', () => {
   it('syncNow() runs the sync algorithm and stores the result', async () => {
     const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
-    vi.mocked(sync).mockResolvedValue({ pushed: 2, pulled: 1, errors: [] })
+    vi.mocked(sync).mockResolvedValue({ pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [] })
     await store.getState().setServerUrl('https://pi.local')
     await store.getState().setSyncFolderPath('/cours')
     await store.getState().login('aife', 'secret')
@@ -238,14 +238,14 @@ describe('useSyncStore', () => {
     expect(sync).toHaveBeenCalledWith(
       expect.objectContaining({ currentUser: 'aife', syncFolderPath: '/cours' })
     )
-    expect(store.getState().lastResult).toEqual({ pushed: 2, pulled: 1, errors: [] })
+    expect(store.getState().lastResult).toEqual({ pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [] })
     expect(saveSyncState).toHaveBeenCalled()
   })
 
   it('syncNow() writes the run and its counters to the debug log', async () => {
     const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
-    vi.mocked(sync).mockResolvedValue({ pushed: 2, pulled: 1, errors: [] })
+    vi.mocked(sync).mockResolvedValue({ pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [] })
     await store.getState().setServerUrl('https://pi.local')
     await store.getState().setSyncFolderPath('/cours')
     await store.getState().login('aife', 'secret')
@@ -281,7 +281,7 @@ describe('useSyncStore', () => {
     const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
     const errors = [{ fileId: 'file-1', message: 'réseau coupé' }]
-    vi.mocked(sync).mockResolvedValue({ pushed: 1, pulled: 0, errors })
+    vi.mocked(sync).mockResolvedValue({ pushed: 1, pulled: 0, errors, cancelled: false, conflicts: [] })
     await store.getState().setServerUrl('https://pi.local')
     await store.getState().setSyncFolderPath('/cours')
     await store.getState().login('aife', 'secret')
@@ -306,6 +306,70 @@ describe('useSyncStore', () => {
     )
   })
 
+  it('publishes the progress of the run, and forgets it once the run is over', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(sync).mockImplementation(async params => {
+      params.onProgress?.(1, 2)
+      params.onProgress?.(2, 2)
+      return { pushed: 2, pulled: 0, errors: [], cancelled: false, conflicts: [] }
+    })
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+    const seen: Array<{ done: number; total: number } | null> = []
+    const unsubscribe = store.subscribe(state => seen.push(state.progress))
+
+    await store.getState().syncNow()
+    unsubscribe()
+
+    expect(seen).toContainEqual({ done: 1, total: 2 })
+    expect(seen).toContainEqual({ done: 2, total: 2 })
+    expect(store.getState().progress).toBeNull()
+  })
+
+  it('cancelSync() stops the run in flight, and an interrupted run is not a success', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(sync).mockImplementation(async params => {
+      // Stands in for the algorithm: resolves when the store aborts the signal
+      // it handed us, exactly as a cancelled run would — including when it was
+      // already aborted before this call, which is what a click on « Annuler »
+      // during the few milliseconds of setup does.
+      return new Promise(resolve => {
+        const finish = () => resolve({ pushed: 1, pulled: 0, errors: [], cancelled: true, conflicts: [] })
+        if (params.signal?.aborted === true) {
+          finish()
+          return
+        }
+        params.signal?.addEventListener('abort', finish)
+      })
+    })
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+
+    const running = store.getState().syncNow()
+    // `status` flips to 'syncing' synchronously, but the algorithm is only
+    // reached a few awaits later — cancelling before that would abort a signal
+    // nothing is listening to yet.
+    await vi.waitFor(() => expect(sync).toHaveBeenCalled())
+    store.getState().cancelSync()
+    await running
+
+    expect(store.getState().lastResult?.cancelled).toBe(true)
+    // Nothing was fully synchronised, so the interface must not claim a date.
+    expect(store.getState().lastSuccessAt).toBeNull()
+    expect(saveSyncStatus).not.toHaveBeenCalled()
+    expect(store.getState().status).toBe('idle')
+    expect(store.getState().progress).toBeNull()
+  })
+
+  it('cancelSync() is a no-op when nothing is running', () => {
+    expect(() => store.getState().cancelSync()).not.toThrow()
+    expect(vi.mocked(sync)).not.toHaveBeenCalled()
+  })
+
   it('syncNow() drops a second call while the first is still running', async () => {
     const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
@@ -315,7 +379,7 @@ describe('useSyncStore', () => {
     vi.mocked(sync).mockImplementation(
       () =>
         new Promise(resolve => {
-          releaseSync = () => resolve({ pushed: 0, pulled: 0, errors: [] })
+          releaseSync = () => resolve({ pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [] })
         })
     )
     await store.getState().setServerUrl('https://pi.local')

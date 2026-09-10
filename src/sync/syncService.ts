@@ -24,16 +24,31 @@ export interface RemoteAssetRecord {
   extension: string
 }
 
+/**
+ * The one request option the sync threads through to PocketBase: cancelling a
+ * run in flight. Every call is optional-options so a fake can ignore it.
+ */
+export interface RequestOptions {
+  signal?: AbortSignal
+}
+
 export interface MindMapsApi {
-  getFullList(): Promise<RemoteMindMapRecord[]>
-  create(data: { file_id: string; author: string; path: string; content: string }): Promise<RemoteMindMapRecord>
-  update(id: string, data: { path: string; content: string }): Promise<RemoteMindMapRecord>
+  getFullList(options?: RequestOptions): Promise<RemoteMindMapRecord[]>
+  create(
+    data: { file_id: string; author: string; path: string; content: string },
+    options?: RequestOptions
+  ): Promise<RemoteMindMapRecord>
+  update(
+    id: string,
+    data: { path: string; content: string },
+    options?: RequestOptions
+  ): Promise<RemoteMindMapRecord>
 }
 
 export interface AssetsApi {
-  getFullList(): Promise<RemoteAssetRecord[]>
-  upload(hash: string, extension: string, bytes: Uint8Array): Promise<void>
-  download(record: RemoteAssetRecord): Promise<Uint8Array>
+  getFullList(options?: RequestOptions): Promise<RemoteAssetRecord[]>
+  upload(hash: string, extension: string, bytes: Uint8Array, options?: RequestOptions): Promise<void>
+  download(record: RemoteAssetRecord, options?: RequestOptions): Promise<Uint8Array>
 }
 
 export interface SyncClient {
@@ -41,10 +56,27 @@ export interface SyncClient {
   assets: AssetsApi
 }
 
+/** A file both sides changed since the last sync — skipped, never resolved in silence. */
+export interface SyncConflict {
+  fileId: string
+  path: string
+  /** The local file's own `meta.lastModified`. */
+  localModified: string
+  /** The server record's `updated`. */
+  remoteUpdated: string
+}
+
 export interface SyncResult {
   pushed: number
   pulled: number
   errors: { fileId: string; message: string }[]
+  /** The run stopped on the caller's signal instead of finishing its own walk. */
+  cancelled: boolean
+  /**
+   * Files the two sides disagree on. They are NOT pushed and NOT overwritten:
+   * both versions contain work someone did, and only the user can choose.
+   */
+  conflicts: SyncConflict[]
 }
 
 interface SyncParams {
@@ -52,6 +84,18 @@ interface SyncParams {
   currentUser: string
   syncFolderPath: string
   state: SyncState
+  /**
+   * Checked between two files, and handed to PocketBase so a slow request can be
+   * cut short as well. An aborted run returns normally, with `cancelled: true`.
+   */
+  signal?: AbortSignal
+  /** Called once per file handled — sent, received or failed — with the running count. */
+  onProgress?: (done: number, total: number) => void
+}
+
+/** The PocketBase SDK flags a cancelled request this way (`ClientResponseError.isAbort`). */
+function isAbortError(error: unknown): boolean {
+  return error !== null && typeof error === 'object' && (error as { isAbort?: unknown }).isAbort === true
 }
 
 /**
@@ -124,7 +168,12 @@ function isSafeRelativePath(path: string): boolean {
 }
 
 /** Every local `.assets` file the app wrote for this map — no need to parse card content, only content ever written is ever present. */
-async function pushAssetsFor(client: SyncClient, mindMapPath: string, knownHashes: Set<string>): Promise<void> {
+async function pushAssetsFor(
+  client: SyncClient,
+  mindMapPath: string,
+  knownHashes: Set<string>,
+  options?: RequestOptions
+): Promise<void> {
   const sidecar = sidecarDirOf(mindMapPath)
   if (!(await exists(sidecar))) return
   const entries = await readDir(sidecar)
@@ -135,7 +184,7 @@ async function pushAssetsFor(client: SyncClient, mindMapPath: string, knownHashe
     const extension = entry.name.slice(dot + 1)
     if (knownHashes.has(hash)) continue
     const bytes = await readAssetBytes(mindMapPath, entry.name)
-    await client.assets.upload(hash, extension, bytes)
+    await client.assets.upload(hash, extension, bytes, options)
     knownHashes.add(hash)
   }
 }
@@ -150,9 +199,14 @@ function referencedAssets(content: string, knownAssets: RemoteAssetRecord[]): Re
   return knownAssets.filter(asset => content.includes(`${asset.hash}.${asset.extension}`))
 }
 
-async function pullAssetsFor(client: SyncClient, mindMapPath: string, assets: RemoteAssetRecord[]): Promise<void> {
+async function pullAssetsFor(
+  client: SyncClient,
+  mindMapPath: string,
+  assets: RemoteAssetRecord[],
+  options?: RequestOptions
+): Promise<void> {
   for (const asset of assets) {
-    const bytes = await client.assets.download(asset)
+    const bytes = await client.assets.download(asset, options)
     await writeAsset(mindMapPath, bytes, asset.extension)
   }
 }
@@ -169,16 +223,33 @@ async function ensureLocalFolder(path: string): Promise<void> {
  * by the server's `updated` for a pull) simply wins, and a per-file failure
  * is collected without aborting the rest of the batch.
  */
-export async function sync({ client, currentUser, syncFolderPath, state }: SyncParams): Promise<SyncResult> {
-  const result: SyncResult = { pushed: 0, pulled: 0, errors: [] }
+export async function sync({
+  client,
+  currentUser,
+  syncFolderPath,
+  state,
+  signal,
+  onProgress,
+}: SyncParams): Promise<SyncResult> {
+  const result: SyncResult = { pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [] }
 
-  const remoteRecords = await client.mindMaps.getFullList()
-  const remoteAssets = await client.assets.getFullList()
+  const remoteRecords = await client.mindMaps.getFullList({ signal })
+  const remoteAssets = await client.assets.getFullList({ signal })
   const knownHashes = new Set(remoteAssets.map(asset => asset.hash))
   const remoteByFileId = new Map(remoteRecords.map(record => [record.file_id, record]))
 
   const localTree = await scanFolder(syncFolderPath)
   const localPaths = flattenMindMapPaths(localTree)
+
+  // Both halves are known up front, so the caller can show « 4/12 » from the
+  // first file rather than a spinner with no end in sight.
+  const total = localPaths.length + remoteRecords.length
+  let done = 0
+  const report = () => {
+    done += 1
+    onProgress?.(done, total)
+  }
+  const aborted = () => signal?.aborted === true
 
   // Guards a single sync run against two local files claiming the same
   // `meta.id`: without it, alternating pushes of two different files would
@@ -186,28 +257,29 @@ export async function sync({ client, currentUser, syncFolderPath, state }: SyncP
   // prevent such a duplicate from arising in the first place.
   const seenFileIds = new Set<string>()
 
-  for (const path of localPaths) {
+  /** Everything the push pass does for ONE local file. */
+  async function pushOne(path: string): Promise<void> {
     let meta: MindMapMeta | null
     try {
       meta = await loadMindMapMeta(path)
     } catch (error) {
       result.errors.push({ fileId: path, message: describeSyncError(error) })
-      continue
+      return
     }
-    if (meta === null || meta.author !== currentUser) continue
+    if (meta === null || meta.author !== currentUser) return
 
     if (seenFileIds.has(meta.id)) {
       result.errors.push({ fileId: meta.id, message: 'plusieurs fichiers locaux partagent le même identifiant de synchronisation' })
-      continue
+      return
     }
     seenFileIds.add(meta.id)
 
     const known = state[meta.id]
-    if (!isPushPending(meta, currentUser, known)) continue
+    if (!isPushPending(meta, currentUser, known)) return
 
     try {
       const cards = await loadMindMap(path)
-      if (cards === null) continue
+      if (cards === null) return
       const content = serializeMindMap(meta, cards)
       const relPath = relativeTo(syncFolderPath, path)
       // Assets are pushed BEFORE the record that references them: an
@@ -215,26 +287,43 @@ export async function sync({ client, currentUser, syncFolderPath, state }: SyncP
       // names an asset hash with no matching asset row yet — that image
       // would then never be retried (the pull-side `>=` skip check treats
       // the record's `updated` as fully synced regardless of its assets).
-      await pushAssetsFor(client, path, knownHashes)
+      await pushAssetsFor(client, path, knownHashes, { signal })
       const existing = remoteByFileId.get(meta.id)
       const savedRecord = existing
-        ? await client.mindMaps.update(existing.id, { content, path: relPath })
-        : await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content })
+        ? await client.mindMaps.update(existing.id, { content, path: relPath }, { signal })
+        : await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content }, { signal })
       state[meta.id] = { lastSyncedModified: meta.lastModified, lastSyncedUpdated: savedRecord.updated }
       result.pushed += 1
     } catch (error) {
+      // A cancelled request is not a file that failed: the run stops, without
+      // blaming a file the user themselves interrupted.
+      if (aborted() || isAbortError(error)) {
+        result.cancelled = true
+        return
+      }
       result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
     }
   }
 
-  for (const record of remoteRecords) {
-    if (record.author === currentUser) continue
+  for (const path of localPaths) {
+    if (aborted()) {
+      result.cancelled = true
+      break
+    }
+    await pushOne(path)
+    report()
+    if (result.cancelled) break
+  }
+
+  /** Everything the pull pass does for ONE remote record. */
+  async function pullOne(record: RemoteMindMapRecord): Promise<void> {
+    if (record.author === currentUser) return
     const known = state[record.file_id]
-    if (known && known.lastSyncedUpdated >= record.updated) continue
+    if (known && known.lastSyncedUpdated >= record.updated) return
 
     if (!isSafeRelativePath(record.path)) {
       result.errors.push({ fileId: record.file_id, message: 'chemin distant invalide, fichier ignoré' })
-      continue
+      return
     }
 
     try {
@@ -254,19 +343,34 @@ export async function sync({ client, currentUser, syncFolderPath, state }: SyncP
             fileId: record.file_id,
             message: 'un fichier local existe déjà à cet emplacement et n’est pas ce fichier synchronisé',
           })
-          continue
+          return
         }
       }
 
       await ensureLocalFolder(localPath)
       await writeTextFile(localPath, record.content)
-      await pullAssetsFor(client, localPath, referencedAssets(record.content, remoteAssets))
+      await pullAssetsFor(client, localPath, referencedAssets(record.content, remoteAssets), { signal })
       state[record.file_id] = { lastSyncedModified: meta?.lastModified ?? record.updated, lastSyncedUpdated: record.updated }
       result.pulled += 1
       void cards // validated by deserializeMindMap succeeding; the written file is the record's own content verbatim
     } catch (error) {
+      if (aborted() || isAbortError(error)) {
+        result.cancelled = true
+        return
+      }
       result.errors.push({ fileId: record.file_id, message: describeSyncError(error) })
     }
+  }
+
+  for (const record of remoteRecords) {
+    // An interrupted push stops the whole run: the user asked to stop, not to
+    // continue with the other half.
+    if (result.cancelled || aborted()) {
+      result.cancelled = true
+      break
+    }
+    await pullOne(record)
+    report()
   }
 
   return result

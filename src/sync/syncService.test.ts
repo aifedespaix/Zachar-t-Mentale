@@ -131,8 +131,11 @@ describe('sync — push', () => {
 
     const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state })
 
+    // The second argument is the request options the sync threads through
+    // (cancellation); the payload is what this test is about.
     expect(client.mindMaps.create).toHaveBeenCalledWith(
-      expect.objectContaining({ file_id: 'file-1', author: 'aife', path: 'a.zmap' })
+      expect.objectContaining({ file_id: 'file-1', author: 'aife', path: 'a.zmap' }),
+      expect.anything()
     )
     expect(result.pushed).toBe(1)
     expect(state['file-1']).toEqual({ lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: '2026-01-02 00:00:00.000Z' })
@@ -147,7 +150,7 @@ describe('sync — push', () => {
 
     await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
 
-    expect(client.mindMaps.update).toHaveBeenCalledWith('rec-1', expect.objectContaining({ path: 'a.zmap' }))
+    expect(client.mindMaps.update).toHaveBeenCalledWith('rec-1', expect.objectContaining({ path: 'a.zmap' }), expect.anything())
     expect(client.mindMaps.create).not.toHaveBeenCalled()
   })
 
@@ -226,7 +229,7 @@ describe('sync — push', () => {
 
     await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
 
-    expect(upload).toHaveBeenCalledWith('hash1', 'png', new Uint8Array([9, 9, 9]))
+    expect(upload).toHaveBeenCalledWith('hash1', 'png', new Uint8Array([9, 9, 9]), expect.anything())
     // The asset must be uploaded before the record referencing it is saved,
     // so a concurrent reader's getFullList() never sees a record naming an
     // asset that isn't there yet.
@@ -269,6 +272,113 @@ describe('sync — push', () => {
     expect(result.errors).toEqual([
       { fileId: 'file-1', message: 'plusieurs fichiers locaux partagent le même identifiant de synchronisation' },
     ])
+  })
+})
+
+describe('sync — progression et annulation', () => {
+  it('reports one step per file handled, over everything it knows about', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
+      { type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' },
+    ])
+    vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const foreign: RemoteMindMapRecord = {
+      id: 'rec-9',
+      file_id: 'file-9',
+      author: 'prof',
+      path: 'c.zmap',
+      content: JSON.stringify({ cards: [] }),
+      updated: '2026-01-02 00:00:00.000Z',
+    }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([foreign]) } as any })
+    const progress: Array<[number, number]> = []
+
+    await sync({
+      client,
+      currentUser: 'aife',
+      syncFolderPath: '/cours',
+      state: {},
+      onProgress: (done, total) => progress.push([done, total]),
+    })
+
+    expect(progress).toEqual([
+      [1, 3],
+      [2, 3],
+      [3, 3],
+    ])
+  })
+
+  it('touches no file when the signal is already aborted', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    const client = fakeClient()
+    const controller = new AbortController()
+    controller.abort()
+
+    const result = await sync({
+      client,
+      currentUser: 'aife',
+      syncFolderPath: '/cours',
+      state: {},
+      signal: controller.signal,
+    })
+
+    expect(result.cancelled).toBe(true)
+    expect(client.mindMaps.create).not.toHaveBeenCalled()
+  })
+
+  it('stops mid-run when the signal aborts, keeping what already went through', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
+      { type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' },
+    ])
+    vi.mocked(loadMindMapMeta).mockImplementation(async path => ({
+      ...AIFE,
+      id: path.includes('a.zmap') ? 'a' : 'b',
+    }))
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const controller = new AbortController()
+    const client = fakeClient()
+    vi.mocked(client.mindMaps.create).mockImplementation(async data => {
+      // The user hit « Annuler » while this very file was in flight.
+      controller.abort()
+      return { id: 'rec-1', updated: '2026-01-02 00:00:00.000Z', ...data }
+    })
+    const state: SyncState = {}
+
+    const result = await sync({
+      client,
+      currentUser: 'aife',
+      syncFolderPath: '/cours',
+      state,
+      signal: controller.signal,
+    })
+
+    expect(result.cancelled).toBe(true)
+    expect(result.pushed).toBe(1)
+    expect(client.mindMaps.create).toHaveBeenCalledTimes(1)
+    // The cache remembers the file that DID go through, so the next run does
+    // not send it a second time.
+    expect(Object.keys(state)).toEqual(['a'])
+  })
+
+  it('does not blame a file for a request the user cancelled', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const abortError = Object.assign(new Error('The operation was aborted.'), { isAbort: true })
+    const client = fakeClient({
+      mindMaps: {
+        getFullList: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockRejectedValue(abortError),
+        update: vi.fn(),
+      } as any,
+    })
+
+    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+
+    expect(result.errors).toEqual([])
+    expect(result.cancelled).toBe(true)
   })
 })
 
@@ -332,7 +442,7 @@ describe('sync — pull', () => {
 
     await sync({ client, currentUser: 'eleve1', syncFolderPath: '/cours', state: {} })
 
-    expect(download).toHaveBeenCalledWith(asset)
+    expect(download).toHaveBeenCalledWith(asset, expect.anything())
     expect(writeAsset).toHaveBeenCalledWith('/cours/b.zmap', new Uint8Array([1, 2, 3]), 'png')
   })
 
