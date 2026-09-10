@@ -11,6 +11,7 @@ import {
 import { useCardsStore } from '../state/useCardsStore'
 import { useWorkspaceStore } from '../state/useWorkspaceStore'
 import { useQuizStore, createQuizStore } from '../state/useQuizStore'
+import { useCardSelectionStore } from '../state/useCardSelectionStore'
 import type { Card } from '../types/card'
 
 // Spy on setCenter without disturbing any other @xyflow/react behavior —
@@ -416,6 +417,10 @@ describe('MindMapCanvas — context menu', () => {
   beforeEach(() => {
     useCardsStore.getState().loadCards([root, child])
     useCardsStore.setState({ locked: false })
+    useCardSelectionStore.getState().reset()
+    // The quiz suite above leaves its store active, and the menus read it: no
+    // card action is offered while a quiz is running.
+    useQuizStore.setState(createQuizStore().getState())
     useWorkspaceStore.setState({ currentFilePath: null })
     vi.mocked(exportToPdfBytes).mockClear()
     vi.mocked(exportToImageDataUrls).mockClear()
@@ -429,13 +434,22 @@ describe('MindMapCanvas — context menu', () => {
     expect(await screen.findByRole('menuitem', { name: /créer une carte volante/i })).toBeInTheDocument()
   })
 
-  it('opens on right-click on a card too, not just the canvas background', async () => {
+  it('opens the CARD menu on a card, not the canvas one', async () => {
     render(<MindMapCanvas />)
     // The card's own outer element, not its (always-mounted) title textarea —
-    // that textarea stops this event from propagating (see CardNode.tsx), so
-    // this proves the fix didn't also kill the app's own menu on cards.
+    // that textarea stops this event from propagating (see CardNode.tsx).
     fireEvent.contextMenu(screen.getByTestId('card-child'))
-    expect(await screen.findByRole('menuitem', { name: /créer une carte volante/i })).toBeInTheDocument()
+    // Card actions, and none of the canvas ones: a right-click on a card is a
+    // question about that card, and the two menus must not both open.
+    expect(await screen.findByRole('menuitem', { name: /^renommer/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /créer une carte volante/i })).not.toBeInTheDocument()
+  })
+
+  it('selects the card it was opened on, so its actions act on that card', async () => {
+    render(<MindMapCanvas />)
+    fireEvent.contextMenu(screen.getByTestId('card-child'))
+    await screen.findByRole('menuitem', { name: /^renommer/i })
+    expect(useCardSelectionStore.getState().selectedCardId).toBe('child')
   })
 
   it('creates a floating card', async () => {
@@ -448,21 +462,26 @@ describe('MindMapCanvas — context menu', () => {
     expect(useCardsStore.getState().history.present.some(c => c.detached)).toBe(true)
   })
 
-  it('hides creation/undo/redo but keeps export when the map is locked', async () => {
+  it('greys creation/undo/redo out — rather than hiding them — when the map is locked', async () => {
+    // Disabled, not absent: an action missing from a menu reads as a feature
+    // the app does not have, while a greyed-out one says « pas maintenant » and
+    // points at the lock.
     useCardsStore.setState({ locked: true })
     const { container } = render(<MindMapCanvas />)
     openMenu(container)
-    expect(screen.queryByRole('menuitem', { name: /créer une carte volante/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: 'Annuler' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: 'Refaire' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('menuitem', { name: /exporter/i })).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: /créer une carte volante/i })).toHaveAttribute(
+      'data-disabled'
+    )
+    expect(screen.getByRole('menuitem', { name: /^annuler/i })).toHaveAttribute('data-disabled')
+    expect(screen.getByRole('menuitem', { name: /^rétablir/i })).toHaveAttribute('data-disabled')
+    expect(screen.getByRole('menuitem', { name: /exporter/i })).not.toHaveAttribute('data-disabled')
   })
 
-  it('disables Annuler when there is no history and Refaire when there is no future', async () => {
+  it('disables Annuler when there is no history and Rétablir when there is no future', async () => {
     const { container } = render(<MindMapCanvas />)
     openMenu(container)
-    expect(await screen.findByRole('menuitem', { name: 'Annuler' })).toHaveAttribute('data-disabled')
-    expect(screen.getByRole('menuitem', { name: 'Refaire' })).toHaveAttribute('data-disabled')
+    expect(await screen.findByRole('menuitem', { name: /^annuler/i })).toHaveAttribute('data-disabled')
+    expect(screen.getByRole('menuitem', { name: /^rétablir/i })).toHaveAttribute('data-disabled')
   })
 
   it('enables Annuler after a change and undoes it', async () => {
@@ -473,8 +492,20 @@ describe('MindMapCanvas — context menu', () => {
     })
     const countAfterAdd = useCardsStore.getState().history.present.length
     openMenu(container)
-    await user.click(await screen.findByRole('menuitem', { name: 'Annuler' }))
-    expect(useCardsStore.getState().history.present).toHaveLength(countAfterAdd - 1)
+    await user.click(await screen.findByRole('menuitem', { name: /^annuler/i }))
+    // The menu entry defers the command by a tick so the closing menu cannot
+    // steal focus from whatever it opens (see `CommandMenuItem`).
+    await waitFor(() =>
+      expect(useCardsStore.getState().history.present).toHaveLength(countAfterAdd - 1)
+    )
+  })
+
+  it('prints each entry’s current keyboard shortcut beside it', async () => {
+    const { container } = render(<MindMapCanvas />)
+    openMenu(container)
+    // Read from the live binding table, so rebinding a key in the settings
+    // changes what every menu says.
+    expect(await screen.findByRole('menuitem', { name: /^annuler/i })).toHaveTextContent('Ctrl + Z')
   })
 
   it('exports to PDF via the submenu, using the workspace file name', async () => {

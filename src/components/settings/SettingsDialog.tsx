@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SlidersHorizontal, Palette, GraduationCap, type LucideIcon } from 'lucide-react'
+import { SlidersHorizontal, Palette, GraduationCap, Keyboard, type LucideIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
@@ -10,19 +10,25 @@ import type { UpdateCheckStatus } from '../../hooks/useAppUpdater'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { AppearanceSettingsPanel } from './AppearanceSettingsPanel'
 import { QuizSettingsPanel } from './QuizSettingsPanel'
+import { ShortcutSettingsPanel } from './ShortcutSettingsPanel'
+import { useShortcutSettingsStore } from '../../state/useShortcutSettingsStore'
+import type { ShortcutSettings } from '../../types/shortcutSettings'
 
-type SettingsTab = 'general' | 'appearance' | 'quiz'
+export type SettingsTab = 'general' | 'appearance' | 'quiz' | 'shortcuts'
 
 const TABS: { id: SettingsTab; label: string; icon: LucideIcon; hint: string }[] = [
   { id: 'general', label: 'Général', icon: SlidersHorizontal, hint: 'Thème et police' },
   { id: 'appearance', label: 'Apparence', icon: Palette, hint: 'Couleurs des niveaux' },
   { id: 'quiz', label: 'Quiz', icon: GraduationCap, hint: 'Correction et aides' },
+  { id: 'shortcuts', label: 'Raccourcis', icon: Keyboard, hint: 'Toutes les actions' },
 ]
 
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   updateCheck: { status: UpdateCheckStatus; checkNow: () => Promise<void> }
+  /** Which tab the window opens on — « Raccourcis clavier » lands straight on its own. */
+  initialTab?: SettingsTab
 }
 
 /**
@@ -35,13 +41,14 @@ interface SettingsDialogProps {
  * snapshot taken when the window opened, which puts the app back exactly as it
  * was, preview included.
  */
-export function SettingsDialog({ open, onOpenChange, updateCheck }: SettingsDialogProps) {
-  const [tab, setTab] = useState<SettingsTab>('general')
+export function SettingsDialog({ open, onOpenChange, updateCheck, initialTab = 'general' }: SettingsDialogProps) {
+  const [tab, setTab] = useState<SettingsTab>(initialTab)
   const [dirty, setDirty] = useState(false)
   // Refs, not state: the snapshot is never rendered, and re-rendering on it
   // would be a re-render per open with nothing to show for it.
   const appearanceSnapshot = useRef<AppearanceSettings | null>(null)
   const quizSnapshot = useRef<QuizSettings | null>(null)
+  const shortcutSnapshot = useRef<ShortcutSettings | null>(null)
 
   // One subscription per field, assembled below. Selecting an OBJECT here
   // would build a new one on every store read, and zustand v5 compares
@@ -62,8 +69,23 @@ export function SettingsDialog({ open, onOpenChange, updateCheck }: SettingsDial
     if (!open) return
     appearanceSnapshot.current = useAppearanceSettingsStore.getState().snapshot()
     quizSnapshot.current = useQuizSettingsStore.getState().snapshot()
+    shortcutSnapshot.current = useShortcutSettingsStore.getState().snapshot()
+    // The caller decides which tab a given entry point lands on — « Raccourcis
+    // clavier » in the menu opens on the shortcuts list, not on Général.
+    setTab(initialTab)
     setDirty(false)
-  }, [open])
+  }, [open, initialTab])
+
+  // The shortcuts tab writes straight into its own store (a recorder cannot
+  // hand a draft back up through a callback the way a slider can), so the
+  // dialog watches for the change instead of being told about it.
+  const shortcutOverrides = useShortcutSettingsStore(s => s.overrides)
+  useEffect(() => {
+    if (!open || shortcutSnapshot.current === null) return
+    const changed =
+      JSON.stringify(shortcutOverrides) !== JSON.stringify(shortcutSnapshot.current.bindings)
+    if (changed) setDirty(true)
+  }, [shortcutOverrides, open])
 
   function editAppearance(next: AppearanceSettings) {
     useAppearanceSettingsStore.getState().applyDraft(next)
@@ -78,6 +100,7 @@ export function SettingsDialog({ open, onOpenChange, updateCheck }: SettingsDial
   const discard = useCallback(() => {
     if (appearanceSnapshot.current) useAppearanceSettingsStore.getState().applyDraft(appearanceSnapshot.current)
     if (quizSnapshot.current) useQuizSettingsStore.getState().applyDraft(quizSnapshot.current)
+    if (shortcutSnapshot.current) useShortcutSettingsStore.getState().applyDraft(shortcutSnapshot.current)
     setDirty(false)
     onOpenChange(false)
   }, [onOpenChange])
@@ -86,6 +109,7 @@ export function SettingsDialog({ open, onOpenChange, updateCheck }: SettingsDial
     await Promise.all([
       useAppearanceSettingsStore.getState().commit(),
       useQuizSettingsStore.getState().commit(),
+      useShortcutSettingsStore.getState().commit(),
     ])
     setDirty(false)
     onOpenChange(false)
@@ -175,6 +199,7 @@ export function SettingsDialog({ open, onOpenChange, updateCheck }: SettingsDial
             )}
             {tab === 'appearance' && <AppearanceSettingsPanel settings={appearance} onChange={editAppearance} />}
             {tab === 'quiz' && <QuizSettingsPanel settings={quiz} onChange={editQuiz} />}
+            {tab === 'shortcuts' && <ShortcutSettingsPanel />}
           </div>
         </div>
 

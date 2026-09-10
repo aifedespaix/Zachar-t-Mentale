@@ -20,6 +20,10 @@ import {
   MIN_SIDEBAR_WIDTH,
 } from '../../persistence/sidebarWidth'
 import { loadShowUnreadableFiles, saveShowUnreadableFiles } from '../../persistence/showUnreadableFiles'
+import { createSubfolder, freeSiblingPath } from '../../persistence/fileOps'
+import { fileNameOf, parentDirOf } from '../../persistence/paths'
+import { NameDialog } from './NameDialog'
+import { useCommand } from '../../hooks/useCommand'
 import type { FileTreeNode } from '../../types/workspace'
 
 /** How far one arrow-key press moves the border, for a keyboard resize. */
@@ -41,8 +45,12 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const removeRootFolder = useWorkspaceStore(s => s.removeRootFolder)
   const refreshAll = useWorkspaceStore(s => s.refreshAll)
   const workspaceError = useWorkspaceStore(s => s.workspaceError)
+  const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
+  const expandPaths = useWorkspaceStore(s => s.expandPaths)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const [collapsed, setCollapsed] = useState(false)
+  /** The folder « Nouveau dossier » is about to create in — `null` when the dialog is closed. */
+  const [newFolderParent, setNewFolderParent] = useState<string | null>(null)
   // Same reason as the width below: read synchronously so the tree doesn't
   // flash unreadable files for a frame before hiding them again.
   const [showUnreadable, setShowUnreadable] = useState(loadShowUnreadableFiles)
@@ -136,12 +144,72 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
     )
   }
 
+  /**
+   * Where « Nouveau dossier » creates, when it is invoked from the keyboard
+   * rather than from a folder's own right-click menu: beside the map you have
+   * open, or failing that in the first configured root.
+   *
+   * A folder row knows its own path; a shortcut does not, and asking « dans
+   * quel dossier ? » for the commonest case — a sibling of what you are
+   * working on — would be a dialog spent on a question with an obvious answer.
+   */
+  function defaultFolderTarget(): string | null {
+    const openFile = useWorkspaceStore.getState().currentFilePath
+    const beside = openFile === null ? '' : parentDirOf(openFile)
+    if (beside !== '') return beside
+    return rootFolders[0]?.path ?? null
+  }
+
+  async function submitNewFolder(name: string) {
+    const parent = newFolderParent
+    setNewFolderParent(null)
+    if (parent === null) return
+    try {
+      const path = await freeSiblingPath(parent, name, true)
+      await createSubfolder(parent, fileNameOf(path))
+      await refreshFolder(parent)
+      // So a folder created several levels down is actually visible, rather
+      // than added to a branch that happens to be collapsed.
+      expandPaths([parent])
+    } catch (error) {
+      setWorkspaceError(`Impossible de créer le dossier : ${describeError(error)}`)
+    }
+  }
+
+  // Registered before the collapsed early-return below, so folding the sidebar
+  // away does not take « Ctrl + B » — the very shortcut that unfolds it — with it.
+  useCommand(
+    'view.toggleSidebar',
+    () => setCollapsed(current => !current),
+    true,
+    collapsed ? 'Afficher l’arborescence' : 'Masquer l’arborescence'
+  )
+  useCommand('file.addRootFolder', () => void handleAddFolder())
+  useCommand('file.refresh', () => void handleRefreshAll())
+  useCommand(
+    'file.newFolder',
+    () => setNewFolderParent(defaultFolderTarget()),
+    rootFolders.length > 0
+  )
+
+  const newFolderDialog = newFolderParent !== null && (
+    <NameDialog
+      title="Nouveau dossier"
+      inputLabel="Nom du dossier"
+      initialName="Nouveau dossier"
+      confirmLabel="Créer"
+      onCancel={() => setNewFolderParent(null)}
+      onConfirm={name => void submitNewFolder(name)}
+    />
+  )
+
   if (collapsed) {
     return (
       <div style={{ width: 32, borderRight: '1px solid var(--border)', display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
         <Button variant="ghost" size="icon-sm" aria-label="Déplier la barre latérale" onClick={() => setCollapsed(false)}>
           <PanelLeftOpen size={16} />
         </Button>
+        {newFolderDialog}
       </div>
     )
   }
@@ -269,6 +337,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
           if (!resizing) event.currentTarget.style.background = 'transparent'
         }}
       />
+      {newFolderDialog}
     </div>
   )
 }

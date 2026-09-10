@@ -38,6 +38,8 @@ import { QcmDialog } from './quiz/QcmDialog'
 import { RecallDialog } from './quiz/RecallDialog'
 import { FlipCard } from './FlipCard'
 import { useCardDetailStore } from '../state/useCardDetailStore'
+import { useCardSelectionStore } from '../state/useCardSelectionStore'
+import { CardContextMenu } from './commands/CardContextMenu'
 import { CONTENT_KIND_ICONS } from '../content/ContentKindBadges'
 import { contentOf, nonTextKinds } from '../content/blocks'
 import { BlockView } from '../content/BlockView'
@@ -446,7 +448,47 @@ export function CardNode({ data }: CardNodeProps) {
     }
   }
 
+  /**
+   * Actions asked of this card from outside it — a keyboard shortcut, a
+   * context-menu entry, the command palette.
+   *
+   * They land here rather than being re-implemented at canvas level because
+   * each one ends in UI that belongs to the card: the inline title editor, the
+   * icon picker, the "supprimer cette carte et ses N descendants ?" dialog with
+   * its « détacher les enfants » alternative. One implementation, reached three
+   * ways, is what keeps those wordings from drifting apart.
+   */
+  const request = useCardSelectionStore(s => s.request)
+  useEffect(() => {
+    if (request === null || request.cardId !== card.id) return
+    // Consumed first: an action that throws must still not leave the request
+    // pending, or it would re-fire on every render of this card.
+    useCardSelectionStore.getState().consumeRequest(request.token)
+    switch (request.action) {
+      case 'rename':
+        titleInputRef.current?.focus()
+        break
+      case 'delete':
+        handleDeleteClick()
+        break
+      case 'detach':
+        handleDetachClick()
+        break
+      case 'icon':
+        setIconPickerOpen(true)
+        break
+      case 'description':
+        openDescription()
+        break
+    }
+    // The handlers are re-created on every render but always act on the same
+    // card; keying the effect on the request alone is what makes it fire once,
+    // when the request arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request, card.id])
+
   return (
+    <CardContextMenu cardId={card.id} disabled={quizActive || locked}>
     <motion.div
       data-testid={`card-${card.id}`}
       data-flipped={flipped}
@@ -989,5 +1031,6 @@ export function CardNode({ data }: CardNodeProps) {
 
       <Handle type="source" position={Position.Right} isConnectable={false} style={{ visibility: 'hidden' }} />
     </motion.div>
+    </CardContextMenu>
   )
 }

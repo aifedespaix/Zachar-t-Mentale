@@ -18,6 +18,11 @@ import {
   moveCardToParent as moveCardToParentOp,
   moveCard as moveCardOp,
   detachCard as detachCardOp,
+  duplicateCard as duplicateCardOp,
+  pasteBranch as pasteBranchOp,
+  extractBranch,
+  branchToText,
+  type CardBranch,
   countDescendants,
   flattenedCardCount,
   overflowingCardCount,
@@ -45,6 +50,18 @@ interface CardsState {
   /** Reparents a card (any level) and returns the ids detached past level 4. */
   moveCard: (id: string, newParentId: string, index?: number) => string[]
   detachCard: (id: string) => void
+  /** A deep copy of the branch rooted at `id`, for the card clipboard. */
+  copyBranch: (id: string) => CardBranch | null
+  /** The branch rooted at `id` as an indented plain-text outline. */
+  branchText: (id: string) => string
+  /** Copies the branch in place, right after the original. Returns the copy's root id. */
+  duplicateCard: (id: string) => string
+  /**
+   * Pastes a copied branch under `parentId` (or into the floating zone when
+   * `null`). Returns the pasted root's id and the copies that had to become
+   * floating cards because they fell past level 4.
+   */
+  pasteBranch: (branch: CardBranch, parentId: string | null, index?: number) => { newCardId: string; detachedIds: string[] }
   /** How many cards `detachCard` would turn into floating cards (the card included). */
   flattenedCount: (id: string) => number
   /** How many cards `moveCard` would detach past level 4 — 0 means the move fits. */
@@ -126,6 +143,18 @@ export function createCardsStore(): CardsStore {
     detachCard: id => {
       const next = detachCardOp(get().history.present, id)
       set(state => ({ history: pushState(state.history, next) }))
+    },
+    copyBranch: id => extractBranch(get().history.present, id),
+    branchText: id => branchToText(get().history.present, id),
+    duplicateCard: id => {
+      const { cards: next, newCardId } = duplicateCardOp(get().history.present, id)
+      set(state => ({ history: pushState(state.history, next) }))
+      return newCardId
+    },
+    pasteBranch: (branch, parentId, index) => {
+      const { cards: next, newCardId, detachedIds } = pasteBranchOp(get().history.present, branch, parentId, index)
+      set(state => ({ history: pushState(state.history, next) }))
+      return { newCardId, detachedIds }
     },
     flattenedCount: id => flattenedCardCount(get().history.present, id),
     overflowCount: (id, newParentId) => overflowingCardCount(get().history.present, id, newParentId),

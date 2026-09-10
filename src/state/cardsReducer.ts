@@ -473,3 +473,204 @@ export function moveCardToIndex(cards: Card[], cardId: string, newIndex: number)
   const others = cards.filter(c => groupKeyOf(c) !== groupKey)
   return [...others, ...reindexed]
 }
+
+/**
+ * A branch lifted out of a mind map: the card, its descendants, and nothing
+ * else. Ids are the ones the cards had when it was taken — `pasteBranch`
+ * re-issues them, so the same branch can be pasted any number of times, into
+ * the map it came from, without two cards ever sharing an id.
+ */
+export interface CardBranch {
+  /** Breadth-first, the branch's own root first. */
+  cards: Card[]
+  rootId: string
+}
+
+/** The branch rooted at `cardId`, deep-copied, or `null` when there is no such card. */
+export function extractBranch(cards: Card[], cardId: string): CardBranch | null {
+  if (!cards.some(card => card.id === cardId)) return null
+  const byId = new Map(cards.map(card => [card.id, card]))
+  const branch = [...subtreeDepths(cards, cardId).keys()]
+    .map(id => byId.get(id))
+    .filter((card): card is Card => card !== undefined)
+  return { cards: structuredClone(branch), rootId: cardId }
+}
+
+/** Depth of every card of a standalone branch, relative to its root. */
+function branchDepths(branch: CardBranch): Map<string, number> {
+  const depths = new Map<string, number>([[branch.rootId, 0]])
+  // The branch is stored breadth-first, so one forward pass is enough: a
+  // card's parent has always been visited before the card itself.
+  for (const card of branch.cards) {
+    if (card.id === branch.rootId) continue
+    const parentDepth = card.parentId === null ? undefined : depths.get(card.parentId)
+    if (parentDepth === undefined) continue
+    depths.set(card.id, parentDepth + 1)
+  }
+  return depths
+}
+
+export interface PasteOutcome {
+  cards: Card[]
+  /** The pasted copy's root — what the canvas selects and scrolls to. */
+  newCardId: string
+  /** Copies that fell past level 4 and became floating cards instead. */
+  detachedIds: string[]
+}
+
+/**
+ * Pastes a copy of `branch` under `parentId`, at `index` among that parent's
+ * children (appended when omitted).
+ *
+ * `parentId: null` pastes into the floating-cards zone, where the branch is
+ * flattened — floating cards may not have children. The same flattening
+ * catches copies that would land past level 4, exactly as `moveCard` does for
+ * a drag: the cards are kept as floating cards rather than silently dropped,
+ * and `detachedIds` says how many, so a caller can tell the user.
+ */
+export function pasteBranch(
+  cards: Card[],
+  branch: CardBranch,
+  parentId: string | null,
+  index?: number
+): PasteOutcome {
+  if (branch.cards.length === 0) throw new Error('pasteBranch: the branch is empty')
+
+  let parent: Card | null = null
+  if (parentId !== null) {
+    const found = cards.find(card => card.id === parentId)
+    if (found === undefined) throw new Error(`pasteBranch: parent ${parentId} not found`)
+    parent = found
+  }
+  if (parent !== null && !canReceiveChildren(parent)) {
+    throw new Error(
+      `pasteBranch: ${parent.detached ? 'a detached card' : 'a level-4 card'} cannot receive children`
+    )
+  }
+
+  const depths = branchDepths(branch)
+  const newIdByOldId = new Map(branch.cards.map(card => [card.id, crypto.randomUUID()]))
+  const baseLevel = parent === null ? 1 : parent.level + 1
+  let detachedOrder = nextDetachedOrder(cards)
+  const detachedIds: string[] = []
+  const detached = new Set<string>()
+
+  // Breadth-first, so a card is always decided after its parent — which is
+  // what lets the "my parent became a floating card" case below be a lookup
+  // rather than a second pass.
+  const copies = branch.cards.map(card => {
+    const id = newIdByOldId.get(card.id)!
+    const depth = depths.get(card.id) ?? 0
+    const copy: Card = { ...structuredClone(card), id }
+    const newParentId = card.id === branch.rootId ? parent?.id : newIdByOldId.get(card.parentId ?? '')
+    const overflows = parent === null || baseLevel + depth > MAX_LEVEL
+    if (overflows || newParentId === undefined || detached.has(newParentId)) {
+      detachedIds.push(id)
+      detached.add(id)
+      return toDetached(copy, detachedOrder++)
+    }
+    return toAttached(copy, newParentId, (baseLevel + depth) as CardLevel, copy.order)
+  })
+
+  const newRootId = newIdByOldId.get(branch.rootId)!
+  const withCopies = [...cards, ...copies]
+
+  // The pasted root only takes a slot in the sibling group when it actually
+  // joined one — a branch pasted into the floating zone has no group to be
+  // ordered inside, `normalizeOrders` packs that zone on its own.
+  if (parent === null || detachedIds.includes(newRootId)) {
+    return { cards: normalizeOrders(withCopies), newCardId: newRootId, detachedIds }
+  }
+
+  const siblings = withCopies
+    .filter(card => card.id !== newRootId && card.parentId === parent.id && !card.detached)
+    .sort((a, b) => a.order - b.order)
+  const insertAt = Math.max(0, Math.min(index ?? siblings.length, siblings.length))
+  const root = withCopies.find(card => card.id === newRootId)!
+  const orderInGroup = new Map(
+    [...siblings.slice(0, insertAt), root, ...siblings.slice(insertAt)].map((card, i) => [card.id, i])
+  )
+  const reordered = withCopies.map(card => {
+    const order = orderInGroup.get(card.id)
+    return order === undefined || card.order === order ? card : { ...card, order }
+  })
+  return { cards: normalizeOrders(reordered), newCardId: newRootId, detachedIds }
+}
+
+/**
+ * Copies a branch in place: the duplicate lands right after the original,
+ * among the same siblings — which is what « Dupliquer » means everywhere else.
+ *
+ * The root card is refused rather than special-cased: a second root would
+ * break the single-root invariant, and pasting the whole map into itself as a
+ * floating pile is not what anyone means by duplicating a chapter.
+ */
+export function duplicateCard(cards: Card[], cardId: string): PasteOutcome {
+  const target = cards.find(card => card.id === cardId)
+  if (!target) throw new Error(`duplicateCard: card ${cardId} not found`)
+  if (isRootCard(target)) throw new Error('duplicateCard: the root card cannot be duplicated')
+
+  const branch = extractBranch(cards, cardId)!
+  if (target.detached) return pasteBranch(cards, branch, null)
+
+  const siblings = cards
+    .filter(card => card.parentId === target.parentId && !card.detached)
+    .sort((a, b) => a.order - b.order)
+  const position = siblings.findIndex(card => card.id === cardId)
+  return pasteBranch(cards, branch, target.parentId!, position + 1)
+}
+
+/**
+ * A branch as an indented plain-text outline, for the system clipboard.
+ *
+ * The point is getting revision notes OUT of the app — into a message, a
+ * document, a printout — without an export dialog and without a file. Titles
+ * become the list; a card's definition follows it, indented one level further,
+ * so the shape of the outline survives the paste.
+ */
+export function branchToText(cards: Card[], cardId: string): string {
+  const lines: string[] = []
+
+  function walk(id: string, depth: number) {
+    const card = cards.find(entry => entry.id === id)
+    if (!card) return
+    const indent = '  '.repeat(depth)
+    lines.push(`${indent}- ${card.title}`)
+    const definition = card.definition?.trim()
+    if (definition) {
+      for (const line of definition.split('\n')) lines.push(`${indent}  ${line}`)
+    }
+    const children = cards.filter(entry => entry.parentId === id && !entry.detached).sort((a, b) => a.order - b.order)
+    for (const child of children) walk(child.id, depth + 1)
+  }
+
+  walk(cardId, 0)
+  return lines.join('\n')
+}
+
+/**
+ * The index of a card among its own sibling group (or among the floating
+ * cards). `-1` when the card does not exist.
+ */
+export function siblingIndexOf(cards: Card[], cardId: string): number {
+  const target = cards.find(card => card.id === cardId)
+  if (!target) return -1
+  const key = groupKeyOf(target)
+  return cards
+    .filter(card => groupKeyOf(card) === key)
+    .sort((a, b) => a.order - b.order)
+    .findIndex(card => card.id === cardId)
+}
+
+/** The cards of `cardId`'s own sibling group, in display order. */
+export function siblingsOf(cards: Card[], cardId: string): Card[] {
+  const target = cards.find(card => card.id === cardId)
+  if (!target) return []
+  const key = groupKeyOf(target)
+  return cards.filter(card => groupKeyOf(card) === key).sort((a, b) => a.order - b.order)
+}
+
+/** A card's children, in display order — the order arrow-key navigation walks. */
+export function childrenOf(cards: Card[], cardId: string): Card[] {
+  return cards.filter(card => card.parentId === cardId && !card.detached).sort((a, b) => a.order - b.order)
+}

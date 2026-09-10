@@ -348,6 +348,18 @@
   font-size: 13px;
 }
 
+/* A hairline divider between groups of toolbar buttons: the header holds three
+   kinds of action (file, edition, application) and, without a break, reads as
+   one undifferentiated row of icons. */
+.toolbar-separator {
+  display: inline-block;
+  width: 1px;
+  height: 20px;
+  flex-shrink: 0;
+  margin: 0 2px;
+  background: var(--border);
+}
+
 /* Modifier for a neutral/informational banner (e.g. update-ready) sharing
    .status-banner's layout but themed via the info tokens instead of the
    warning ones. */
