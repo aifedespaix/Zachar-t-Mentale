@@ -4,12 +4,26 @@ import { createRootCard } from '../state/cardsReducer'
 import { serializeMindMap } from './serialization'
 import { loadMindMap, mindMapExists } from './fileStore'
 import { isMindMapPath, sanitizeFileName, withMindMapExtension, mindMapBaseName, parentDirOf, fileNameOf } from './paths'
+import { titleCase } from '../utils/titleCase'
 import { sidecarDirOf } from './assets'
 import type { MindMapMeta, UserRole } from '../types/card'
 
+/**
+ * Writes a brand-new mind map with a single root card, and returns its path.
+ *
+ * The root card is NAMED AFTER THE FILE. It used to be the placeholder
+ * « Nouveau chapitre », which meant a freshly created map showed the same
+ * anonymous card whether it was « Chapitre 1 – Les nombres relatifs » or
+ * « Chapitre 2 – Pythagore »: the first thing the user had to do was rename the
+ * very card the name they had just typed was already about. The name is
+ * title-cased for the card (« les nombres relatifs » → « Les Nombres
+ * Relatifs ») and left as typed for the FILE, which stays the thing the user
+ * named.
+ */
 export async function createMindMapFile(folderPath: string, fileName: string): Promise<string> {
   const path = await join(folderPath, withMindMapExtension(fileName))
-  await writeTextFile(path, serializeMindMap(null, [createRootCard('Nouveau chapitre')]))
+  const title = titleCase(mindMapBaseName(path))
+  await writeTextFile(path, serializeMindMap(null, [createRootCard(title === '' ? 'Nouveau chapitre' : title)]))
   return path
 }
 

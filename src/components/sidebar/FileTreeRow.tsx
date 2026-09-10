@@ -1,5 +1,5 @@
 // src/components/sidebar/FileTreeRow.tsx
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Folder, FolderOpen, FolderPlus, FileJson, FilePlus, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, FileUp, Copy, Lock } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
@@ -107,6 +107,39 @@ export function FileTreeRow({
   const isLocked = meta !== null && meta.author !== currentUser?.username
 
   const indent = { paddingLeft: 8 + depth * 16 }
+
+  /**
+   * What the row shows for a mind map. The extension is only worth a row's
+   * width while unopenable files are listed: there it is what tells
+   * « chapitre.zmap » from « notes.pdf ». With those hidden, every remaining
+   * file is a mind map the app can open, so « .zmap » / « .json » on every line
+   * is noise — and on a deep tree it is noise that pushes the actual names out
+   * of view. The real file name stays reachable (the rename field's label, and
+   * the row's `title`), and it is what the rename and delete dialogs say.
+   */
+  const displayName = node.type === 'mindmap' && !showUnreadable ? mindMapBaseName(node.name) : node.name
+
+  /**
+   * How much of the file name a rename pre-selects: the name the user gave the
+   * map, never its extension.
+   *
+   * Opening a rename field with the name already selected is what makes typing
+   * replace it; a selection that ALSO covered « .zmap » would take the extension
+   * with the first keystroke, and a rename would silently change the file's
+   * type. The extension is the app's business, not the user's.
+   */
+  const renameSelectionLength =
+    node.type === 'mindmap' ? mindMapBaseName(node.name).length : node.name.length
+
+  const renameInputRef = useRef<HTMLInputElement>(null)
+
+  // Applied in an effect rather than at mount: the field has to exist and be
+  // focused before a selection range sticks, and `autoFocus` only focuses it
+  // during the commit — this runs right after that.
+  useEffect(() => {
+    if (!renaming) return
+    renameInputRef.current?.setSelectionRange(0, renameSelectionLength)
+  }, [renaming, renameSelectionLength])
 
   /**
    * Entering rename mode from a menu item, not a double-click, needs a tick
@@ -295,6 +328,7 @@ export function FileTreeRow({
               {renaming ? (
                 <input
                   autoFocus
+                  ref={renameInputRef}
                   aria-label={`Renommer ${node.name}`}
                   value={draftRenameName}
                   onChange={e => setDraftRenameName(e.target.value)}
@@ -424,6 +458,7 @@ export function FileTreeRow({
               {renaming ? (
                 <input
                   autoFocus
+                  ref={renameInputRef}
                   aria-label={`Renommer ${node.name}`}
                   value={draftRenameName}
                   onChange={e => setDraftRenameName(e.target.value)}
@@ -442,6 +477,7 @@ export function FileTreeRow({
                   type="button"
                   onClick={() => onOpenFile(node.path)}
                   onDoubleClick={() => setRenaming(true)}
+                  title={displayName === node.name ? undefined : node.name}
                   style={{
                     ...indent,
                     display: 'flex',
@@ -465,7 +501,7 @@ export function FileTreeRow({
                   ) : (
                     <FileJson size={16} />
                   )}
-                  <span>{node.name}</span>
+                  <span>{displayName}</span>
                 </button>
               )}
             </div>

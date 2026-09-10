@@ -83,6 +83,22 @@ describe('CardDetailPanel', () => {
     expect(useCardsStore.getState().history.present.find(c => c.id === leaf.id)?.definition).toBe('Réécrite')
   })
 
+  it('shows a description that was just written for a card that had none, in the panel', async () => {
+    // Writing a description is what makes the card worth reading: the fiche
+    // joins the panel at that moment, rather than the user having to go and
+    // find the card again.
+    const user = userEvent.setup()
+    useCardDetailStore.getState().show(bare.id)
+    render(<CardDetailPanel />)
+
+    await user.click(screen.getByRole('button', { name: /ajouter une description/i }))
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), 'On garde le plus grand.')
+    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
+
+    expect(useCardDetailStore.getState().open.some(entry => entry.cardId === bare.id)).toBe(true)
+    expect(screen.getByText(/on garde le plus grand/i)).toBeInTheDocument()
+  })
+
   it('offers no editing on a locked map', () => {
     useCardsStore.setState({ locked: true })
     useCardDetailStore.getState().show(leaf.id)

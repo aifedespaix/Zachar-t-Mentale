@@ -21,7 +21,7 @@ import { mindMapExists, loadMindMap } from './fileStore'
 describe('createMindMapFile', () => {
   beforeEach(() => vi.mocked(writeTextFile).mockReset())
 
-  it('writes a new .zmap file with a single default root card', async () => {
+  it('writes a new .zmap file whose root card is named after the file', async () => {
     const path = await createMindMapFile('/cours', 'Chapitre 3')
     expect(path).toBe('/cours/Chapitre 3.zmap')
 
@@ -29,8 +29,25 @@ describe('createMindMapFile', () => {
     expect(writtenPath).toBe('/cours/Chapitre 3.zmap')
     const cards = JSON.parse(content as string)
     expect(cards).toEqual([
-      expect.objectContaining({ level: 1, title: 'Nouveau chapitre', parentId: null, order: 0 }),
+      expect.objectContaining({ level: 1, title: 'Chapitre 3', parentId: null, order: 0 }),
     ])
+  })
+
+  it('title-cases the name it gives the root card, without touching the file name', async () => {
+    // « les nombres relatifs » is how a chapter is typed and how its file is
+    // named; the card that carries it reads as a title.
+    const path = await createMindMapFile('/cours', 'les nombres relatifs')
+    expect(path).toBe('/cours/les nombres relatifs.zmap')
+
+    const cards = JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string)
+    expect(cards[0].title).toBe('Les Nombres Relatifs')
+  })
+
+  it('does not double-append .zmap to the root card title when the name carries one', async () => {
+    await createMindMapFile('/cours', 'Chapitre 3.json')
+
+    const cards = JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string)
+    expect(cards[0].title).toBe('Chapitre 3')
   })
 
   it('does not double-append .json when the given name already has it', async () => {

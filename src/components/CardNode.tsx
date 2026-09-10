@@ -11,6 +11,7 @@ import {
   Check,
   X,
   PenLine,
+  Pencil,
   ListChecks,
   Sparkles,
   BookOpen,
@@ -69,6 +70,44 @@ type CardNodeProps = NodeProps & {
 const DISABLED_GREY = '#c0c0c0'
 const EDGE_BUTTON_SIZE = '1.6rem'
 
+/**
+ * The card's fixed width, in px.
+ *
+ * Fixed, not content-driven, and that is the whole point (règle anti-décalage
+ * 1: a card's footprint never depends on its content). A card used to be sized
+ * by its widest child, and its two title states are not the same kind of box:
+ * the editor's title is a 2-row `<textarea>` whose intrinsic width comes from
+ * `cols` and ignores its value, while the quiz's masked title is a plain
+ * `<div>` sized by its text — masked titles are rendered in a wide monospace
+ * with extra letter spacing, so a card being quizzed grew to two or three times
+ * the width of the same card a moment earlier, pushing everything around it.
+ *
+ * Shared with `MindMapCanvas`, which hands it to React Flow as the
+ * pre-measurement fallback.
+ */
+export const CARD_WIDTH = 200
+
+/**
+ * The box the card's title occupies — shared by BOTH of its states, so an
+ * editing card and a quiz card keep exactly the same size.
+ *
+ * The quiz variant clamps to two lines for the same reason: the `<textarea>`
+ * it stands in for is two rows tall whatever the title's length, so an
+ * unclamped div would let a long masked title make the card taller than the
+ * same card while it is being edited. The mask stays fully readable where it
+ * matters — the answer dialog's letter boxes.
+ */
+const TITLE_BOX_STYLE: CSSProperties = {
+  display: 'block',
+  width: '100%',
+  font: 'inherit',
+  lineHeight: 1.2,
+  padding: '0.1rem 0.3rem',
+  margin: '-0.1rem -0.3rem',
+  border: '2px solid transparent',
+  borderRadius: 4,
+}
+
 // Centering offsets go through motion's own `x`/`y` style values, never a
 // raw CSS `transform` string: `whileHover`'s `scale` is composed by Framer
 // Motion into that same `transform` property, and a literal string there
@@ -97,7 +136,11 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
           <motion.button
             aria-label={label}
             aria-disabled={disabled}
-            onClick={() => {
+            onClick={event => {
+              // The whole card is a click target of its own (see
+              // `handleCardClick`) — an action button must not also open the
+              // fiche panel underneath it.
+              event.stopPropagation()
               // Defence in depth: `pointerEvents: none` already blocks real clicks,
               // but the store action must never run for an inapplicable button.
               if (disabled) return
@@ -141,6 +184,17 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
  * the card's own level colour), distinct from the emoji identity badge
  * (top-right, inset) and from the ghost footer row (Détacher/Retourner/
  * Supprimer) it sits just outside of.
+ *
+ * On an editable map it always opens the EDITOR, filled or empty. Reading no
+ * longer needs it — clicking the card itself shows the definition in the right
+ * panel (see `handleCardClick`) — so the badge keeps the one job that has
+ * nowhere else to live: getting into the description to change it. Trying to
+ * read here was the trap: the card with nothing in it opened the editor and the
+ * card with a definition opened a panel, so the same button did two different
+ * things depending on content the user had not looked at yet.
+ *
+ * On a LOCKED map it goes back to reading: the editor would write to a file the
+ * user may not write, so there is only one thing the button can honestly do.
  */
 function FicheBadge({
   card,
@@ -157,19 +211,27 @@ function FicheBadge({
 }) {
   const blocks = contentOf(card)
   const hasContent = blocks.length > 0
-  // Not gated on `card.kind === 'media'`: a plain definition can still lead
-  // with a formula, table or image block, and the badge should say so the
-  // same way a media card does — `nonTextKinds` already reads the actual
-  // blocks, independent of the card's own kind field.
+  // The glyphs for READING, used on a locked map: the content kind when the
+  // description leads with something other than text, an open book for plain
+  // text, a pen when there is nothing to read. Not gated on
+  // `card.kind === 'media'`: a plain definition can still lead with a formula,
+  // table or image block, and the badge should say so the same way a media card
+  // does — `nonTextKinds` already reads the actual blocks, independent of the
+  // card's own kind field.
   const dominant = nonTextKinds(blocks)[0]
-  // Two different verbs need two different glyphs: a card with nothing yet
-  // is an invitation to WRITE (pen), one that already has content is an
-  // invitation to READ it (its content-kind icon, or an open book for plain
-  // text). Sharing one icon between "add" and "view" — as this used to —
-  // left opacity as the only distinguishing cue, which broke the moment the
-  // badge needed an opaque background (see below).
-  const Icon = dominant ? CONTENT_KIND_ICONS[dominant].icon : hasContent ? BookOpen : PenLine
-  const label = !hasContent ? 'Ajouter une description' : card.kind === 'media' ? 'Afficher le média' : 'Afficher la définition'
+  const readIcon = dominant ? CONTENT_KIND_ICONS[dominant].icon : hasContent ? BookOpen : PenLine
+  // The glyphs for WRITING, one verb each: a pencil for "go and change what is
+  // written", a pen for "there is nothing written yet".
+  const Icon = locked ? readIcon : hasContent ? Pencil : PenLine
+  const label = locked
+    ? !hasContent
+      ? 'Ajouter une description'
+      : card.kind === 'media'
+        ? 'Afficher le média'
+        : 'Afficher la définition'
+    : hasContent
+      ? 'Modifier la description'
+      : 'Ajouter une description'
 
   return (
     <Tooltip>
@@ -335,18 +397,26 @@ export function CardNode({ data }: CardNodeProps) {
   const childColors = !isDetached && childLevelAppearance ? childLevelAppearance.color[theme] : null
 
   const isRoot = isRootCard(card)
+  // Read once: it drives the card's own click (nothing to read, nothing to
+  // open) and the cursor that advertises it.
+  const hasContent = contentOf(card).length > 0
   // Add-actions that cannot apply here are removed outright, not greyed: a
-  // root has no siblings to add above/below, and a card that already has a
-  // child (or sits at level 4, where there is no level 5) has nowhere for a
-  // new "->" child to go. Only the delete `x` keeps the "always present,
-  // greyed when inapplicable" treatment — it is a destructive action on an
-  // existing structure, not a slot for a card that cannot exist.
+  // root has no siblings to add above/below, and a card at level 4 (where
+  // there is no level 5) has nowhere for a new "->" child to go. Only the
+  // delete `x` keeps the "always present, greyed when inapplicable"
+  // treatment — it is a destructive action on an existing structure, not a
+  // slot for a card that cannot exist.
   // Floating cards are excluded from both: they have no sibling group (no
   // parent to add into) and may never have children — they are a scratch area,
   // and getting children back is exactly what dropping one back onto the tree
   // is for.
   const canAddSibling = !isRoot && !isDetached
-  const canAddChild = childColors !== null && !hasChildren(card.id)
+  // A card that ALREADY has a child keeps the arrow: its child group is where a
+  // new one goes (`addChild` appends to it), and hiding the button the moment
+  // the first child existed left "add a second child" reachable only by
+  // dragging a card onto its parent — the same gesture as reparenting, for a
+  // different outcome.
+  const canAddChild = childColors !== null
   // The root itself is never removed (single-root invariant), so its delete
   // action only makes sense while it still has descendants to empty out.
   const deleteDisabled = isRoot && !hasChildren(card.id)
@@ -368,16 +438,42 @@ export function CardNode({ data }: CardNodeProps) {
   }, [autoEdit])
 
   /**
-   * The card's one description action, in both its states.
+   * The card's one description action: on an editable map it opens the EDITOR,
+   * whether or not a definition exists yet.
    *
-   * A card with a description OPENS its fiche — reading is the common case, and
-   * the fiche is where the whole thing fits. A card without one goes straight
-   * to the editor: there is nothing to read, and making the user open an empty
-   * panel to find an "add" button would be a click spent on nothing.
+   * Reading is what clicking the card itself does now, so this button is only
+   * ever about writing — and it must be, because it is the sole way into the
+   * description of a card that has none. On a LOCKED map editing is impossible,
+   * so it falls back to the fiche: the one thing it can still honestly do.
    */
   function openDescription() {
+    // The panel first: the editor is rendered inside it, so a fiche that is not
+    // open has nowhere to put the dialog.
     showFiche(card.id)
-    if (!locked && contentOf(card).length === 0) editFiche(card.id)
+    if (!locked) editFiche(card.id)
+  }
+
+  /**
+   * Reading a card is a click on the card.
+   *
+   * The fiche badge is a 24px target in a corner; making the user find it to
+   * read a definition they are looking straight at is the wrong trade, so the
+   * card's own body opens its fiche. Its controls (arrows, drag handle, footer,
+   * badge) keep their own actions and stop the click on the way up.
+   *
+   * A card with NO description does nothing here: there is nothing to read, and
+   * an empty panel is a click spent on nothing — its badge opens the editor.
+   */
+  function handleCardClick() {
+    if (isPending) {
+      setAnswerOpen(true)
+      return
+    }
+    // The fiche panel is not even mounted during a quiz (App hides it), so a
+    // click here must not queue a fiche that would appear once the quiz ends.
+    if (quizActive) return
+    if (!hasContent) return
+    showFiche(card.id)
   }
 
   function handleTitleFocus() {
@@ -504,7 +600,9 @@ export function CardNode({ data }: CardNodeProps) {
         .join(' ')}
       // The whole card is the target while it is waiting for an answer: people
       // click the thing they are being asked about, not the button under it.
-      onClick={isPending ? () => setAnswerOpen(true) : undefined}
+      // Off a quiz, the same click opens the card's fiche — see
+      // `handleCardClick`.
+      onClick={handleCardClick}
       style={{
         // A card still waiting for an answer drops its level colour for a
         // neutral, deliberately EMPTY surface. That is the state it is in —
@@ -521,7 +619,10 @@ export function CardNode({ data }: CardNodeProps) {
         // Room for the pinned edge buttons: the drag handle and the delete `x`
         // sit in the top corners, the `->` on the right edge.
         padding: '22px 26px 14px 22px',
-        minWidth: 200,
+        // A fixed width, never content-driven — see `CARD_WIDTH`: the editor's
+        // title is a 2-row textarea and the quiz's is a masked div, and only a
+        // width the card owns keeps the two the same size.
+        width: CARD_WIDTH,
         minHeight: 92,
         boxSizing: 'border-box',
         position: 'relative',
@@ -533,8 +634,9 @@ export function CardNode({ data }: CardNodeProps) {
         // `.card-drag-handle`, it does not restyle the rest of the node) —
         // an explicit cursor here overrides that for every part of the card
         // that is not itself interactive (buttons/handle/input set their own).
-        // A card awaiting an answer is itself the click target, so it says so.
-        cursor: isPending ? 'pointer' : 'default',
+        // A card that responds to a click says so: pending (to answer) or
+        // holding a definition (to read).
+        cursor: isPending || (!quizActive && hasContent) ? 'pointer' : 'default',
       }}
     >
       {/*
@@ -552,6 +654,10 @@ export function CardNode({ data }: CardNodeProps) {
         className="card-drag-handle"
         data-testid="drag-handle"
         aria-disabled={locked}
+        // Grabbing the card is not clicking it: a drag that ends where it began
+        // still fires a click, which must not open a fiche the user never asked
+        // for.
+        onClick={event => event.stopPropagation()}
         style={{
           position: 'absolute',
           top: 4,
@@ -687,6 +793,14 @@ export function CardNode({ data }: CardNodeProps) {
         <div
           data-testid="quiz-title"
           style={{
+            ...TITLE_BOX_STYLE,
+            // Two lines, like the textarea this stands in for — see
+            // `TITLE_BOX_STYLE`. `-webkit-line-clamp` is what Chromium (and
+            // therefore the Tauri WebView) uses for a multi-line ellipsis.
+            display: '-webkit-box',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: 2,
+            overflow: 'hidden',
             fontFamily: displayMasked ? 'ui-monospace, monospace' : 'inherit',
             letterSpacing: displayMasked ? '0.12em' : undefined,
             fontWeight: displayMasked ? 700 : 'inherit',
@@ -727,17 +841,11 @@ export function CardNode({ data }: CardNodeProps) {
                 if (e.key === 'Escape') cancelTitle()
               }}
               style={{
-                display: 'block',
-                width: '100%',
+                ...TITLE_BOX_STYLE,
                 resize: 'none',
-                font: 'inherit',
-                lineHeight: 1.2,
                 color: 'inherit',
                 background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
                 border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
-                borderRadius: 4,
-                padding: '0.1rem 0.3rem',
-                margin: '-0.1rem -0.3rem',
                 outline: 'none',
                 cursor: 'text',
                 transition: 'background 0.15s ease, border-color 0.15s ease',
@@ -904,7 +1012,12 @@ export function CardNode({ data }: CardNodeProps) {
                   size="icon-sm"
                   aria-label="Détacher"
                   disabled={locked}
-                  onClick={handleDetachClick}
+                  onClick={event => {
+                    // Footer controls act on the card; they are not a click ON
+                    // the card, which would open its fiche.
+                    event.stopPropagation()
+                    handleDetachClick()
+                  }}
                 >
                   <Unlink />
                 </Button>
@@ -915,7 +1028,15 @@ export function CardNode({ data }: CardNodeProps) {
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Retourner" onClick={() => setFlipped(v => !v)}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Retourner"
+                onClick={event => {
+                  event.stopPropagation()
+                  setFlipped(v => !v)
+                }}
+              >
                 <FlipHorizontal2 />
               </Button>
             </TooltipTrigger>
@@ -932,7 +1053,10 @@ export function CardNode({ data }: CardNodeProps) {
                 size="icon-sm"
                 aria-label="Supprimer"
                 disabled={locked || deleteDisabled}
-                onClick={handleDeleteClick}
+                onClick={event => {
+                  event.stopPropagation()
+                  handleDeleteClick()
+                }}
               >
                 <Trash2 />
               </Button>

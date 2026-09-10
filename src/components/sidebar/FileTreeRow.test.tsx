@@ -94,9 +94,21 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={onOpenFile} />)
 
-    await user.click(screen.getByText('chapitre1.json'))
+    await user.click(screen.getByText('chapitre1'))
 
     expect(onOpenFile).toHaveBeenCalledWith('/cours/chapitre1.json')
+  })
+
+  it('shows a mind map without its extension while unreadable files are hidden, and with it otherwise', () => {
+    // The extension is informative next to files the app cannot open — it is
+    // what tells a map from a PDF. On its own every line it is noise.
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.zmap', path: '/cours/chapitre1.zmap' }
+    const { unmount } = render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+    expect(screen.getByText('chapitre1')).toBeInTheDocument()
+    unmount()
+
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} showUnreadable />)
+    expect(screen.getByText('chapitre1.zmap')).toBeInTheDocument()
   })
 
   it('shows the generic icon while the mind map format check has not resolved to valid', () => {
@@ -132,7 +144,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    expect(screen.getByRole('button', { name: 'chapitre1.json' })).toHaveStyle({ background: 'var(--muted)' })
+    expect(screen.getByRole('button', { name: 'chapitre1' })).toHaveStyle({ background: 'var(--muted)' })
   })
 
   it('renders an "other" file as visually inert and never calls onOpenFile', async () => {
@@ -159,7 +171,7 @@ describe('FileTreeRow', () => {
     useWorkspaceStore.setState({ expandedPaths: new Set(['/cours/chimie']) })
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    expect(screen.getByText('atomes.json')).toBeInTheDocument()
+    expect(screen.getByText('atomes')).toBeInTheDocument()
     expect(screen.queryByText('notes.pdf')).not.toBeInTheDocument()
   })
 
@@ -216,7 +228,7 @@ describe('FileTreeRow', () => {
     useWorkspaceStore.setState({ expandedPaths: new Set(['/cours/chimie']) })
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    expect(screen.getByText('atomes.json')).toBeInTheDocument()
+    expect(screen.getByText('atomes')).toBeInTheDocument()
     expect(screen.queryByText('atomes.assets')).not.toBeInTheDocument()
   })
 
@@ -265,13 +277,13 @@ describe('FileTreeRow', () => {
     }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    expect(screen.queryByText('atomes.json')).not.toBeInTheDocument()
+    expect(screen.queryByText('atomes')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /chimie/i }))
-    expect(screen.getByText('atomes.json')).toBeInTheDocument()
+    expect(screen.getByText('atomes')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /chimie/i }))
-    expect(screen.queryByText('atomes.json')).not.toBeInTheDocument()
+    expect(screen.queryByText('atomes')).not.toBeInTheDocument()
   })
 
   it('renames a mind map file via double-click, with no menu involved', async () => {
@@ -281,7 +293,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.dblClick(screen.getByRole('button', { name: 'chapitre1.json' }))
+    await user.dblClick(screen.getByRole('button', { name: 'chapitre1' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
     await user.type(input, 'chapitre1-v2.json{Enter}')
@@ -294,7 +306,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    await user.dblClick(screen.getByRole('button', { name: 'chapitre1.json' }))
+    await user.dblClick(screen.getByRole('button', { name: 'chapitre1' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.type(input, 'draft-en-cours')
 
@@ -302,7 +314,35 @@ describe('FileTreeRow', () => {
 
     expect(screen.queryByRole('menuitem', { name: 'Renommer' })).not.toBeInTheDocument()
     expect(renamePath).not.toHaveBeenCalled()
+    // Appended at the caret: `user.type` clicks the field first, which collapses
+    // the pre-selection the rename starts with (pinned by the test below).
     expect(screen.getByRole('textbox', { name: /renommer chapitre1.json/i })).toHaveValue('chapitre1.jsondraft-en-cours')
+  })
+
+  it('pre-selects the file name but not its extension when a rename starts', async () => {
+    // Renaming a map is about the name the user gave it: a selection that also
+    // covered « .json » would delete the file's type on the first keystroke.
+    const user = userEvent.setup()
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.dblClick(screen.getByRole('button', { name: 'chapitre1' }))
+    const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i }) as HTMLInputElement
+
+    expect(input.selectionStart).toBe(0)
+    expect(input.selectionEnd).toBe('chapitre1'.length)
+  })
+
+  it('pre-selects the whole name of a folder, which has no extension', async () => {
+    const user = userEvent.setup()
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.dblClick(screen.getByRole('button', { name: /chimie/i }))
+    const input = screen.getByRole('textbox', { name: /renommer chimie/i }) as HTMLInputElement
+
+    expect(input.selectionStart).toBe(0)
+    expect(input.selectionEnd).toBe('chimie'.length)
   })
 
   it('renames a non-root folder via double-click', async () => {
@@ -337,7 +377,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
@@ -354,7 +394,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
@@ -406,7 +446,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
@@ -548,7 +588,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={onOpenFile} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Dupliquer' }))
 
     expect(freeSiblingPath).toHaveBeenCalledWith('/cours', 'chapitre1 (copie)', false)
@@ -586,7 +626,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Dupliquer' }))
     const input = await screen.findByRole('textbox', { name: /dupliquer/i })
     await user.type(input, '{Enter}')
@@ -601,7 +641,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Dupliquer' }))
     const input = await screen.findByRole('textbox')
     await user.clear(input)
@@ -621,7 +661,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
     await user.click(screen.getByRole('button', { name: 'Confirmer' }))
 
@@ -636,7 +676,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
     expect(screen.getByRole('heading', { name: /supprimer le fichier « chapitre1.json » ?/i })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Confirmer' }))
@@ -652,7 +692,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
     await user.click(screen.getByRole('button', { name: 'Confirmer' }))
 
@@ -690,7 +730,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Exporter' }))
 
     expect(await screen.findByText('Exporter « chapitre1 »')).toBeInTheDocument()
@@ -702,7 +742,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Exporter' }))
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/n’existe plus/))
@@ -718,7 +758,7 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    openMenu('chapitre1.json')
+    openMenu('chapitre1')
     await user.click(await screen.findByRole('menuitem', { name: 'Exporter' }))
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/structure du fichier est invalide/))

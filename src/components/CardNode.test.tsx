@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
-import { CardNode } from './CardNode'
+import { CardNode, CARD_WIDTH } from './CardNode'
 import { useCardsStore, createCardsStore } from '../state/useCardsStore'
 import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import type { Card } from '../types/card'
@@ -239,6 +239,18 @@ describe('CardNode structural buttons', () => {
     expect(screen.queryByRole('button', { name: /ajouter en dessous/i })).not.toBeInTheDocument()
   })
 
+  it('creates a second child when the -> button is clicked on a card that already has one', async () => {
+    const user = userEvent.setup()
+    const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
+    resetStore([testCard, child])
+    renderCardNode(testCard)
+
+    await user.click(screen.getByRole('button', { name: /ajouter un enfant/i }))
+
+    const children = useCardsStore.getState().history.present.filter(card => card.parentId === testCard.id)
+    expect(children).toHaveLength(2)
+  })
+
   it('does not render the -> button on a level-4 card (no level 5)', () => {
     const level4: Card = { id: 'l4', level: 4, title: 'Info', parentId: 'root', order: 0 }
     resetStore([testCard, level4])
@@ -246,11 +258,13 @@ describe('CardNode structural buttons', () => {
     expect(screen.queryByRole('button', { name: /ajouter un enfant/i })).not.toBeInTheDocument()
   })
 
-  it('does not render the -> button once the card already has a child', () => {
+  it('still renders the -> button once the card already has a child, so a second one can be added', () => {
+    // Hiding it the moment the first child existed left "add another child"
+    // reachable only by dragging a card onto its parent.
     const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
     resetStore([testCard, child])
     renderCardNode(testCard)
-    expect(screen.queryByRole('button', { name: /ajouter un enfant/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toBeInTheDocument()
   })
 
   it('renders the -> button when the card has no child yet', () => {
@@ -564,7 +578,7 @@ describe('CardNode footer', () => {
 
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
-    const filled = screen.getByRole('button', { name: /afficher la définition/i }).style.height
+    const filled = screen.getByRole('button', { name: /modifier la description/i }).style.height
 
     expect(empty).toBe(filled)
     expect(empty).not.toBe('')
@@ -776,28 +790,76 @@ describe('CardNode footer', () => {
     expect(useCardDetailStore.getState().editingCardId).toBe(testCard.id)
   })
 
-  it('opens the fiche for reading when the card already has a description', async () => {
+  it('opens the editor — not just the fiche — for a card that already has a description', async () => {
+    // Reading is what clicking the card itself does; this button is the one
+    // way into the description to CHANGE it, filled or empty.
     const user = userEvent.setup()
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
 
-    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    await user.click(screen.getByRole('button', { name: /modifier la description/i }))
 
     expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([cardWithDefinition.id])
-    // Reading is the common case: the editor is one more click away, not the
-    // destination.
+    expect(useCardDetailStore.getState().editingCardId).toBe(cardWithDefinition.id)
+  })
+
+  it('shows the definition in the right panel when the card itself is clicked', async () => {
+    const user = userEvent.setup()
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+
+    await user.click(screen.getByTestId(`card-${cardWithDefinition.id}`))
+
+    expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([cardWithDefinition.id])
+    // Reading, not writing: the fiche is the destination, the editor is not.
     expect(useCardDetailStore.getState().editingCardId).toBeNull()
   })
 
-  it('opens a fiche in preview, so browsing a map does not pile panels up', async () => {
+  it('opens nothing when a card with no description is clicked', async () => {
+    // There is nothing to read, and an empty panel would be a click spent on
+    // nothing — its badge opens the editor instead.
+    const user = userEvent.setup()
+    renderCardNode(testCard)
+
+    await user.click(screen.getByTestId(`card-${testCard.id}`))
+
+    expect(useCardDetailStore.getState().open).toEqual([])
+  })
+
+  it('does not open the fiche from a click on one of the card’s controls', async () => {
+    const user = userEvent.setup()
+    const child: Card = { ...cardWithDefinition, id: 'child', level: 2, parentId: 'root', order: 0 }
+    resetStore([cardWithDefinition, child])
+    renderCardNode(child)
+
+    await user.click(screen.getByRole('button', { name: /ajouter en dessous/i }))
+
+    expect(useCardDetailStore.getState().open).toEqual([])
+  })
+
+  it('keeps a single fiche when the same card is clicked twice', async () => {
     const user = userEvent.setup()
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
 
-    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
-    await user.click(screen.getByRole('button', { name: /afficher la définition/i }))
+    const card = screen.getByTestId(`card-${cardWithDefinition.id}`)
+    await user.click(card)
+    await user.click(card)
 
     expect(useCardDetailStore.getState().open).toHaveLength(1)
+  })
+
+  it('queues no fiche when a card is clicked during a quiz', async () => {
+    // The panel is unmounted for the whole quiz, so a fiche opened here would
+    // only surface after it — long after the click that asked for it.
+    const user = userEvent.setup()
+    useQuizStore.setState({ active: true })
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+
+    await user.click(screen.getByTestId(`card-${cardWithDefinition.id}`))
+
+    expect(useCardDetailStore.getState().open).toEqual([])
   })
 
   it('marks itself as a reparent drop target when data.isReparentTarget is set', () => {
@@ -1002,12 +1064,16 @@ describe('the fiche corner badge', () => {
     useQuizSettingsStore.setState(DEFAULT_QUIZ_SETTINGS)
   })
 
-  it('shows a BookOpen icon for a definition card, with an accessible label', () => {
+  it('offers to edit a definition card, with an accessible label', () => {
+    // The badge no longer reads: a filled card's button goes to the editor, so
+    // that the same button never means two different things depending on
+    // content the user has not looked at yet.
     renderCardNode(cardWithDefinition)
-    expect(screen.getByRole('button', { name: /afficher la définition/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /modifier la description/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /afficher la définition/i })).not.toBeInTheDocument()
   })
 
-  it('shows the content-kind icon (e.g. table) for a media card, not the definition label', () => {
+  it('offers to edit a media card too, rather than only viewing it', () => {
     const mediaCard: Card = {
       ...cardWithDefinition,
       kind: 'media',
@@ -1015,8 +1081,8 @@ describe('the fiche corner badge', () => {
       definition: 'A\n1',
     }
     renderCardNode(mediaCard)
-    expect(screen.getByRole('button', { name: /afficher le média/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /afficher la définition/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /modifier la description/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /afficher le média/i })).not.toBeInTheDocument()
   })
 
   it('shows the "add" label and stays enabled on a card with no content yet', () => {
@@ -1029,16 +1095,64 @@ describe('the fiche corner badge', () => {
     expect(screen.queryByText('Définition existante')).not.toBeInTheDocument()
   })
 
-  it('opens the fiche when clicked, and reflects the open state via aria-pressed', async () => {
+  it('opens the fiche and its editor when clicked, and reflects the open state via aria-pressed', async () => {
     const user = userEvent.setup()
     renderCardNode(cardWithDefinition)
 
-    const badge = screen.getByRole('button', { name: /afficher la définition/i })
+    const badge = screen.getByRole('button', { name: /modifier la description/i })
     expect(badge).toHaveAttribute('aria-pressed', 'false')
 
     await user.click(badge)
 
     expect(useCardDetailStore.getState().open.some(entry => entry.cardId === cardWithDefinition.id)).toBe(true)
+    expect(useCardDetailStore.getState().editingCardId).toBe(cardWithDefinition.id)
+  })
+})
+
+describe('CardNode size', () => {
+  beforeEach(() => {
+    useCardDetailStore.getState().closeAll()
+    resetStore([testCard])
+    resetQuizStore()
+    useQuizSettingsStore.setState(DEFAULT_QUIZ_SETTINGS)
+  })
+
+  // A title long enough that its masked form would have made the card grow.
+  const longTitled: Card = {
+    id: 'root',
+    level: 1,
+    title: 'Les nombres relatifs et leur comparaison',
+    definition: 'Une définition',
+    parentId: null,
+    order: 0,
+  }
+
+  it('has the same fixed width while edited and while quizzed, whatever the title', () => {
+    // The bug this pins: the editor's title is a `<textarea>` (fixed intrinsic
+    // width) and the quiz's is a masked div sized by its own monospace text, so
+    // a card being quizzed grew to several times the width of the same card a
+    // second earlier — and shoved the rest of the map around it.
+    const { unmount } = renderCardNode(longTitled)
+    const edited = screen.getByTestId(`card-${longTitled.id}`).style.width
+    unmount()
+
+    renderCardNode(longTitled, false, false, { type: 'recall', result: 'unanswered' })
+
+    expect(edited).toBe(`${CARD_WIDTH}px`)
+    expect(screen.getByTestId(`card-${longTitled.id}`).style.width).toBe(edited)
+  })
+
+  it('clamps the masked title to the two lines the title field occupies', () => {
+    renderCardNode(longTitled, false, false, { type: 'recall', result: 'unanswered' })
+
+    const title = screen.getByTestId('quiz-title')
+    // Two lines, like the textarea this stands in for — see `TITLE_BOX_STYLE`.
+    expect(title).toHaveStyle({ WebkitLineClamp: '2', overflow: 'hidden' })
+    // Same box metrics as the textarea it stands in for. Read off the element's
+    // own style rather than through `toHaveStyle`: jsdom's computed style does
+    // not resolve a percentage width.
+    expect(title.style.width).toBe('100%')
+    expect(title.style.lineHeight).toBe('1.2')
   })
 })
 

@@ -507,7 +507,7 @@ describe('App unsaved changes guard', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'cours' }))
-    await user.click(await screen.findByRole('button', { name: 'chapitre-a.json' }))
+    await user.click(await screen.findByRole('button', { name: 'chapitre-a' }))
     await settle()
     const rootId = useCardsStore.getState().history.present[0].id
     await act(async () => {
@@ -515,7 +515,7 @@ describe('App unsaved changes guard', () => {
     })
     vi.mocked(saveMindMap).mockClear()
 
-    await user.click(screen.getByRole('button', { name: 'chapitre-b.json' }))
+    await user.click(screen.getByRole('button', { name: 'chapitre-b' }))
     await settle()
 
     // The edit made just before switching was written under PATH_A, not lost.
@@ -529,7 +529,7 @@ describe('App unsaved changes guard', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'cours' }))
-    await user.click(await screen.findByRole('button', { name: 'chapitre-a.json' }))
+    await user.click(await screen.findByRole('button', { name: 'chapitre-a' }))
     await settle()
     const rootId = useCardsStore.getState().history.present[0].id
     await act(async () => {
@@ -537,7 +537,7 @@ describe('App unsaved changes guard', () => {
     })
     vi.mocked(saveMindMap).mockReset().mockRejectedValue(new Error('disque plein'))
 
-    await user.click(screen.getByRole('button', { name: 'chapitre-b.json' }))
+    await user.click(screen.getByRole('button', { name: 'chapitre-b' }))
 
     expect(await screen.findByText(/disque plein/)).toBeInTheDocument()
     // Still on A: the switch has not happened yet, pending the user's decision.

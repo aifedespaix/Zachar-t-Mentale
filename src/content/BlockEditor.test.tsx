@@ -209,6 +209,79 @@ describe('the math field', () => {
   })
 })
 
+describe('the language keyboard help', () => {
+  it('offers the languages first, and no character until one is chosen', async () => {
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'text', text: '' }])
+
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+
+    expect(screen.getByRole('group', { name: /choix de la langue/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /point d’interrogation inversé/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the Spanish punctuation a French keyboard cannot produce', async () => {
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'text', text: '' }])
+
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+
+    expect(screen.getByRole('button', { name: /point d’interrogation inversé/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /point d’exclamation inversé/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /eñe$/i })).toBeInTheDocument()
+    // The English set is not on screen: one language's characters at a time.
+    expect(screen.queryByRole('button', { name: /livre sterling/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the English typography, which is what a French keyboard gets wrong there', async () => {
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'text', text: '' }])
+
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    await user.click(screen.getByRole('button', { name: /langue : anglais/i }))
+
+    expect(screen.getByRole('button', { name: /apostrophe anglaise/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /point d’interrogation inversé/i })).not.toBeInTheDocument()
+  })
+
+  it('inserts the character into the text being written, without replacing it', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'don' }])
+
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    await user.click(screen.getByRole('button', { name: /langue : anglais/i }))
+    await user.click(screen.getByRole('button', { name: /apostrophe anglaise/i }))
+
+    const written = (latest()![0] as { text: string }).text
+    expect(written).toContain('’')
+    expect(written.replace('’', '')).toBe('don')
+  })
+
+  it('inserts into the block being edited, not always into the first one', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([
+      { kind: 'text', text: 'premier' },
+      { kind: 'text', text: 'second' },
+    ])
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: /eñe$/i }))
+
+    const blocks = latest()!
+    expect(blocks[0]).toEqual({ kind: 'text', text: 'premier' })
+    expect((blocks[1] as { text: string }).text).toContain('ñ')
+  })
+
+  it('is offered disabled when the description has no text block to write in', () => {
+    renderEditor([{ kind: 'math', latex: 'x' }])
+
+    expect(screen.getByRole('button', { name: /choisir une langue/i })).toBeDisabled()
+  })
+})
+
 describe('inserting an image', () => {
   function renderWithImages(overrides: {
     onInsertImage?: (s: { bytes: Uint8Array; mime: string; name?: string }) => Promise<CardBlock | undefined>

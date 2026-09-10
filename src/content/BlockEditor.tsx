@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Type, Sigma, Table2, Plus, Trash2, ImagePlus, ChevronUp, ChevronDown } from 'lucide-react'
 import type { CardBlock, CardBlockKind } from '../types/cardBlock'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle } from './MathFieldEditor'
 import { MathPalette } from './MathPalette'
+import { LanguageHelpButton, LanguageHelpPanel } from './LanguageHelpPalette'
+import type { LanguageId } from './languageHelp'
 
 /**
  * Editing modes the selector offers. `image` is deliberately absent: an image
@@ -114,6 +116,16 @@ export interface BlockEditorProps {
   /** Opens the native picker; absent when the host offers no picker. */
   onPickImage?: () => Promise<CardBlock | undefined>
   onError?: (message: string) => void
+  /**
+   * Puts the caret in the first text field as soon as the editor mounts.
+   *
+   * The description modal exists so a card can be written in; without this it
+   * opens with focus on the first toolbar button (Radix focuses the first
+   * tabbable element of a dialog), and the user's first keystroke goes nowhere.
+   * The host must also cancel Radix's own auto-focus, or it would take the
+   * focus straight back.
+   */
+  autoFocusField?: boolean
 }
 
 export function BlockEditor({
@@ -123,12 +135,59 @@ export function BlockEditor({
   onInsertImage,
   onPickImage,
   onError,
+  autoFocusField = false,
 }: BlockEditorProps) {
   // Which block the header's mode selector acts on. Kept here rather than
   // derived from DOM focus so the selector still shows the right mode while
   // the user is clicking the selector itself (which takes focus away).
   const [activeIndex, setActiveIndex] = useState(0)
   const active = blocks[activeIndex] ?? blocks[blocks.length - 1]
+
+  // The special-character palette: which language it is helping with, and
+  // whether it is showing at all. Local to the editor on purpose — it is a
+  // writing aid for the description open right now, not a document setting.
+  const [language, setLanguage] = useState<LanguageId | null>(null)
+  const [languageHelpOpen, setLanguageHelpOpen] = useState(false)
+
+  const editorRef = useRef<HTMLDivElement>(null)
+  // Set by an insert, consumed by the effect below once the new text has been
+  // committed: a caret placed before that commit is thrown away with the old
+  // value, which is what made the palette's characters land but leave the
+  // cursor at the start of the field.
+  const pendingCaret = useRef<{ index: number; position: number } | null>(null)
+
+  /** The text field of block `index`, looked up in the DOM it is rendered in. */
+  function textFieldAt(index: number): HTMLTextAreaElement | null {
+    return editorRef.current?.querySelector<HTMLTextAreaElement>(`textarea[data-block-index="${index}"]`) ?? null
+  }
+
+  // No dependency array: the caret is restored after whatever render the insert
+  // caused, and the ref makes every other run a no-op.
+  useEffect(() => {
+    const pending = pendingCaret.current
+    if (pending === null) return
+    pendingCaret.current = null
+    const field = textFieldAt(pending.index)
+    field?.focus()
+    field?.setSelectionRange(pending.position, pending.position)
+  })
+
+  useEffect(() => {
+    if (!autoFocusField) return
+    // A TEXT block first — that is where prose is written, and where the
+    // language palette inserts (`data-block-index` is only on those fields) —
+    // with any field at all as the fallback, so a description whose first block
+    // is a formula still opens on something typeable.
+    const field =
+      editorRef.current?.querySelector<HTMLElement>('textarea[data-block-index]') ??
+      editorRef.current?.querySelector<HTMLElement>('textarea, input')
+    field?.focus()
+    if (field instanceof HTMLTextAreaElement) {
+      // At the end of what is already written: focusing is for carrying on,
+      // not for overwriting the definition the card already had.
+      field.setSelectionRange(field.value.length, field.value.length)
+    }
+  }, [autoFocusField])
 
   function replace(index: number, block: CardBlock) {
     onChange(blocks.map((existing, i) => (i === index ? block : existing)))
@@ -156,6 +215,42 @@ export function BlockEditor({
       // reason (usually "too large").
       onError?.(error instanceof Error ? error.message : 'Impossible d’insérer cette image.')
     }
+  }
+
+  /**
+   * Which block the language palette writes into.
+   *
+   * The block being edited when that block is text — the same rule the mode
+   * selector follows — and the description's first text block otherwise, so the
+   * palette still works while a formula or an image is the selected block.
+   * `-1` means this description has no text block at all, and the flag is
+   * offered disabled rather than inserting into nowhere.
+   */
+  const firstTextIndex = blocks.findIndex(block => block.kind === 'text')
+  const languageTargetIndex = active?.kind === 'text' ? activeIndex : firstTextIndex
+
+  /**
+   * Inserts a fragment at the caret of the block being written.
+   *
+   * A field that is not the focused element has no caret to respect — that is
+   * the keyboard path, where focus is on the palette button — so the fragment
+   * goes to the end of the text: degraded, never a lost click.
+   */
+  function insertText(text: string) {
+    const index = languageTargetIndex
+    if (index < 0) return
+    const block = blocksRef.current[index]
+    if (block?.kind !== 'text') return
+
+    const field = textFieldAt(index)
+    const caret = field !== null && document.activeElement === field ? field : null
+    const start = caret === null ? block.text.length : caret.selectionStart ?? block.text.length
+    const end = caret === null ? start : caret.selectionEnd ?? start
+
+    const next = block.text.slice(0, start) + text + block.text.slice(end)
+    onChange(blocksRef.current.map((existing, i) => (i === index ? { kind: 'text', text: next } : existing)))
+    pendingCaret.current = { index, position: start + text.length }
+    setActiveIndex(index)
   }
 
   /**
@@ -192,7 +287,11 @@ export function BlockEditor({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }} onPaste={handlePaste}>
+    <div
+      ref={editorRef}
+      style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
+      onPaste={handlePaste}
+    >
       {/* A row of its own, of fixed height, so CHANGING mode never moves the
           content below it (règle anti-décalage 8). */}
       <div
@@ -262,7 +361,25 @@ export function BlockEditor({
             Image
           </button>
         )}
+
+        {/* The keyboard help for a language course: the accents and inverted
+            punctuation a French keyboard cannot produce. In the mode row
+            because it is one more writing tool, next to the maths palette the
+            formula block already has. */}
+        <LanguageHelpButton
+          language={language}
+          open={languageHelpOpen}
+          disabled={languageTargetIndex < 0}
+          onToggle={() => setLanguageHelpOpen(open => !open)}
+        />
       </div>
+
+      {/* Below the mode row rather than floating over the description: it stays
+          open while several characters are inserted, and a popover would cover
+          the very sentence being written. */}
+      {languageHelpOpen && (
+        <LanguageHelpPanel language={language} onChooseLanguage={setLanguage} onInsert={insertText} />
+      )}
 
       {blocks.map((block, index) => (
         <div
@@ -410,6 +527,10 @@ function BlockField({ block, index, isActive, resolveAsset, onChange }: BlockFie
       return (
         <textarea
           aria-label={`Texte du bloc ${index + 1}`}
+          // How the language palette finds this field to insert at its caret —
+          // see `textFieldAt`. An attribute rather than a ref map: the editor
+          // renders its own markup, so the lookup can be a query against it.
+          data-block-index={index}
           value={block.text}
           onChange={event => {
             const text = event.target.value

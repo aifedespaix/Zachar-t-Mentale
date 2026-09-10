@@ -98,9 +98,9 @@ describe('FileSidebar', () => {
     render(<FileSidebar onOpenFile={onOpenFile} />)
     await screen.findByText('cours-svt')
 
-    expect(screen.queryByText('chapitre1.json')).not.toBeInTheDocument()
+    expect(screen.queryByText('chapitre1')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'cours-svt' }))
-    await user.click(await screen.findByText('chapitre1.json'))
+    await user.click(await screen.findByText('chapitre1'))
 
     expect(onOpenFile).toHaveBeenCalledWith('/cours-svt/chapitre1.json')
   })
@@ -166,7 +166,7 @@ describe('FileSidebar', () => {
     ])
     await user.click(screen.getByRole('button', { name: 'Rafraîchir' }))
 
-    expect(await screen.findByText('ajouté-dehors.json')).toBeInTheDocument()
+    expect(await screen.findByText('ajouté-dehors')).toBeInTheDocument()
   })
 
   it('opens at the width saved by the previous session', async () => {
@@ -251,7 +251,7 @@ describe('FileSidebar', () => {
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('cours-svt')
     await user.click(screen.getByRole('button', { name: 'cours-svt' }))
-    await screen.findByText('chapitre1.json')
+    await screen.findByText('chapitre1')
 
     expect(screen.queryByText('notes.pdf')).not.toBeInTheDocument()
 

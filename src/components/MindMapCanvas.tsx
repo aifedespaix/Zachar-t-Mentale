@@ -43,7 +43,7 @@ import type { QuizQuestion, QuizResult } from '../types/quiz'
 import { computeLayout, type Position } from '../layout/columns'
 import { isFullyVisible } from '../layout/visibility'
 import { canMoveCardTo, overflowingCardCount, subtreeDepths } from '../state/cardsReducer'
-import { CardNode } from './CardNode'
+import { CardNode, CARD_WIDTH } from './CardNode'
 import { clampCardLevel } from '../colors/levelColors'
 import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../hooks/useResolvedTheme'
@@ -51,13 +51,14 @@ import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
 
-// Nominal card size. Used to offset `setCenter` onto the middle of a freshly
-// created card, and passed as `initialWidth`/`initialHeight` — a pre-measurement
-// FALLBACK only (React Flow replaces it with `measured` as soon as the real DOM
-// node is observed, unlike the fixed `width`/`height` this used to declare).
-// Without it, `fitView` resolves as soon as the first node is measured and ends
-// up framing that node alone, zoomed to maxZoom.
-const NOMINAL_NODE_WIDTH = 200
+// Nominal card size. The width is the card's own fixed width (`CARD_WIDTH`),
+// shared rather than re-declared so the pre-measurement fallback and the real
+// box can never drift apart. Used to offset `setCenter` onto the middle of a
+// freshly created card, and passed as `initialWidth`/`initialHeight` — a
+// pre-measurement FALLBACK only (React Flow replaces it with `measured` as soon
+// as the real DOM node is observed, unlike the fixed `width`/`height` this used
+// to declare). Without it, `fitView` resolves as soon as the first node is
+// measured and ends up framing that node alone, zoomed to maxZoom.
 const NOMINAL_NODE_HEIGHT = 92
 
 // Two chrome-only nodes, laid out in flow coordinates so they pan and zoom with
@@ -117,7 +118,7 @@ function buildNodes(
       data: { card, autoEdit: card.id === autoEditId, quiz },
       draggable: !locked,
       dragHandle: '.card-drag-handle',
-      initialWidth: NOMINAL_NODE_WIDTH,
+      initialWidth: CARD_WIDTH,
       initialHeight: NOMINAL_NODE_HEIGHT,
       zIndex: spawnParent ? -1 : undefined,
     }
@@ -357,7 +358,7 @@ function MindMapCanvasInner() {
     (cardId: string) => {
       const position = layout[cardId]
       if (position === undefined) return
-      setCenter(position.x + NOMINAL_NODE_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
+      setCenter(position.x + CARD_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
         zoom: getZoom(),
         duration: 250,
       })
@@ -433,7 +434,7 @@ function MindMapCanvasInner() {
     const createdId = findNewlyCreatedCardId(previousIds.current, currentIds)
     if (createdId) {
       const position = layout[createdId]
-      setCenter(position.x + NOMINAL_NODE_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
+      setCenter(position.x + CARD_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
         zoom: 1,
         duration: 400,
       })
@@ -475,7 +476,7 @@ function MindMapCanvasInner() {
 
     const topLeft = flowToScreenPosition({ x: position.x, y: position.y })
     const bottomRight = flowToScreenPosition({
-      x: position.x + NOMINAL_NODE_WIDTH,
+      x: position.x + CARD_WIDTH,
       y: position.y + NOMINAL_NODE_HEIGHT,
     })
     const card = { left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y }
@@ -484,7 +485,7 @@ function MindMapCanvasInner() {
     // border by ~14px and are just as unusable when clipped.
     if (isFullyVisible(card, bounds, 24)) return
 
-    setCenter(position.x + NOMINAL_NODE_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
+    setCenter(position.x + CARD_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
       zoom: getZoom(),
       duration: 300,
     })
@@ -611,7 +612,7 @@ function MindMapCanvasInner() {
           id: node.id,
           x: node.id === draggedNode.id ? draggedNode.position.x : node.position.x,
           y: node.id === draggedNode.id ? draggedNode.position.y : node.position.y,
-          width: node.measured?.width ?? NOMINAL_NODE_WIDTH,
+          width: node.measured?.width ?? CARD_WIDTH,
           height: node.measured?.height ?? NOMINAL_NODE_HEIGHT,
         }))
       const target = resolveDropTarget(cards, boxes, draggedNode.id)

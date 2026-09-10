@@ -46,6 +46,50 @@ describe('DescriptionDialog', () => {
     expect(screen.getByRole('textbox', { name: /texte du bloc 1/i })).toHaveValue('')
   })
 
+  it('opens with the caret already in the text field', () => {
+    // Radix focuses the first tabbable element of a dialog, which here is the
+    // « Texte » mode button: without this the dialog opened on a button and the
+    // first keystroke went nowhere.
+    renderDialog()
+
+    expect(screen.getByRole('textbox', { name: /texte du bloc 1/i })).toHaveFocus()
+  })
+
+  it('puts the caret at the end of an existing description, so carrying on does not overwrite it', () => {
+    renderDialog({ blocks: text('Une définition') })
+
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    expect(field).toHaveFocus()
+    expect(field.selectionStart).toBe('Une définition'.length)
+  })
+
+  it('focuses the first text block even when the description opens on a formula', () => {
+    // The language and typing aids live on the text field; a description whose
+    // first block is a formula still has to be typed into somewhere.
+    renderDialog({
+      blocks: [
+        { kind: 'math', latex: 'x^2' },
+        { kind: 'text', text: 'Et sa règle' },
+      ],
+    })
+
+    expect(screen.getByRole('textbox', { name: /texte du bloc 2/i })).toHaveFocus()
+  })
+
+  it('inserts a Spanish character from the language palette into the text field', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog({ blocks: text('Como estas') })
+
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
+    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
+
+    // Appended at the caret the dialog opened on (the end of the text), not
+    // replacing it: the palette never took focus out of the field.
+    expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Como estas¿' }])
+  })
+
   it('saves the edited blocks and closes', async () => {
     const user = userEvent.setup()
     const props = renderDialog()

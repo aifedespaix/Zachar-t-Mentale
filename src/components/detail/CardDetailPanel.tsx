@@ -409,6 +409,10 @@ function CardFiche({
  */
 function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onClose: () => void }) {
   const updateContent = useCardsStore(s => s.updateContent)
+  // A description written from the editor joins the panel immediately: the
+  // card had nothing to read a second ago, so nothing was opened for it, and
+  // saving it is exactly the moment the fiche becomes worth showing.
+  const show = useCardDetailStore(s => s.show)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
 
@@ -417,7 +421,10 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
       breadcrumb={ancestorTitles(cards, card.id)}
       cardTitle={card.title}
       blocks={contentOf(card)}
-      onSave={blocks => updateContent(card.id, blocks)}
+      onSave={blocks => {
+        updateContent(card.id, blocks)
+        if (blocks.length > 0) show(card.id)
+      }}
       onClose={onClose}
       resolveAsset={currentFilePath === null ? () => '' : asset => assetSrc(currentFilePath, asset)}
       // Gated on there being an open file: assets live in a sidecar named

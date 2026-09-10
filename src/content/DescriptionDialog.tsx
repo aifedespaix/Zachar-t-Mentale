@@ -149,6 +149,13 @@ export function DescriptionDialog({
         />
         <DialogPrimitive.Content
           aria-label={`Description de « ${cardTitle} »`}
+          // The dialog opens ON the field being written in. Radix's default is
+          // to focus the first tabbable element, which here is the mode
+          // selector's « Texte » button — so the user's first keystroke went to
+          // a button instead of into the description. Cancelling it lets the
+          // editor's own auto-focus (see `autoFocusField` below) keep the
+          // caret, without Radix taking it straight back afterwards.
+          onOpenAutoFocus={event => event.preventDefault()}
           // Inline styles rather than utility classes: the shared
           // `DialogContent` caps itself at `sm:max-w-sm` and lays out as a
           // grid, and this dialog is deliberately the widest surface in the
@@ -193,6 +200,7 @@ export function DescriptionDialog({
                 onInsertImage={onInsertImage}
                 onPickImage={onPickImage}
                 onError={onError}
+                autoFocusField
               />
             </section>
 
