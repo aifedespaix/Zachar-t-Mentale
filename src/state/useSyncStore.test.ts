@@ -12,7 +12,7 @@ import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { sync } from '../sync/syncService'
 import { createSyncStore, type SyncStore } from './useSyncStore'
 
-function fakePocketBase(authWithPassword: ReturnType<typeof vi.fn>) {
+function fakePocketBase(authWithPassword: (username: string, password: string) => Promise<{ record: { username: string; role: string } }>) {
   let record: { username: string; role: string } | null = null
   return {
     collection: () => ({

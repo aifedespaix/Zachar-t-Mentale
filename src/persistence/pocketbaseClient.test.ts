@@ -30,7 +30,7 @@ describe('createPocketBaseClient', () => {
 
   it('persists auth changes to a file under appConfigDir', async () => {
     const pb = createPocketBaseClient('https://pi.local')
-    pb.authStore.save('token-123', { id: 'u1', username: 'aife', role: 'prof' })
+    pb.authStore.save('token-123', { id: 'u1', collectionId: 'users', collectionName: 'users', username: 'aife', role: 'prof' })
     // AsyncAuthStore queues the save behind its own `initial` promise
     // resolution — poll instead of guessing a fixed microtask depth.
     await vi.waitFor(() => {

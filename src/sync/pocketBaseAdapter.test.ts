@@ -56,7 +56,7 @@ describe('createSyncClient — assets', () => {
   it('download() fetches the file URL and returns its bytes', async () => {
     const pb = fakePb()
     vi.mocked(pb.collection('assets').getOne).mockResolvedValue({ id: 'a1', hash: 'hash1', extension: 'png', file: 'hash1.png' })
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new Uint8Array([9, 9]).buffer })
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new Uint8Array([9, 9]).buffer })
 
     const client = createSyncClient(pb)
     const bytes = await client.assets.download({ id: 'a1', hash: 'hash1', extension: 'png' })
@@ -68,7 +68,7 @@ describe('createSyncClient — assets', () => {
   it('download() throws a French error when the fetch response is not ok', async () => {
     const pb = fakePb()
     vi.mocked(pb.collection('assets').getOne).mockResolvedValue({ id: 'a1', hash: 'hash1', extension: 'png', file: 'hash1.png' })
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 })
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 })
 
     const client = createSyncClient(pb)
     await expect(client.assets.download({ id: 'a1', hash: 'hash1', extension: 'png' })).rejects.toThrow('404')
