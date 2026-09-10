@@ -4,8 +4,10 @@ import userEvent from '@testing-library/user-event'
 import { SyncSettingsPanel } from './SyncSettingsPanel'
 import { useSyncStore } from '../../state/useSyncStore'
 import { clearSyncLog, openSyncLog, revealSyncLog } from '../../persistence/syncLog'
+import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
+vi.mock('../../hooks/usePublishMindMap', () => ({ usePublishMindMap: vi.fn() }))
 vi.mock('../../persistence/syncLog', () => ({
   revealSyncLog: vi.fn(),
   openSyncLog: vi.fn(),
@@ -20,6 +22,17 @@ function resetSyncStore() {
     status: 'idle',
     error: null,
     lastResult: null,
+    lastSuccessAt: null,
+    localOnlyCount: null,
+    localOnlyPaths: [],
+    settingsProblem: null,
+    username: '',
+    password: '',
+  })
+  vi.mocked(usePublishMindMap).mockReturnValue({
+    canPublish: () => false,
+    publish: vi.fn(),
+    publishAll: vi.fn(),
   })
 }
 
@@ -90,6 +103,46 @@ describe('SyncSettingsPanel', () => {
     render(<SyncSettingsPanel />)
 
     expect(screen.getByText(/dernière synchro il y a 12 min/)).toBeInTheDocument()
+  })
+
+  it('explains a folder full of unpublished maps, and publishes them in one click', async () => {
+    const user = userEvent.setup()
+    const publishAll = vi.fn().mockResolvedValue({ published: 12, failed: 0 })
+    vi.mocked(usePublishMindMap).mockReturnValue({ canPublish: () => false, publish: vi.fn(), publishAll })
+    useSyncStore.setState({ localOnlyCount: 12, localOnlyPaths: ['/cours/a.zmap', '/cours/b.zmap'] })
+    render(<SyncSettingsPanel />)
+
+    // The explanation the « 0 envoyé » mystery needs.
+    expect(screen.getByText(/pas encore d’identité de synchronisation/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /publier ces 12 cartes/i }))
+
+    expect(publishAll).toHaveBeenCalledWith(['/cours/a.zmap', '/cours/b.zmap'])
+    expect(await screen.findByText(/12 carte\(s\) publiée\(s\)/)).toBeInTheDocument()
+  })
+
+  it('offers nothing to publish when every map already has an identity', () => {
+    useSyncStore.setState({ localOnlyCount: 0, localOnlyPaths: [] })
+    render(<SyncSettingsPanel />)
+
+    expect(screen.queryByRole('button', { name: /publier ces/i })).not.toBeInTheDocument()
+  })
+
+  it('keeps the credentials the form should come back with', () => {
+    useSyncStore.setState({ username: 'aife', password: 'secret' })
+    render(<SyncSettingsPanel />)
+
+    expect(screen.getByLabelText("Nom d'utilisateur")).toHaveValue('aife')
+    expect(screen.getByLabelText('Mot de passe')).toHaveValue('secret')
+    // Stated plainly: a password in clear text is not something to discover later.
+    expect(screen.getByText(/enregistrés en clair/)).toBeInTheDocument()
+  })
+
+  it('shows a settings file it could not read, rather than looking like a fresh install', () => {
+    useSyncStore.setState({ settingsProblem: 'Réglages enregistrés illisibles, réinitialisés (contenu inattendu).' })
+    render(<SyncSettingsPanel />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/illisibles/)
   })
 
   it('shows the last sync result summary', () => {

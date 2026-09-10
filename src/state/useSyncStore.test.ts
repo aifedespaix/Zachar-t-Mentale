@@ -4,7 +4,7 @@ vi.mock('../persistence/syncSettings', () => ({ loadSyncSettings: vi.fn(), saveS
 vi.mock('../persistence/syncState', () => ({ loadSyncState: vi.fn(), saveSyncState: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('../persistence/pocketbaseClient', () => ({ createPocketBaseClient: vi.fn() }))
 vi.mock('../sync/pocketBaseAdapter', () => ({ createSyncClient: vi.fn().mockReturnValue({}) }))
-vi.mock('../sync/syncService', () => ({ sync: vi.fn(), countPendingPushes: vi.fn() }))
+vi.mock('../sync/syncService', () => ({ sync: vi.fn(), surveySyncFolder: vi.fn() }))
 vi.mock('../persistence/syncLog', () => ({ logSyncEvent: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('../persistence/syncStatus', () => ({ loadSyncStatus: vi.fn(), saveSyncStatus: vi.fn() }))
 
@@ -12,7 +12,7 @@ import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { DEFAULT_SYNC_SETTINGS } from '../types/syncSettings'
 import { loadSyncState, saveSyncState } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
-import { countPendingPushes, sync } from '../sync/syncService'
+import { surveySyncFolder, sync } from '../sync/syncService'
 import { logSyncEvent } from '../persistence/syncLog'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { createSyncStore, type SyncStore } from './useSyncStore'
@@ -46,7 +46,9 @@ describe('useSyncStore', () => {
   let store: SyncStore
 
   beforeEach(() => {
-    vi.mocked(loadSyncSettings).mockReset().mockResolvedValue({ ...DEFAULT_SYNC_SETTINGS })
+    vi.mocked(loadSyncSettings)
+      .mockReset()
+      .mockResolvedValue({ settings: { ...DEFAULT_SYNC_SETTINGS }, problem: null })
     vi.mocked(saveSyncSettings).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadSyncState).mockReset().mockResolvedValue({})
     vi.mocked(saveSyncState).mockReset().mockResolvedValue(undefined)
@@ -55,19 +57,88 @@ describe('useSyncStore', () => {
     vi.mocked(logSyncEvent).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadSyncStatus).mockReset().mockResolvedValue({ lastSuccessAt: null })
     vi.mocked(saveSyncStatus).mockReset().mockResolvedValue(undefined)
-    vi.mocked(countPendingPushes).mockReset().mockResolvedValue(0)
+    vi.mocked(surveySyncFolder).mockReset().mockResolvedValue({ pending: [], localOnly: [] })
     store = createSyncStore()
   })
 
   it('init() loads persisted settings', async () => {
     vi.mocked(loadSyncSettings).mockResolvedValue({
-      ...DEFAULT_SYNC_SETTINGS,
-      serverUrl: 'https://pi.local',
-      syncFolderPath: '/cours',
+      settings: { ...DEFAULT_SYNC_SETTINGS, serverUrl: 'https://pi.local', syncFolderPath: '/cours' },
+      problem: null,
     })
     await store.getState().init()
     expect(store.getState().serverUrl).toBe('https://pi.local')
     expect(store.getState().syncFolderPath).toBe('/cours')
+  })
+
+  it('init() surfaces a settings file it could not read, instead of quietly starting over', async () => {
+    vi.mocked(loadSyncSettings).mockResolvedValue({
+      settings: { ...DEFAULT_SYNC_SETTINGS },
+      problem: 'Réglages enregistrés illisibles, réinitialisés (contenu inattendu).',
+    })
+
+    await store.getState().init()
+
+    expect(store.getState().settingsProblem).toMatch(/illisibles/)
+    expect(logSyncEvent).toHaveBeenCalledWith('error', expect.stringContaining('illisibles'))
+  })
+
+  it('init() signs in again with the saved credentials when the session is gone', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(loadSyncSettings).mockResolvedValue({
+      settings: {
+        ...DEFAULT_SYNC_SETTINGS,
+        serverUrl: 'https://pi.local',
+        syncFolderPath: '/cours',
+        username: 'aife',
+        password: 'secret',
+      },
+      problem: null,
+    })
+
+    await store.getState().init()
+    await vi.waitFor(() => expect(authWithPassword).toHaveBeenCalledWith('aife', 'secret'))
+    // The sign-in itself is asynchronous; what matters is that it lands.
+    await vi.waitFor(() => expect(store.getState().currentUser).toEqual({ username: 'aife', role: 'prof' }))
+  })
+
+  it('init() does not try to sign in when there is nothing to sign in to', async () => {
+    const authWithPassword = vi.fn()
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(loadSyncSettings).mockResolvedValue({
+      settings: { ...DEFAULT_SYNC_SETTINGS, username: 'aife', password: 'secret' },
+      problem: null,
+    })
+
+    await store.getState().init()
+
+    expect(authWithPassword).not.toHaveBeenCalled()
+  })
+
+  it('login() keeps the credentials, so the form comes back filled in', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    await store.getState().setServerUrl('https://pi.local')
+    vi.mocked(saveSyncSettings).mockClear()
+
+    await store.getState().login('aife', 'secret')
+
+    expect(store.getState().username).toBe('aife')
+    expect(store.getState().password).toBe('secret')
+    expect(saveSyncSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'aife', password: 'secret' })
+    )
+  })
+
+  it('updateSettings() reports a failed write instead of losing it silently', async () => {
+    vi.mocked(saveSyncSettings).mockRejectedValue(new Error('disque plein'))
+
+    await store.getState().updateSettings({ serverUrl: 'https://pi.local' })
+
+    expect(store.getState().settingsProblem).toMatch(/Impossible d’enregistrer/)
+    expect(store.getState().settingsProblem).toMatch(/disque plein/)
+    expect(logSyncEvent).toHaveBeenCalledWith('error', expect.stringContaining('disque plein'), expect.any(Error))
   })
 
   it('init() restores when the last sync succeeded — it has to survive a restart', async () => {
@@ -82,12 +153,16 @@ describe('useSyncStore', () => {
     await store.getState().setServerUrl('https://pi.local')
     await store.getState().setSyncFolderPath('/cours')
     await store.getState().login('aife', 'secret')
-    vi.mocked(countPendingPushes).mockResolvedValue(3)
+    vi.mocked(surveySyncFolder).mockResolvedValue({ pending: ['a', 'b', 'c'], localOnly: ['neuve'] })
 
     await store.getState().refreshPendingCount()
 
     expect(store.getState().pendingCount).toBe(3)
-    expect(countPendingPushes).toHaveBeenCalledWith(
+    // The maps nobody can push yet are counted apart: that is the difference
+    // between « rien à envoyer » and « 0 envoyé, et pourtant 4 cartes ici ».
+    expect(store.getState().localOnlyCount).toBe(1)
+    expect(store.getState().localOnlyPaths).toEqual(['neuve'])
+    expect(surveySyncFolder).toHaveBeenCalledWith(
       expect.objectContaining({ syncFolderPath: '/cours', currentUser: 'aife' })
     )
   })
@@ -95,14 +170,14 @@ describe('useSyncStore', () => {
   it('refreshPendingCount() answers "unknown", never a number, when it cannot know', async () => {
     await store.getState().refreshPendingCount()
     expect(store.getState().pendingCount).toBeNull()
-    expect(countPendingPushes).not.toHaveBeenCalled()
+    expect(surveySyncFolder).not.toHaveBeenCalled()
 
     const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
     await store.getState().setServerUrl('https://pi.local')
     await store.getState().setSyncFolderPath('/cours')
     await store.getState().login('aife', 'secret')
-    vi.mocked(countPendingPushes).mockRejectedValue(new Error('dossier disparu'))
+    vi.mocked(surveySyncFolder).mockRejectedValue(new Error('dossier disparu'))
 
     await store.getState().refreshPendingCount()
     expect(store.getState().pendingCount).toBeNull()
@@ -122,7 +197,7 @@ describe('useSyncStore', () => {
     expect(recorded).not.toBeNull()
     expect(saveSyncStatus).toHaveBeenCalledWith({ lastSuccessAt: recorded })
     // And the footer's counter is refreshed from that same run.
-    expect(countPendingPushes).toHaveBeenCalled()
+    expect(surveySyncFolder).toHaveBeenCalled()
   })
 
   it('a failed sync leaves the last success where it was', async () => {
@@ -161,9 +236,8 @@ describe('useSyncStore', () => {
     }
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePb as any)
     vi.mocked(loadSyncSettings).mockResolvedValue({
-      ...DEFAULT_SYNC_SETTINGS,
-      serverUrl: 'https://pi.local',
-      syncFolderPath: null,
+      settings: { ...DEFAULT_SYNC_SETTINGS, serverUrl: 'https://pi.local', syncFolderPath: null },
+      problem: null,
     })
 
     await store.getState().init()

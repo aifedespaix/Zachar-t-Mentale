@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { CloudSync, Eraser, FileText, FolderOpen, LogIn, LogOut } from 'lucide-react'
+import { CloudSync, CloudUpload, Eraser, FileText, FolderOpen, LogIn, LogOut } from 'lucide-react'
 import { useSyncStore } from '../../state/useSyncStore'
 import { describeError } from '../../state/useWorkspaceStore'
 import { syncResultLabel } from '../../sync/syncResultLabel'
 import { formatRelativeTime } from '../../utils/relativeTime'
+import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import { clearSyncLog, openSyncLog, revealSyncLog } from '../../persistence/syncLog'
 import { SettingsSection } from './SettingsSection'
 import { SettingToggle } from './SettingToggle'
@@ -47,24 +48,63 @@ export function SyncSettingsPanel() {
   const autoSyncIntervalMinutes = useSyncStore(s => s.autoSyncIntervalMinutes)
   const lastSuccessAt = useSyncStore(s => s.lastSuccessAt)
   const verboseLog = useSyncStore(s => s.verboseLog)
+  const storedUsername = useSyncStore(s => s.username)
+  const storedPassword = useSyncStore(s => s.password)
+  const settingsProblem = useSyncStore(s => s.settingsProblem)
+  const localOnlyCount = useSyncStore(s => s.localOnlyCount)
+  const localOnlyPaths = useSyncStore(s => s.localOnlyPaths)
   const updateSettings = useSyncStore(s => s.updateSettings)
+  const { publishAll } = usePublishMindMap()
   const setServerUrl = useSyncStore(s => s.setServerUrl)
   const setSyncFolderPath = useSyncStore(s => s.setSyncFolderPath)
   const login = useSyncStore(s => s.login)
   const logout = useSyncStore(s => s.logout)
   const syncNow = useSyncStore(s => s.syncNow)
 
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
+  // Prefilled from what the last successful sign-in kept, so the common case —
+  // reopening the app on the same machine — needs no typing at all.
+  const [username, setUsername] = useState(storedUsername)
+  const [password, setPassword] = useState(storedPassword)
   const [serverUrlDraft, setServerUrlDraft] = useState(serverUrl)
   const [logPath, setLogPath] = useState<string | null>(null)
   const [logError, setLogError] = useState<string | null>(null)
   const [logNotice, setLogNotice] = useState<string | null>(null)
   const [openingLogs, setOpeningLogs] = useState(false)
   const [clearingLog, setClearingLog] = useState(false)
+  const [publishingLocal, setPublishingLocal] = useState(false)
+  const [publishNotice, setPublishNotice] = useState<string | null>(null)
   useEffect(() => {
     setServerUrlDraft(serverUrl)
   }, [serverUrl])
+  useEffect(() => {
+    setUsername(storedUsername)
+  }, [storedUsername])
+  useEffect(() => {
+    setPassword(storedPassword)
+  }, [storedPassword])
+  /**
+   * Publishes every map of the sync folder that has no identity yet.
+   *
+   * This is the gesture behind the whole « 0 envoyé » mystery: a map with no
+   * `meta` is invisible to the push loop, and nothing short of publishing it
+   * will ever send it.
+   */
+  async function publishLocalMaps() {
+    if (localOnlyPaths.length === 0) return
+    setPublishingLocal(true)
+    setPublishNotice(null)
+    try {
+      const { published, failed } = await publishAll(localOnlyPaths)
+      setPublishNotice(
+        failed === 0
+          ? `${published} carte(s) publiée(s) : elles partiront à la prochaine synchronisation.`
+          : `${published} carte(s) publiée(s), ${failed} en échec — voir le journal.`
+      )
+    } finally {
+      setPublishingLocal(false)
+    }
+  }
+
   async function pickSyncFolder() {
     const selected = await open({ directory: true })
     if (typeof selected === 'string') await setSyncFolderPath(selected)
@@ -133,6 +173,21 @@ export function SyncSettingsPanel() {
           placeholder="https://cartes.mon-domaine.fr"
           style={{ ...inputStyle, width: '100%' }}
         />
+        {/*
+          Said plainly rather than hidden: a password kept in clear text is the
+          user's explicit choice here, and it must not be a surprise discovered
+          by opening the config folder.
+        */}
+        <p style={{ fontSize: 11.5, color: 'var(--muted-foreground)', margin: '8px 0 0', lineHeight: 1.45 }}>
+          L’adresse et les identifiants sont enregistrés en clair dans le dossier de configuration de
+          l’application, pour que ce formulaire soit déjà rempli au prochain démarrage. Ils ne quittent
+          jamais cet appareil, et jamais le dossier synchronisé.
+        </p>
+        {settingsProblem && (
+          <p role="alert" style={{ fontSize: 12.5, color: 'var(--warning-fg)', marginTop: 8 }}>
+            ⚠ {settingsProblem}
+          </p>
+        )}
       </SettingsSection>
 
       <SettingsSection title="Compte" description="Identifiant et mot de passe créés sur ce serveur.">
@@ -262,6 +317,33 @@ export function SyncSettingsPanel() {
           <p role="alert" style={{ fontSize: 12.5, color: 'var(--warning-fg)', marginTop: 8 }}>
             ⚠ {error}
           </p>
+        )}
+        {/*
+          A sync that reports « 0 envoyé » while the folder is full of chapters
+          needs an explanation, not a shrug: those maps have no sync identity, so
+          the file loop skips them by design. One click gives them one.
+        */}
+        {localOnlyCount !== null && localOnlyCount > 0 && (
+          <div
+            style={{ marginTop: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 10 }}
+          >
+            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5 }}>
+              <strong>{localOnlyCount}</strong> carte{localOnlyCount > 1 ? 's' : ''} de ce dossier n’
+              {localOnlyCount > 1 ? 'ont' : 'a'} pas encore d’identité de synchronisation : elle
+              {localOnlyCount > 1 ? 's ne partent' : ' ne part'} jamais au serveur, même en cliquant
+              « Synchroniser ».
+            </p>
+            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <Button variant="outline" onClick={() => void publishLocalMaps()} disabled={publishingLocal}>
+                <CloudUpload size={14} /> Publier ces {localOnlyCount} carte{localOnlyCount > 1 ? 's' : ''}
+              </Button>
+              {publishNotice && (
+                <span role="status" style={{ fontSize: 12.5, color: 'var(--muted-foreground)' }}>
+                  {publishNotice}
+                </span>
+              )}
+            </div>
+          </div>
         )}
       </SettingsSection>
 

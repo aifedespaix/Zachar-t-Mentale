@@ -21,9 +21,29 @@ describe('loadSyncSettings', () => {
     vi.mocked(readTextFile).mockReset()
   })
 
-  it('returns the defaults when no file exists yet', async () => {
+  it('returns the defaults, and no problem, when no file exists yet', async () => {
     vi.mocked(exists).mockResolvedValue(false)
-    expect(await loadSyncSettings()).toEqual(DEFAULT_SYNC_SETTINGS)
+    expect(await loadSyncSettings()).toEqual({ settings: DEFAULT_SYNC_SETTINGS, problem: null })
+  })
+
+  it('reports a corrupt file instead of starting over in silence', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue('{ tronqué')
+
+    const loaded = await loadSyncSettings()
+
+    expect(loaded.settings).toEqual(DEFAULT_SYNC_SETTINGS)
+    expect(loaded.problem).toMatch(/illisibles/)
+  })
+
+  it('reports a read the filesystem refused, and never throws', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockRejectedValue(new Error('accès refusé'))
+
+    const loaded = await loadSyncSettings()
+
+    expect(loaded.settings).toEqual(DEFAULT_SYNC_SETTINGS)
+    expect(loaded.problem).toMatch(/accès refusé/)
   })
 
   it('merges a partial file onto the defaults', async () => {
@@ -32,8 +52,8 @@ describe('loadSyncSettings', () => {
     // Everything the file does not mention keeps its shipped default — which is
     // what lets a new setting be added without a migration.
     expect(await loadSyncSettings()).toEqual({
-      ...DEFAULT_SYNC_SETTINGS,
-      serverUrl: 'https://pi.local',
+      settings: { ...DEFAULT_SYNC_SETTINGS, serverUrl: 'https://pi.local' },
+      problem: null,
     })
   })
 
@@ -49,12 +69,25 @@ describe('loadSyncSettings', () => {
     )
 
     expect(await loadSyncSettings()).toEqual({
-      serverUrl: 'https://pi.local',
-      syncFolderPath: null,
-      autoSyncOnLaunch: true,
-      autoSyncIntervalMinutes: 15,
-      verboseLog: true,
+      settings: {
+        ...DEFAULT_SYNC_SETTINGS,
+        serverUrl: 'https://pi.local',
+        autoSyncOnLaunch: true,
+        autoSyncIntervalMinutes: 15,
+        verboseLog: true,
+      },
+      problem: null,
     })
+  })
+
+  it('reads back the credentials the user asked to keep', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ username: 'aife', password: 'secret' }))
+
+    const loaded = await loadSyncSettings()
+
+    expect(loaded.settings.username).toBe('aife')
+    expect(loaded.settings.password).toBe('secret')
   })
 })
 

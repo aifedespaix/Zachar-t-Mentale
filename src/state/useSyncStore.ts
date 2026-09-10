@@ -8,7 +8,7 @@ import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { logSyncEvent } from '../persistence/syncLog'
 import { createSyncClient } from '../sync/pocketBaseAdapter'
-import { countPendingPushes, sync, type SyncResult } from '../sync/syncService'
+import { surveySyncFolder, sync, type SyncResult } from '../sync/syncService'
 import { syncResultLabel } from '../sync/syncResultLabel'
 
 export interface SyncUser {
@@ -37,6 +37,14 @@ interface SyncStoreState {
    * it cannot be known (nobody signed in, no folder, folder unreadable).
    */
   pendingCount: number | null
+  /**
+   * Maps under the sync folder with no sync identity at all. Kept apart from
+   * `pendingCount` because they need a different gesture — publishing, not
+   * syncing — and because "0 envoyé" without them is a mystery.
+   */
+  localOnlyCount: number | null
+  /** The very files behind `localOnlyCount`, for the one-click bulk publish. */
+  localOnlyPaths: string[]
   /** Where the run in flight has got to, or `null` when nothing is running. */
   progress: { done: number; total: number } | null
   /** Recomputes `pendingCount` — the one place that walks the sync folder for it. */
@@ -47,6 +55,15 @@ interface SyncStoreState {
   autoSyncOnLaunch: boolean
   autoSyncIntervalMinutes: number
   verboseLog: boolean
+  /** The last account used, kept so the form comes back filled in (see SyncSettings). */
+  username: string
+  password: string
+  /**
+   * What went wrong with the settings FILE — unreadable, or impossible to write.
+   * The interface shows it, because a persistence failure the user cannot see is
+   * a persistence failure they will report as "mes réglages ne sont pas gardés".
+   */
+  settingsProblem: string | null
   /** Merges into the persisted settings, and mirrors them in this store. */
   updateSettings: (patch: Partial<SyncSettings>) => Promise<void>
   init: () => Promise<void>
@@ -74,6 +91,13 @@ interface RawUserRecord {
  * failed `authWithPassword` — PocketBase uses the same code for wrong
  * username/password as for a malformed request.
  */
+/** The same never-empty tail as elsewhere, for the settings file's own failures. */
+function describeSettingsError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string' && error) return error
+  return 'erreur inconnue'
+}
+
 function describeSyncStoreError(error: unknown): string {
   if (error && typeof error === 'object' && 'status' in error) {
     const status = (error as { status: unknown }).status
@@ -138,32 +162,65 @@ export function createSyncStore(): SyncStore {
       lastResult: null,
       lastSuccessAt: null,
       pendingCount: null,
+      localOnlyCount: null,
+      localOnlyPaths: [],
       progress: null,
       autoSyncOnLaunch: DEFAULT_SYNC_SETTINGS.autoSyncOnLaunch,
       autoSyncIntervalMinutes: DEFAULT_SYNC_SETTINGS.autoSyncIntervalMinutes,
       verboseLog: DEFAULT_SYNC_SETTINGS.verboseLog,
+      username: DEFAULT_SYNC_SETTINGS.username,
+      password: DEFAULT_SYNC_SETTINGS.password,
+      settingsProblem: null,
 
       updateSettings: async patch => {
         set(patch)
-        const { serverUrl, syncFolderPath, autoSyncOnLaunch, autoSyncIntervalMinutes, verboseLog } = get()
-        await saveSyncSettings({
+        const {
           serverUrl,
           syncFolderPath,
           autoSyncOnLaunch,
           autoSyncIntervalMinutes,
           verboseLog,
-        })
+          username,
+          password,
+        } = get()
+        try {
+          await saveSyncSettings({
+            serverUrl,
+            syncFolderPath,
+            autoSyncOnLaunch,
+            autoSyncIntervalMinutes,
+            verboseLog,
+            username,
+            password,
+          })
+          set({ settingsProblem: null })
+        } catch (error) {
+          // A save that fails IN SILENCE is the bug this reports: the user would
+          // otherwise retype everything at the next launch and blame the app.
+          const message = `Impossible d’enregistrer les réglages de synchronisation : ${describeSettingsError(error)}`
+          set({ settingsProblem: message })
+          await logSyncEvent('error', message, error)
+        }
       },
 
       init: async () => {
-        const settings = await loadSyncSettings()
+        // NEVER throws, and reports what it could not read — see the loader's own
+        // comment for why a corrupt file must not silently reset everything.
+        const { settings, problem } = await loadSyncSettings()
         set({
           serverUrl: settings.serverUrl,
           syncFolderPath: settings.syncFolderPath,
           autoSyncOnLaunch: settings.autoSyncOnLaunch,
           autoSyncIntervalMinutes: settings.autoSyncIntervalMinutes,
           verboseLog: settings.verboseLog,
+          username: settings.username,
+          password: settings.password,
+          settingsProblem: problem,
         })
+        await logSyncEvent(
+          problem === null ? 'info' : 'error',
+          problem ?? `réglages chargés : ${settings.serverUrl || 'aucun serveur'}`
+        )
         if (settings.serverUrl) set({ currentUser: userFromClient(clientFor(settings.serverUrl)) })
         // The interface's own memory, kept apart from the settings: it has to
         // survive a restart to answer « quand ai-je synchronisé la dernière fois ? ».
@@ -172,6 +229,15 @@ export function createSyncStore(): SyncStore {
         // The count depends on the session and the folder that were just
         // restored, so it is computed once here rather than on every render.
         void get().refreshPendingCount()
+
+        // Signed in by itself when the session is gone but the credentials were
+        // kept: that is the whole point of storing them, and it is what makes the
+        // morning sync happen without typing anything.
+        const { currentUser, username, password } = get()
+        if (currentUser === null && username !== '' && password !== '') {
+          if (settings.serverUrl !== '') void get().login(username, password)
+          else await logSyncEvent('info', 'identifiants enregistrés, mais aucun serveur configuré')
+        }
       },
 
       cancelSync: () => {
@@ -184,20 +250,24 @@ export function createSyncStore(): SyncStore {
       refreshPendingCount: async () => {
         const { syncFolderPath, currentUser } = get()
         if (syncFolderPath === null || currentUser === null) {
-          set({ pendingCount: null })
+          set({ pendingCount: null, localOnlyCount: null, localOnlyPaths: [] })
           return
         }
         try {
           const state = await loadSyncState()
-          const pending = await countPendingPushes({
+          const survey = await surveySyncFolder({
             syncFolderPath,
             currentUser: currentUser.username,
             state,
           })
-          set({ pendingCount: pending })
+          set({
+            pendingCount: survey.pending.length,
+            localOnlyCount: survey.localOnly.length,
+            localOnlyPaths: survey.localOnly,
+          })
         } catch {
           // A sync folder that was moved or deleted: no badge beats a wrong one.
-          set({ pendingCount: null })
+          set({ pendingCount: null, localOnlyCount: null, localOnlyPaths: [] })
         }
       },
 
@@ -221,9 +291,12 @@ export function createSyncStore(): SyncStore {
           const pb = clientFor(get().serverUrl)
           await pb.collection<RawUserRecord>('users').authWithPassword(username, password)
           const user = userFromClient(pb)
-          // The username only — never the password, which is not even read here.
+          // The username only — the password never reaches the log.
           await logSyncEvent('info', `connexion réussie : « ${user?.username ?? username} » sur ${get().serverUrl}`)
           set({ currentUser: user, status: 'idle' })
+          // Kept for the next launch: the form comes back filled in, and the app
+          // can sign in again when the PocketBase session has expired.
+          await get().updateSettings({ username, password })
           // Signing in is what makes the count answerable at all.
           await get().refreshPendingCount()
         } catch (error) {
@@ -242,7 +315,7 @@ export function createSyncStore(): SyncStore {
       logout: () => {
         clientFor(get().serverUrl).authStore.clear()
         // Nothing to send on behalf of nobody: the badge goes away with the session.
-        set({ currentUser: null, pendingCount: null })
+        set({ currentUser: null, pendingCount: null, localOnlyCount: null, localOnlyPaths: [] })
       },
 
       syncNow: async (options?: SyncTriggerOptions) => {
