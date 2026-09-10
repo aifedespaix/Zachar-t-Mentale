@@ -1,0 +1,183 @@
+import { exists, mkdir, readDir, writeTextFile } from '@tauri-apps/plugin-fs'
+import { join } from '@tauri-apps/api/path'
+import { loadMindMap, loadMindMapMeta } from '../persistence/fileStore'
+import { scanFolder } from '../persistence/fileTree'
+import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
+import { serializeMindMap, deserializeMindMap } from '../persistence/serialization'
+import { fileNameOf, parentDirOf, separatorOf } from '../persistence/paths'
+import type { FileTreeNode } from '../types/workspace'
+import type { MindMapMeta } from '../types/card'
+import type { SyncState } from '../persistence/syncState'
+
+export interface RemoteMindMapRecord {
+  id: string
+  file_id: string
+  author: string
+  path: string
+  content: string
+  updated: string
+}
+
+export interface RemoteAssetRecord {
+  id: string
+  hash: string
+  extension: string
+}
+
+export interface MindMapsApi {
+  getFullList(): Promise<RemoteMindMapRecord[]>
+  create(data: { file_id: string; author: string; path: string; content: string }): Promise<RemoteMindMapRecord>
+  update(id: string, data: { path: string; content: string }): Promise<RemoteMindMapRecord>
+}
+
+export interface AssetsApi {
+  getFullList(): Promise<RemoteAssetRecord[]>
+  upload(hash: string, extension: string, bytes: Uint8Array): Promise<void>
+  download(record: RemoteAssetRecord): Promise<Uint8Array>
+}
+
+export interface SyncClient {
+  mindMaps: MindMapsApi
+  assets: AssetsApi
+}
+
+export interface SyncResult {
+  pushed: number
+  pulled: number
+  errors: { fileId: string; message: string }[]
+}
+
+interface SyncParams {
+  client: SyncClient
+  currentUser: string
+  syncFolderPath: string
+  state: SyncState
+}
+
+function flattenMindMapPaths(nodes: FileTreeNode[]): string[] {
+  const paths: string[] = []
+  for (const node of nodes) {
+    if (node.type === 'mindmap') paths.push(node.path)
+    else if (node.type === 'folder') paths.push(...flattenMindMapPaths(node.children))
+  }
+  return paths
+}
+
+function relativeTo(root: string, path: string): string {
+  const separator = separatorOf(path)
+  return path.startsWith(root + separator) ? path.slice(root.length + 1) : fileNameOf(path)
+}
+
+function describeSyncError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  return 'erreur inconnue'
+}
+
+/** Every local `.assets` file the app wrote for this map — no need to parse card content, only content ever written is ever present. */
+async function pushAssetsFor(client: SyncClient, mindMapPath: string, knownHashes: Set<string>): Promise<void> {
+  const sidecar = sidecarDirOf(mindMapPath)
+  if (!(await exists(sidecar))) return
+  const entries = await readDir(sidecar)
+  for (const entry of entries) {
+    const dot = entry.name.lastIndexOf('.')
+    if (dot <= 0) continue
+    const hash = entry.name.slice(0, dot)
+    const extension = entry.name.slice(dot + 1)
+    if (knownHashes.has(hash)) continue
+    const bytes = await readAssetBytes(mindMapPath, entry.name)
+    await client.assets.upload(hash, extension, bytes)
+    knownHashes.add(hash)
+  }
+}
+
+/**
+ * Only assets whose `<hash>.<ext>` name literally appears in the pulled
+ * `content` string are downloaded — content-addressed names are unique
+ * enough that a substring check is exact here, and it avoids depending on
+ * the card-block schema to find image references.
+ */
+function referencedAssets(content: string, knownAssets: RemoteAssetRecord[]): RemoteAssetRecord[] {
+  return knownAssets.filter(asset => content.includes(`${asset.hash}.${asset.extension}`))
+}
+
+async function pullAssetsFor(client: SyncClient, mindMapPath: string, assets: RemoteAssetRecord[]): Promise<void> {
+  for (const asset of assets) {
+    const bytes = await client.assets.download(asset)
+    await writeAsset(mindMapPath, bytes, asset.extension)
+  }
+}
+
+async function ensureLocalFolder(path: string): Promise<void> {
+  const dir = parentDirOf(path)
+  if (dir && !(await exists(dir))) await mkdir(dir, { recursive: true })
+}
+
+/**
+ * Push then pull, one `.zmap` at a time. The fork model guarantees a given
+ * file is writable server-side by exactly one author, so nothing here
+ * resolves a conflict — the newer side (by `meta.lastModified` for a push,
+ * by the server's `updated` for a pull) simply wins, and a per-file failure
+ * is collected without aborting the rest of the batch.
+ */
+export async function sync({ client, currentUser, syncFolderPath, state }: SyncParams): Promise<SyncResult> {
+  const result: SyncResult = { pushed: 0, pulled: 0, errors: [] }
+
+  const remoteRecords = await client.mindMaps.getFullList()
+  const remoteAssets = await client.assets.getFullList()
+  const knownHashes = new Set(remoteAssets.map(asset => asset.hash))
+  const remoteByFileId = new Map(remoteRecords.map(record => [record.file_id, record]))
+
+  const localTree = await scanFolder(syncFolderPath)
+  const localPaths = flattenMindMapPaths(localTree)
+
+  for (const path of localPaths) {
+    let meta: MindMapMeta | null
+    try {
+      meta = await loadMindMapMeta(path)
+    } catch (error) {
+      result.errors.push({ fileId: path, message: describeSyncError(error) })
+      continue
+    }
+    if (meta === null || meta.author !== currentUser) continue
+
+    const known = state[meta.id]
+    if (known && known.lastSyncedModified >= meta.lastModified) continue
+
+    try {
+      const cards = await loadMindMap(path)
+      if (cards === null) continue
+      const content = serializeMindMap(meta, cards)
+      const relPath = relativeTo(syncFolderPath, path)
+      const existing = remoteByFileId.get(meta.id)
+      const savedRecord = existing
+        ? await client.mindMaps.update(existing.id, { content, path: relPath })
+        : await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content })
+      await pushAssetsFor(client, path, knownHashes)
+      state[meta.id] = { lastSyncedModified: meta.lastModified, lastSyncedUpdated: savedRecord.updated }
+      result.pushed += 1
+    } catch (error) {
+      result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+    }
+  }
+
+  for (const record of remoteRecords) {
+    if (record.author === currentUser) continue
+    const known = state[record.file_id]
+    if (known && known.lastSyncedUpdated >= record.updated) continue
+
+    try {
+      const { meta, cards } = deserializeMindMap(record.content)
+      const localPath = await join(syncFolderPath, record.path)
+      await ensureLocalFolder(localPath)
+      await writeTextFile(localPath, record.content)
+      await pullAssetsFor(client, localPath, referencedAssets(record.content, remoteAssets))
+      state[record.file_id] = { lastSyncedModified: meta?.lastModified ?? record.updated, lastSyncedUpdated: record.updated }
+      result.pulled += 1
+      void cards // validated by deserializeMindMap succeeding; the written file is the record's own content verbatim
+    } catch (error) {
+      result.errors.push({ fileId: record.file_id, message: describeSyncError(error) })
+    }
+  }
+
+  return result
+}
