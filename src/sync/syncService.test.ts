@@ -21,7 +21,14 @@ import { exists, writeTextFile, readDir } from '@tauri-apps/plugin-fs'
 import { loadMindMap, loadMindMapMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { readAssetBytes, writeAsset } from '../persistence/assets'
-import { sync, type SyncClient, type RemoteMindMapRecord, type RemoteAssetRecord } from './syncService'
+import {
+  countPendingPushes,
+  isPushPending,
+  sync,
+  type SyncClient,
+  type RemoteMindMapRecord,
+  type RemoteAssetRecord,
+} from './syncService'
 import type { SyncState } from '../persistence/syncState'
 import type { MindMapMeta } from '../types/card'
 
@@ -53,6 +60,65 @@ beforeEach(() => {
   vi.mocked(scanFolder).mockReset()
   vi.mocked(readAssetBytes).mockReset()
   vi.mocked(writeAsset).mockReset()
+})
+
+describe('isPushPending', () => {
+  const known = { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' }
+
+  it('is pending when we have never pushed it', () => {
+    expect(isPushPending(AIFE, 'aife', undefined)).toBe(true)
+  })
+
+  it('is pending when the local file moved since the last push', () => {
+    expect(isPushPending({ ...AIFE, lastModified: '2026-01-02T00:00:00.000Z' }, 'aife', known)).toBe(true)
+  })
+
+  it('is not pending when the cache already knows this exact version', () => {
+    expect(isPushPending(AIFE, 'aife', known)).toBe(false)
+  })
+
+  it('never considers a map we do not author, or one that has no meta', () => {
+    expect(isPushPending({ ...AIFE, author: 'someone-else' }, 'aife', undefined)).toBe(false)
+    expect(isPushPending(null, 'aife', undefined)).toBe(false)
+  })
+})
+
+describe('countPendingPushes', () => {
+  it('counts only our own maps that moved since the last push', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
+      { type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' },
+      { type: 'mindmap', name: 'c.zmap', path: '/cours/c.zmap' },
+    ])
+    vi.mocked(loadMindMapMeta).mockImplementation(async path => {
+      if (path === '/cours/b.zmap') return { ...AIFE, id: 'b' }
+      if (path === '/cours/c.zmap') return { ...AIFE, id: 'c', author: 'someone-else' }
+      return { ...AIFE, id: 'a' }
+    })
+
+    const pending = await countPendingPushes({
+      syncFolderPath: '/cours',
+      currentUser: 'aife',
+      state: { b: { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' } },
+    })
+
+    expect(pending).toBe(1) // 'a' never pushed; 'b' unchanged; 'c' is not ours
+  })
+
+  it('skips a map it cannot read rather than counting it', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockRejectedValue(new Error('corrompu'))
+
+    expect(await countPendingPushes({ syncFolderPath: '/cours', currentUser: 'aife', state: {} })).toBe(0)
+  })
+
+  it('lets an unreadable folder throw, so the caller can answer "unknown"', async () => {
+    vi.mocked(scanFolder).mockRejectedValue(new Error('dossier disparu'))
+
+    await expect(
+      countPendingPushes({ syncFolderPath: '/cours', currentUser: 'aife', state: {} })
+    ).rejects.toThrow('dossier disparu')
+  })
 })
 
 describe('sync — push', () => {

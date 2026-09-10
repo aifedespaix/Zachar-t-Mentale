@@ -7,7 +7,7 @@ import { serializeMindMap, deserializeMindMap } from '../persistence/serializati
 import { fileNameOf, parentDirOf, separatorOf } from '../persistence/paths'
 import type { FileTreeNode } from '../types/workspace'
 import type { MindMapMeta } from '../types/card'
-import type { SyncState } from '../persistence/syncState'
+import type { SyncState, SyncStateEntry } from '../persistence/syncState'
 
 export interface RemoteMindMapRecord {
   id: string
@@ -52,6 +52,49 @@ interface SyncParams {
   currentUser: string
   syncFolderPath: string
   state: SyncState
+}
+
+/**
+ * Whether a local map still has to be sent: the ONE definition of "pending
+ * push", shared by the sync loop and the sidebar's counter so the number the
+ * user reads can never disagree with what a sync would actually do.
+ *
+ * A file is pending when it is the current account's own (ownership is what
+ * makes it writable), and its `lastModified` is newer than the last state we
+ * pushed — or when we have never pushed it at all.
+ */
+export function isPushPending(
+  meta: MindMapMeta | null,
+  author: string,
+  stateEntry: SyncStateEntry | undefined
+): boolean {
+  if (meta === null || meta.author !== author) return false
+  return stateEntry === undefined || stateEntry.lastSyncedModified < meta.lastModified
+}
+
+/**
+ * How many maps a sync would push right now.
+ *
+ * Reads one header per `.zmap` under the sync folder — the same walk the sync
+ * itself does, which is why the sidebar only recomputes it on real events (a
+ * finished sync, a published file, a re-scan) rather than on every render.
+ *
+ * A file that cannot be read is skipped rather than counted: the sync reports
+ * it, and a wrong number in the footer would be worse than a missing one.
+ */
+export async function countPendingPushes(params: {
+  syncFolderPath: string
+  currentUser: string
+  state: SyncState
+}): Promise<number> {
+  const tree = await scanFolder(params.syncFolderPath)
+  let pending = 0
+  for (const path of flattenMindMapPaths(tree)) {
+    const meta = await loadMindMapMeta(path).catch(() => null)
+    if (meta === null || !isPushPending(meta, params.currentUser, params.state[meta.id])) continue
+    pending += 1
+  }
+  return pending
 }
 
 function flattenMindMapPaths(nodes: FileTreeNode[]): string[] {
@@ -160,7 +203,7 @@ export async function sync({ client, currentUser, syncFolderPath, state }: SyncP
     seenFileIds.add(meta.id)
 
     const known = state[meta.id]
-    if (known && known.lastSyncedModified >= meta.lastModified) continue
+    if (!isPushPending(meta, currentUser, known)) continue
 
     try {
       const cards = await loadMindMap(path)

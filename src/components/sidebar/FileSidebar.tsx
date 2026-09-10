@@ -15,6 +15,7 @@ import { CommandButton } from '../commands/CommandButton'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useSyncStore } from '../../state/useSyncStore'
 import { syncResultLabel } from '../../sync/syncResultLabel'
+import { formatRelativeTime } from '../../utils/relativeTime'
 import { FileTreeRow } from './FileTreeRow'
 import {
   clampSidebarWidth,
@@ -99,6 +100,13 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const syncError = useSyncStore(s => s.error)
   const lastResult = useSyncStore(s => s.lastResult)
   const syncNow = useSyncStore(s => s.syncNow)
+  const pendingCount = useSyncStore(s => s.pendingCount)
+  const lastSuccessAt = useSyncStore(s => s.lastSuccessAt)
+  const refreshPendingCount = useSyncStore(s => s.refreshPendingCount)
+  // The username, not the object: a fresh `{username, role}` on every auth tick
+  // would make the effect below walk the sync folder for nothing.
+  const syncUserName = useSyncStore(s => s.currentUser?.username ?? null)
+  const syncFolderPath = useSyncStore(s => s.syncFolderPath)
   const [collapsed, setCollapsed] = useState(false)
   /** The folder « Nouveau dossier » is about to create in — `null` when the dialog is closed. */
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null)
@@ -122,6 +130,14 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   useEffect(() => {
     setSyncFeedbackDismissed(false)
   }, [syncError, lastResult])
+
+  useEffect(() => {
+    // Recompute the « à envoyer » count on the events that can change it: the
+    // account, the folder, a re-scanned tree, a finished sync. The walk reads
+    // one header per .zmap, so it is deliberately NOT run on every render —
+    // publishing refreshes it itself, from the hook that changed the file.
+    void refreshPendingCount()
+  }, [refreshPendingCount, syncFolderPath, syncUserName, rootFolders, lastResult])
 
   // Writing on every pointer move would hammer `localStorage` a hundred times
   // per drag for a value only the NEXT launch reads, so the width is persisted
@@ -333,6 +349,29 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
       ? lastResult.errors.map(error => `${error.fileId} : ${error.message}`).join('\n')
       : undefined
 
+  /**
+   * What the sync button's tooltip adds to its name: the two facts the footer
+   * would otherwise make the user click to discover. Each part is dropped when
+   * it cannot be known, and the count is also on the badge, for the glance that
+   * does not hover anything.
+   */
+  const pendingDetail =
+    pendingCount === null
+      ? null
+      : pendingCount === 0
+        ? 'rien à envoyer'
+        : `${pendingCount} carte${pendingCount > 1 ? 's' : ''} à envoyer`
+  const lastSyncDetail =
+    lastSuccessAt === null
+      ? syncUserName === null
+        ? null
+        : 'jamais synchronisé'
+      : `dernière synchro ${formatRelativeTime(lastSuccessAt) ?? 'inconnue'}`
+  const syncTooltipDetail =
+    syncRunning || (pendingDetail === null && lastSyncDetail === null)
+      ? undefined
+      : [pendingDetail, lastSyncDetail].filter(part => part !== null).join(' · ')
+
   return (
     <TooltipProvider>
       <div
@@ -471,13 +510,44 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
 
           <span className="toolbar-separator" aria-hidden />
 
-          <CommandButton
-            command="sync.now"
-            icon={CloudSync}
-            variant="outline"
-            size="icon-sm"
-            spinning={syncRunning}
-          />
+          {/*
+            The badge sits OUTSIDE the button (absolutely positioned over it) so
+            the button's own hit area, its accessible name and its tooltip are
+            untouched by a number that changes on its own.
+          */}
+          <span style={{ position: 'relative', display: 'inline-flex' }}>
+            <CommandButton
+              command="sync.now"
+              icon={CloudSync}
+              variant="outline"
+              size="icon-sm"
+              spinning={syncRunning}
+              tooltipDetail={syncTooltipDetail}
+            />
+            {pendingCount !== null && pendingCount > 0 && (
+              <span
+                role="status"
+                style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  minWidth: 14,
+                  height: 14,
+                  padding: '0 3px',
+                  borderRadius: 999,
+                  background: 'var(--primary)',
+                  color: 'var(--primary-foreground)',
+                  fontSize: 9,
+                  fontWeight: 600,
+                  lineHeight: '14px',
+                  textAlign: 'center',
+                  pointerEvents: 'none',
+                }}
+              >
+                {pendingCount}
+              </span>
+            )}
+          </span>
 
           <span style={{ marginLeft: 'auto' }} aria-hidden />
 

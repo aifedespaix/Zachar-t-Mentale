@@ -5,9 +5,10 @@ import { DEFAULT_SYNC_SETTINGS } from '../types/syncSettings'
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { loadSyncState, saveSyncState } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
+import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { logSyncEvent } from '../persistence/syncLog'
 import { createSyncClient } from '../sync/pocketBaseAdapter'
-import { sync, type SyncResult } from '../sync/syncService'
+import { countPendingPushes, sync, type SyncResult } from '../sync/syncService'
 import { syncResultLabel } from '../sync/syncResultLabel'
 
 export interface SyncUser {
@@ -22,6 +23,15 @@ interface SyncStoreState {
   status: 'idle' | 'connecting' | 'syncing'
   error: string | null
   lastResult: SyncResult | null
+  /** When the last sync succeeded (ISO), remembered across runs — « il y a 12 min ». */
+  lastSuccessAt: string | null
+  /**
+   * How many of the account's maps a sync would push right now, or `null` when
+   * it cannot be known (nobody signed in, no folder, folder unreadable).
+   */
+  pendingCount: number | null
+  /** Recomputes `pendingCount` — the one place that walks the sync folder for it. */
+  refreshPendingCount: () => Promise<void>
   init: () => Promise<void>
   setServerUrl: (url: string) => Promise<void>
   setSyncFolderPath: (path: string | null) => Promise<void>
@@ -95,11 +105,40 @@ export function createSyncStore(): SyncStore {
       status: 'idle',
       error: null,
       lastResult: null,
+      lastSuccessAt: null,
+      pendingCount: null,
 
       init: async () => {
         const settings = await loadSyncSettings()
         set({ serverUrl: settings.serverUrl, syncFolderPath: settings.syncFolderPath })
         if (settings.serverUrl) set({ currentUser: userFromClient(clientFor(settings.serverUrl)) })
+        // The interface's own memory, kept apart from the settings: it has to
+        // survive a restart to answer « quand ai-je synchronisé la dernière fois ? ».
+        const status = await loadSyncStatus()
+        set({ lastSuccessAt: status.lastSuccessAt })
+        // The count depends on the session and the folder that were just
+        // restored, so it is computed once here rather than on every render.
+        void get().refreshPendingCount()
+      },
+
+      refreshPendingCount: async () => {
+        const { syncFolderPath, currentUser } = get()
+        if (syncFolderPath === null || currentUser === null) {
+          set({ pendingCount: null })
+          return
+        }
+        try {
+          const state = await loadSyncState()
+          const pending = await countPendingPushes({
+            syncFolderPath,
+            currentUser: currentUser.username,
+            state,
+          })
+          set({ pendingCount: pending })
+        } catch {
+          // A sync folder that was moved or deleted: no badge beats a wrong one.
+          set({ pendingCount: null })
+        }
       },
 
       setServerUrl: async url => {
@@ -110,6 +149,7 @@ export function createSyncStore(): SyncStore {
       setSyncFolderPath: async path => {
         set({ syncFolderPath: path })
         await saveSyncSettings({ serverUrl: get().serverUrl, syncFolderPath: path })
+        await get().refreshPendingCount()
       },
 
       login: async (username, password) => {
@@ -121,6 +161,8 @@ export function createSyncStore(): SyncStore {
           // The username only — never the password, which is not even read here.
           await logSyncEvent('info', `connexion réussie : « ${user?.username ?? username} » sur ${get().serverUrl}`)
           set({ currentUser: user, status: 'idle' })
+          // Signing in is what makes the count answerable at all.
+          await get().refreshPendingCount()
         } catch (error) {
           const message = describeSyncStoreError(error)
           // The French message is for the user, the raw error for whoever reads
@@ -136,7 +178,8 @@ export function createSyncStore(): SyncStore {
 
       logout: () => {
         clientFor(get().serverUrl).authStore.clear()
-        set({ currentUser: null })
+        // Nothing to send on behalf of nobody: the badge goes away with the session.
+        set({ currentUser: null, pendingCount: null })
       },
 
       syncNow: async () => {
@@ -178,7 +221,12 @@ export function createSyncStore(): SyncStore {
             // The per-file detail, which is what a bug report actually needs.
             await logSyncEvent('error', 'fichiers en erreur pendant la synchronisation', result.errors)
           }
-          set({ status: 'idle', lastResult: result })
+          const finishedAt = new Date().toISOString()
+          // The state update comes first: the button must come back to life
+          // before the two disk writes and the folder walk below.
+          set({ status: 'idle', lastResult: result, lastSuccessAt: finishedAt })
+          await saveSyncStatus({ lastSuccessAt: finishedAt })
+          await get().refreshPendingCount()
         } catch (error) {
           const message = describeSyncStoreError(error)
           await logSyncEvent('error', `synchronisation échouée : ${message}`, error)

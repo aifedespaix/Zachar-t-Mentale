@@ -59,6 +59,9 @@ export function usePublishMindMap() {
       // header just changed.
       bumpFileMetaRevision()
       await refreshFolder(parentDirOf(path))
+      // The published file is one more to send: the footer's counter would
+      // otherwise stay at the number it read before the click.
+      await useSyncStore.getState().refreshPendingCount()
       return 'published'
     } catch (error) {
       setWorkspaceError(`Impossible de publier « ${name} » : ${describeError(error)}`)

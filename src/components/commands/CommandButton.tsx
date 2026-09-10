@@ -22,6 +22,15 @@ interface CommandButtonProps {
    * reader all say the same thing.
    */
   spinning?: boolean
+  /**
+   * A second, muted line under the tooltip's label, for the LIVE STATE of the
+   * action — « 3 cartes à envoyer · dernière synchro il y a 12 min ».
+   *
+   * Deliberately not folded into the label: the accessible name stays the
+   * action's own name, which is what a screen reader should announce and what
+   * the tests assert, whatever the state happens to be.
+   */
+  tooltipDetail?: string
 }
 
 /**
@@ -44,6 +53,7 @@ export function CommandButton({
   size,
   showLabel = false,
   spinning = false,
+  tooltipDetail,
 }: CommandButtonProps) {
   const definition = commandById(command)
   const enabled = useCommandEnabled(command)
@@ -69,9 +79,12 @@ export function CommandButton({
           {showLabel && <span>{name}</span>}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>
-        {name}
-        {shortcut && <span style={{ opacity: 0.7, marginLeft: 8 }}>{shortcut}</span>}
+      <TooltipContent className={tooltipDetail ? 'flex-col items-start gap-1' : undefined}>
+        <span>
+          {name}
+          {shortcut && <span style={{ opacity: 0.7, marginLeft: 8 }}>{shortcut}</span>}
+        </span>
+        {tooltipDetail && <span style={{ opacity: 0.75 }}>{tooltipDetail}</span>}
       </TooltipContent>
     </Tooltip>
   )

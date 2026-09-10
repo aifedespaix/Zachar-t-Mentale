@@ -4,14 +4,16 @@ vi.mock('../persistence/syncSettings', () => ({ loadSyncSettings: vi.fn(), saveS
 vi.mock('../persistence/syncState', () => ({ loadSyncState: vi.fn(), saveSyncState: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('../persistence/pocketbaseClient', () => ({ createPocketBaseClient: vi.fn() }))
 vi.mock('../sync/pocketBaseAdapter', () => ({ createSyncClient: vi.fn().mockReturnValue({}) }))
-vi.mock('../sync/syncService', () => ({ sync: vi.fn() }))
+vi.mock('../sync/syncService', () => ({ sync: vi.fn(), countPendingPushes: vi.fn() }))
 vi.mock('../persistence/syncLog', () => ({ logSyncEvent: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('../persistence/syncStatus', () => ({ loadSyncStatus: vi.fn(), saveSyncStatus: vi.fn() }))
 
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { loadSyncState, saveSyncState } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
-import { sync } from '../sync/syncService'
+import { countPendingPushes, sync } from '../sync/syncService'
 import { logSyncEvent } from '../persistence/syncLog'
+import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { createSyncStore, type SyncStore } from './useSyncStore'
 
 function fakePocketBase(authWithPassword: (username: string, password: string) => Promise<{ record: { username: string; role: string } }>) {
@@ -50,6 +52,9 @@ describe('useSyncStore', () => {
     vi.mocked(createPocketBaseClient).mockReset()
     vi.mocked(sync).mockReset()
     vi.mocked(logSyncEvent).mockReset().mockResolvedValue(undefined)
+    vi.mocked(loadSyncStatus).mockReset().mockResolvedValue({ lastSuccessAt: null })
+    vi.mocked(saveSyncStatus).mockReset().mockResolvedValue(undefined)
+    vi.mocked(countPendingPushes).mockReset().mockResolvedValue(0)
     store = createSyncStore()
   })
 
@@ -58,6 +63,75 @@ describe('useSyncStore', () => {
     await store.getState().init()
     expect(store.getState().serverUrl).toBe('https://pi.local')
     expect(store.getState().syncFolderPath).toBe('/cours')
+  })
+
+  it('init() restores when the last sync succeeded — it has to survive a restart', async () => {
+    vi.mocked(loadSyncStatus).mockResolvedValue({ lastSuccessAt: '2026-09-10T19:00:00.000Z' })
+    await store.getState().init()
+    expect(store.getState().lastSuccessAt).toBe('2026-09-10T19:00:00.000Z')
+  })
+
+  it('refreshPendingCount() counts what a sync would push, for the account and the folder', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+    vi.mocked(countPendingPushes).mockResolvedValue(3)
+
+    await store.getState().refreshPendingCount()
+
+    expect(store.getState().pendingCount).toBe(3)
+    expect(countPendingPushes).toHaveBeenCalledWith(
+      expect.objectContaining({ syncFolderPath: '/cours', currentUser: 'aife' })
+    )
+  })
+
+  it('refreshPendingCount() answers "unknown", never a number, when it cannot know', async () => {
+    await store.getState().refreshPendingCount()
+    expect(store.getState().pendingCount).toBeNull()
+    expect(countPendingPushes).not.toHaveBeenCalled()
+
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+    vi.mocked(countPendingPushes).mockRejectedValue(new Error('dossier disparu'))
+
+    await store.getState().refreshPendingCount()
+    expect(store.getState().pendingCount).toBeNull()
+  })
+
+  it('a successful sync records and persists when it finished', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(sync).mockResolvedValue({ pushed: 1, pulled: 0, errors: [] })
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+
+    await store.getState().syncNow()
+
+    const recorded = store.getState().lastSuccessAt
+    expect(recorded).not.toBeNull()
+    expect(saveSyncStatus).toHaveBeenCalledWith({ lastSuccessAt: recorded })
+    // And the footer's counter is refreshed from that same run.
+    expect(countPendingPushes).toHaveBeenCalled()
+  })
+
+  it('a failed sync leaves the last success where it was', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(sync).mockRejectedValue(Object.assign(new Error('Failed to fetch'), { status: 0 }))
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+
+    await store.getState().syncNow()
+
+    expect(store.getState().lastSuccessAt).toBeNull()
+    expect(saveSyncStatus).not.toHaveBeenCalled()
   })
 
   it('picks up a session that resolves asynchronously via AsyncAuthStore onChange', async () => {

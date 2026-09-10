@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { FileSidebar } from './FileSidebar'
@@ -21,11 +21,13 @@ vi.mock('../../persistence/sessionState', () => ({
   saveSessionState: vi.fn(),
 }))
 vi.mock('../../hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
+vi.mock('../../persistence/syncState', () => ({ loadSyncState: vi.fn() }))
 
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../../persistence/workspaceConfig'
 import { scanFolder } from '../../persistence/fileTree'
 import { open } from '@tauri-apps/plugin-dialog'
 import { loadSessionState } from '../../persistence/sessionState'
+import { loadSyncState } from '../../persistence/syncState'
 
 /**
  * The sidebar panel itself — the element the width is set on. It has no role
@@ -58,6 +60,8 @@ function resetSyncStore() {
     status: 'idle',
     error: null,
     lastResult: null,
+    lastSuccessAt: null,
+    pendingCount: null,
     syncNow: vi.fn().mockResolvedValue(undefined),
   })
 }
@@ -74,6 +78,7 @@ describe('FileSidebar', () => {
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
     vi.mocked(open).mockReset()
     vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadSyncState).mockReset().mockResolvedValue({})
   })
 
   it('loads the configured workspace on mount and shows an empty state with no root folders', async () => {
@@ -376,15 +381,76 @@ describe('FileSidebar', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Fichiers que l’application ne peut pas ouvrir')
   })
 
+  it('badges the sync button with what is waiting to be sent', async () => {
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+    // After the mount: the panel recomputes the count when it appears (there is
+    // no account configured here, so it would otherwise settle on "unknown").
+    act(() => useSyncStore.setState({ pendingCount: 3 }))
+
+    expect(screen.getByRole('status')).toHaveTextContent('3')
+  })
+
+  it('shows no badge when nothing is waiting, or when the count is unknown', async () => {
+    const { unmount } = render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+    act(() => useSyncStore.setState({ pendingCount: 0 }))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    unmount()
+
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+    act(() => useSyncStore.setState({ pendingCount: null }))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('tells the whole story in the sync button’s tooltip, without clicking anything', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+    act(() =>
+      useSyncStore.setState({
+        pendingCount: 2,
+        lastSuccessAt: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
+      })
+    )
+
+    await user.hover(screen.getByRole('button', { name: 'Synchroniser' }))
+
+    const tooltip = await screen.findByRole('tooltip')
+    expect(tooltip).toHaveTextContent('2 cartes à envoyer')
+    expect(tooltip).toHaveTextContent(/dernière synchro il y a 12 min/)
+  })
+
+  it('recomputes what is waiting as soon as a sync finishes', async () => {
+    const user = userEvent.setup()
+    useSyncStore.setState({
+      syncFolderPath: '/cours-svt',
+      currentUser: { username: 'aife', role: 'prof' },
+    })
+    vi.mocked(useSyncStore.getState().syncNow).mockImplementation(async () => {
+      useSyncStore.setState({ lastResult: { pushed: 1, pulled: 1, errors: [] } })
+    })
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+    vi.mocked(scanFolder).mockClear()
+
+    await user.click(screen.getByRole('button', { name: 'Synchroniser' }))
+
+    // The counter walks the sync folder — that walk IS the observable here.
+    await waitFor(() => expect(scanFolder).toHaveBeenCalledWith('/cours-svt'))
+  })
+
   it('gathers every action into one bar BELOW the tree, instead of the header', async () => {
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('Cartes mentales')
 
     const panel = sidebarPanel()
     const tree = panel.children[1]
-    // The tooltip trigger renders the button directly, so the button's parent
-    // IS the action bar — reached through the button rather than by index.
-    const bar = screen.getByRole('button', { name: 'Synchroniser' }).parentElement as HTMLElement
+    // Reached through the button rather than by index: the badge wrapper sits
+    // between the two, so the bar is the button's grandparent.
+    const bar = screen.getByRole('button', { name: 'Synchroniser' }).parentElement
+      ?.parentElement as HTMLElement
 
     expect(panel.children[0]).toHaveTextContent('Cartes mentales')
     expect(tree).not.toHaveTextContent('Synchroniser')
