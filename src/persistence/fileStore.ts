@@ -1,6 +1,6 @@
 import { exists, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
-import type { Card } from '../types/card'
-import { serializeCards, deserializeCards } from './serialization'
+import type { Card, MindMapMeta } from '../types/card'
+import { serializeMindMap, deserializeMindMap } from './serialization'
 
 /**
  * Returns `null` when there is no file at `path` yet — an expected first-run
@@ -15,7 +15,14 @@ import { serializeCards, deserializeCards } from './serialization'
 export async function loadMindMap(path: string): Promise<Card[] | null> {
   if (!(await exists(path))) return null
   const json = await readTextFile(path)
-  return deserializeCards(json)
+  return deserializeMindMap(json).cards
+}
+
+/** The sync metadata of a `.zmap`, or `null` for a file that has never been synced (or does not exist). */
+export async function loadMindMapMeta(path: string): Promise<MindMapMeta | null> {
+  if (!(await exists(path))) return null
+  const json = await readTextFile(path)
+  return deserializeMindMap(json).meta
 }
 
 /**
@@ -27,6 +34,16 @@ export async function mindMapExists(path: string): Promise<boolean> {
   return exists(path)
 }
 
+/**
+ * Whatever `meta` the file already had is carried over, with `lastModified`
+ * bumped to now — every autosave of a synced file updates the one field the
+ * sync algorithm compares, with zero changes needed at any of this
+ * function's call sites (autosave, XMind import, the repair flow, …). A file
+ * that has never been synced (`meta === null`) keeps writing a bare array.
+ */
 export async function saveMindMap(path: string, cards: Card[]): Promise<void> {
-  await writeTextFile(path, serializeCards(cards))
+  const previousMeta = await loadMindMapMeta(path)
+  const meta: MindMapMeta | null =
+    previousMeta === null ? null : { ...previousMeta, lastModified: new Date().toISOString() }
+  await writeTextFile(path, serializeMindMap(meta, cards))
 }

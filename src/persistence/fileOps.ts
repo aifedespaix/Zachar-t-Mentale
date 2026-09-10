@@ -1,14 +1,15 @@
 import { mkdir, remove, rename, writeTextFile, exists, readDir, copyFile } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
 import { createRootCard } from '../state/cardsReducer'
-import { serializeCards } from './serialization'
-import { mindMapExists } from './fileStore'
-import { isMindMapPath, sanitizeFileName, withMindMapExtension } from './paths'
+import { serializeMindMap } from './serialization'
+import { loadMindMap, mindMapExists } from './fileStore'
+import { isMindMapPath, sanitizeFileName, withMindMapExtension, mindMapBaseName, parentDirOf, fileNameOf } from './paths'
 import { sidecarDirOf } from './assets'
+import type { MindMapMeta, UserRole } from '../types/card'
 
 export async function createMindMapFile(folderPath: string, fileName: string): Promise<string> {
   const path = await join(folderPath, withMindMapExtension(fileName))
-  await writeTextFile(path, serializeCards([createRootCard('Nouveau chapitre')]))
+  await writeTextFile(path, serializeMindMap(null, [createRootCard('Nouveau chapitre')]))
   return path
 }
 
@@ -128,4 +129,23 @@ export async function duplicatePath(sourcePath: string, destPath: string, isFold
   } catch {
     // Best-effort, as in `renamePath`: the primary copy already succeeded.
   }
+}
+
+/**
+ * Forks a map: a full local copy, stamped as authored by `author` under a
+ * fresh id, so the copy is immediately and exclusively editable by them —
+ * this is the entire "Personnaliser / Faire ma copie" action.
+ */
+export async function duplicateMap(sourcePath: string, author: string, role: UserRole): Promise<string> {
+  const cards = await loadMindMap(sourcePath)
+  if (cards === null) throw new Error(`« ${fileNameOf(sourcePath)} » n'existe plus.`)
+
+  const meta: MindMapMeta = { id: crypto.randomUUID(), author, role, lastModified: new Date().toISOString() }
+  const destPath = await freeMindMapPath(parentDirOf(sourcePath), `${mindMapBaseName(sourcePath)} (copie)`)
+  await writeTextFile(destPath, serializeMindMap(meta, cards))
+
+  const sourceSidecar = sidecarDirOf(sourcePath)
+  if (await exists(sourceSidecar)) await copyDirRecursive(sourceSidecar, sidecarDirOf(destPath))
+
+  return destPath
 }
