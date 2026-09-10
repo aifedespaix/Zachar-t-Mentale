@@ -158,6 +158,31 @@ describe('useCardDetailStore', () => {
     })
   })
 
+  describe('unpin', () => {
+    it('demotes a pinned fiche to a preview without closing it', () => {
+      // « Désépingler » is not « Fermer »: the fiche stays readable, it just
+      // stops being protected from the next preview replacement.
+      useCardDetailStore.getState().show('a')
+      useCardDetailStore.getState().pin('a')
+
+      useCardDetailStore.getState().unpin('a')
+
+      expect(ids()).toEqual(['a'])
+      expect(pinnedIds()).toEqual([])
+    })
+
+    it('makes the fiche replaceable again when stack mode is off', () => {
+      useCardDetailStore.getState().show('a')
+      useCardDetailStore.getState().pin('a')
+      useCardDetailStore.getState().show('b')
+
+      useCardDetailStore.getState().unpin('a')
+      useCardDetailStore.getState().show('c')
+
+      expect(ids()).toEqual(['c'])
+    })
+  })
+
   describe('clearUnpinned', () => {
     it('drops every unpinned fiche but keeps the pinned ones', () => {
       useCardDetailStore.setState({ stackMode: true })

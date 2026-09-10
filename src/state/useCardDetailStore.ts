@@ -46,6 +46,12 @@ interface CardDetailState {
   show: (cardId: string) => void
   /** Preview → pinned. Already-pinned cards are left alone. */
   pin: (cardId: string) => void
+  /**
+   * Pinned → preview. The fiche STAYS open — while stack mode is off the next
+   * card opened replaces it again, which is exactly what « désépingler »
+   * means; closing it is what « Fermer » is for.
+   */
+  unpin: (cardId: string) => void
   close: (cardId: string) => void
   toggleCollapsed: (cardId: string) => void
   setEditing: (cardId: string | null) => void
@@ -90,6 +96,11 @@ export const useCardDetailStore = create<CardDetailState>((set) => ({
   pin: cardId =>
     set(state => ({
       open: state.open.map(entry => (entry.cardId === cardId ? { ...entry, pinned: true } : entry)),
+    })),
+
+  unpin: cardId =>
+    set(state => ({
+      open: state.open.map(entry => (entry.cardId === cardId ? { ...entry, pinned: false } : entry)),
     })),
 
   close: cardId =>

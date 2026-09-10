@@ -11,6 +11,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { CloudSync, Eye, EyeOff, FolderPlus, PanelLeftClose, PanelLeftOpen, RefreshCw, X } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent } from '../ui/context-menu'
 import { CommandButton } from '../commands/CommandButton'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useSyncStore } from '../../state/useSyncStore'
@@ -29,6 +30,7 @@ import { loadShowUnreadableFiles, saveShowUnreadableFiles } from '../../persiste
 import { createSubfolder, freeSiblingPath } from '../../persistence/fileOps'
 import { fileNameOf, parentDirOf } from '../../persistence/paths'
 import { NameDialog } from './NameDialog'
+import { useFolderCreation } from './useFolderCreation'
 import { useCommand } from '../../hooks/useCommand'
 import type { FileTreeNode } from '../../types/workspace'
 
@@ -127,6 +129,14 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
    */
   const [syncFeedbackDismissed, setSyncFeedbackDismissed] = useState(false)
   const handleRef = useRef<HTMLDivElement>(null)
+
+  // Right-clicking the sidebar's own empty space (the header, the gap under the
+  // tree, the footer bar) targets the FIRST configured folder: it is the one
+  // the user is implicitly working in, and it is the only folder a menu with no
+  // row under the cursor can name. Folder rows keep their own menu, richer
+  // because they know which folder they are.
+  const firstRoot = rootFolders[0]
+  const folderCreation = useFolderCreation(firstRoot?.path ?? '', onOpenFile)
 
   // A new failure, or a new result, is news again — the dismissal only ever
   // covers the run it was clicked on.
@@ -316,28 +326,36 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   if (collapsed) {
     return (
       <TooltipProvider>
-        <div
-          style={{
-            width: 32,
-            borderRight: '1px solid var(--border)',
-            display: 'flex',
-            justifyContent: 'center',
-            // Bottom-aligned on purpose: folding and unfolding happen in the
-            // same corner of the screen, so the control does not appear to jump
-            // across the window between the two states.
-            alignItems: 'flex-end',
-            paddingBottom: 8,
-          }}
-        >
-          <CommandButton
-            command="view.toggleSidebar"
-            icon={PanelLeftOpen}
-            label="Déplier la barre latérale"
-            variant="ghost"
-            size="icon-sm"
-          />
-        </div>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div
+              style={{
+                width: 32,
+                borderRight: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'center',
+                // Bottom-aligned on purpose: folding and unfolding happen in the
+                // same corner of the screen, so the control does not appear to jump
+                // across the window between the two states.
+                alignItems: 'flex-end',
+                paddingBottom: 8,
+              }}
+            >
+              <CommandButton
+                command="view.toggleSidebar"
+                icon={PanelLeftOpen}
+                label="Déplier la barre latérale"
+                variant="ghost"
+                size="icon-sm"
+              />
+            </div>
+          </ContextMenuTrigger>
+          {firstRoot !== undefined && (
+            <ContextMenuContent>{folderCreation.menuItems}</ContextMenuContent>
+          )}
+        </ContextMenu>
         {newFolderDialog}
+        {folderCreation.dialog}
       </TooltipProvider>
     )
   }
@@ -393,262 +411,270 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
 
   return (
     <TooltipProvider>
-      <div
-        style={{
-          // `flexShrink: 0` so the canvas beside it, not the sidebar, gives way
-          // when the window gets narrow — otherwise a drag to 500px would be
-          // silently undone by the flex layout the moment the window shrank.
-          width,
-          flexShrink: 0,
-          borderRight: '1px solid var(--border)',
-          display: 'flex',
-          flexDirection: 'column',
-          position: 'relative',
-        }}
-      >
-        {/*
-          The header is the title and nothing else. Every action lives in the
-          footer bar below, so the tree starts right under the heading that
-          names it and the buttons sit where the file rows end — one bar, one
-          place to look, instead of a header cluster and a footer one.
-        */}
-        <div style={{ padding: 8 }}>
-          <span style={{ fontWeight: 600, fontSize: 13 }}>Cartes mentales</span>
-        </div>
-
-        <div style={{ overflowY: 'auto', flex: 1 }}>
-          {rootFolders.length === 0 && (
-            <p style={{ padding: 8, fontSize: 13, color: 'var(--muted-foreground)' }}>Aucun dossier configuré.</p>
-          )}
-          {rootFolders.map(root => {
-            const rootNode: FileTreeNode = {
-              type: 'folder',
-              name: folderDisplayName(root.path),
-              path: root.path,
-              children: root.tree,
-            }
-            return (
-              <FileTreeRow
-                key={root.path}
-                node={rootNode}
-                depth={0}
-                onOpenFile={onOpenFile}
-                isRoot
-                onRemoveRoot={handleRemoveRoot}
-                showUnreadable={showUnreadable}
-              />
-            )
-          })}
-        </div>
-
-        {/*
-          Messages sit immediately above the bar that produced them — a failed
-          sync is explained next to the button that was clicked, not at the far
-          end of the panel from it.
-        */}
-        {(workspaceError !== null || syncRunning || showSyncError || showSyncResult) && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 8px 6px', flexShrink: 0 }}>
-            {syncRunning && (
-              <div role="status" className="status-banner status-banner--info" style={{ margin: 0 }}>
-                <span style={{ flex: 1 }}>
-                  {syncProgress === null
-                    ? 'Synchronisation…'
-                    : `Synchronisation ${syncProgress.done}/${syncProgress.total}…`}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Annuler la synchronisation"
-                  onClick={cancelSync}
-                >
-                  <X size={14} />
-                </Button>
-              </div>
-            )}
-            {workspaceError && (
-              <div role="alert" className="status-banner" style={{ margin: 0 }}>
-                <span style={{ flex: 1 }}>{workspaceError}</span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Masquer le message d’erreur"
-                  onClick={() => setWorkspaceError(null)}
-                >
-                  <X size={14} />
-                </Button>
-              </div>
-            )}
-            {showSyncError && (
-              <div role="alert" className="status-banner" style={{ margin: 0 }}>
-                <span style={{ flex: 1 }}>{syncError}</span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Masquer le message de synchronisation"
-                  onClick={() => setSyncFeedbackDismissed(true)}
-                >
-                  <X size={14} />
-                </Button>
-              </div>
-            )}
-            {showSyncResult && (
-              <div
-                role="status"
-                className={
-                  lastResult.conflicts.length > 0 || lastResult.errors.length > 0
-                    ? 'status-banner'
-                    : 'status-banner status-banner--info'
-                }
-                style={{ margin: 0 }}
-                title={syncResultDetail}
-              >
-                <span style={{ flex: 1 }}>{syncResultLabel(lastResult)}</span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Masquer le message de synchronisation"
-                  onClick={() => setSyncFeedbackDismissed(true)}
-                >
-                  <X size={14} />
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/*
-          The action bar, at the bottom rather than in the header: read left to
-          right it is « what the tree shows », then « exchange with the server »,
-          then the panel control, each group separated by a hairline. The sync
-          button is the one boxed control — it is the deliberate, occasional
-          action of the bar, and the only one that can take noticeable time.
-        */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            rowGap: 4,
-            // A safety net for the 180 px minimum width: wrapping onto a second
-            // line beats clipping a button the user cannot reach.
-            flexWrap: 'wrap',
-            padding: '6px 8px',
-            borderTop: '1px solid var(--border)',
-            flexShrink: 0,
-          }}
-        >
-          <CommandButton command="file.addRootFolder" icon={FolderPlus} variant="ghost" size="icon-sm" />
-          <CommandButton command="file.refresh" icon={RefreshCw} variant="ghost" size="icon-sm" />
-          <SidebarIconButton
-            label={showUnreadable ? 'Masquer les fichiers non lisibles' : 'Afficher les fichiers non lisibles'}
-            hint="Fichiers que l’application ne peut pas ouvrir"
-            active={showUnreadable}
-            onClick={handleToggleShowUnreadable}
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            style={{
+              // `flexShrink: 0` so the canvas beside it, not the sidebar, gives way
+              // when the window gets narrow — otherwise a drag to 500px would be
+              // silently undone by the flex layout the moment the window shrank.
+              width,
+              flexShrink: 0,
+              borderRight: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+            }}
           >
-            {showUnreadable ? <Eye size={16} /> : <EyeOff size={16} />}
-          </SidebarIconButton>
+            {/*
+              The header is the title and nothing else. Every action lives in the
+              footer bar below, so the tree starts right under the heading that
+              names it and the buttons sit where the file rows end — one bar, one
+              place to look, instead of a header cluster and a footer one.
+            */}
+            <div style={{ padding: 8 }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Cartes mentales</span>
+            </div>
 
-          <span className="toolbar-separator" aria-hidden />
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {rootFolders.length === 0 && (
+                <p style={{ padding: 8, fontSize: 13, color: 'var(--muted-foreground)' }}>Aucun dossier configuré.</p>
+              )}
+              {rootFolders.map(root => {
+                const rootNode: FileTreeNode = {
+                  type: 'folder',
+                  name: folderDisplayName(root.path),
+                  path: root.path,
+                  children: root.tree,
+                }
+                return (
+                  <FileTreeRow
+                    key={root.path}
+                    node={rootNode}
+                    depth={0}
+                    onOpenFile={onOpenFile}
+                    isRoot
+                    onRemoveRoot={handleRemoveRoot}
+                    showUnreadable={showUnreadable}
+                  />
+                )
+              })}
+            </div>
 
-          {/*
-            The badge sits OUTSIDE the button (absolutely positioned over it) so
-            the button's own hit area, its accessible name and its tooltip are
-            untouched by a number that changes on its own.
-          */}
-          <span style={{ position: 'relative', display: 'inline-flex' }}>
-            <CommandButton
-              command="sync.now"
-              icon={CloudSync}
-              variant="outline"
-              size="icon-sm"
-              spinning={syncRunning}
-              tooltipDetail={syncTooltipDetail}
-            />
-            {(pendingCount ?? 0) + (localOnlyCount ?? 0) > 0 && (
-              <span
-                role="status"
-                style={{
-                  position: 'absolute',
-                  top: -4,
-                  right: -4,
-                  minWidth: 14,
-                  height: 14,
-                  padding: '0 3px',
-                  borderRadius: 999,
-                  background: 'var(--primary)',
-                  color: 'var(--primary-foreground)',
-                  fontSize: 9,
-                  fontWeight: 600,
-                  lineHeight: '14px',
-                  textAlign: 'center',
-                  pointerEvents: 'none',
-                }}
-              >
-                {(pendingCount ?? 0) + (localOnlyCount ?? 0)}
-              </span>
+            {/*
+              Messages sit immediately above the bar that produced them — a failed
+              sync is explained next to the button that was clicked, not at the far
+              end of the panel from it.
+            */}
+            {(workspaceError !== null || syncRunning || showSyncError || showSyncResult) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 8px 6px', flexShrink: 0 }}>
+                {syncRunning && (
+                  <div role="status" className="status-banner status-banner--info" style={{ margin: 0 }}>
+                    <span style={{ flex: 1 }}>
+                      {syncProgress === null
+                        ? 'Synchronisation…'
+                        : `Synchronisation ${syncProgress.done}/${syncProgress.total}…`}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Annuler la synchronisation"
+                      onClick={cancelSync}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                )}
+                {workspaceError && (
+                  <div role="alert" className="status-banner" style={{ margin: 0 }}>
+                    <span style={{ flex: 1 }}>{workspaceError}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Masquer le message d’erreur"
+                      onClick={() => setWorkspaceError(null)}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                )}
+                {showSyncError && (
+                  <div role="alert" className="status-banner" style={{ margin: 0 }}>
+                    <span style={{ flex: 1 }}>{syncError}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Masquer le message de synchronisation"
+                      onClick={() => setSyncFeedbackDismissed(true)}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                )}
+                {showSyncResult && (
+                  <div
+                    role="status"
+                    className={
+                      lastResult.conflicts.length > 0 || lastResult.errors.length > 0
+                        ? 'status-banner'
+                        : 'status-banner status-banner--info'
+                    }
+                    style={{ margin: 0 }}
+                    title={syncResultDetail}
+                  >
+                    <span style={{ flex: 1 }}>{syncResultLabel(lastResult)}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Masquer le message de synchronisation"
+                      onClick={() => setSyncFeedbackDismissed(true)}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                )}
+              </div>
             )}
-          </span>
 
-          <span style={{ marginLeft: 'auto' }} aria-hidden />
+            {/*
+              The action bar, at the bottom rather than in the header: read left to
+              right it is « what the tree shows », then « exchange with the server »,
+              then the panel control, each group separated by a hairline. The sync
+              button is the one boxed control — it is the deliberate, occasional
+              action of the bar, and the only one that can take noticeable time.
+            */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                rowGap: 4,
+                // A safety net for the 180 px minimum width: wrapping onto a second
+                // line beats clipping a button the user cannot reach.
+                flexWrap: 'wrap',
+                padding: '6px 8px',
+                borderTop: '1px solid var(--border)',
+                flexShrink: 0,
+              }}
+            >
+              <CommandButton command="file.addRootFolder" icon={FolderPlus} variant="ghost" size="icon-sm" />
+              <CommandButton command="file.refresh" icon={RefreshCw} variant="ghost" size="icon-sm" />
+              <SidebarIconButton
+                label={showUnreadable ? 'Masquer les fichiers non lisibles' : 'Afficher les fichiers non lisibles'}
+                hint="Fichiers que l’application ne peut pas ouvrir"
+                active={showUnreadable}
+                onClick={handleToggleShowUnreadable}
+              >
+                {showUnreadable ? <Eye size={16} /> : <EyeOff size={16} />}
+              </SidebarIconButton>
 
-          <CommandButton
-            command="view.toggleSidebar"
-            icon={PanelLeftClose}
-            label="Replier la barre latérale"
-            variant="ghost"
-            size="icon-sm"
-          />
-        </div>
+              <span className="toolbar-separator" aria-hidden />
 
-        {/*
-          The drag target for the resize. It straddles the border (a 5px strip
-          centred on it) rather than sitting inside the sidebar: a 1px border is
-          far too small a target to hit, and widening the border itself would
-          move the content. `role="separator"` with the aria-value* trio is the
-          standard split-pane contract, so the width is also adjustable with the
-          arrow keys once the handle has focus.
-        */}
-        <div
-          ref={handleRef}
-          role="separator"
-          aria-label="Redimensionner la barre latérale"
-          aria-orientation="vertical"
-          aria-valuenow={width}
-          aria-valuemin={MIN_SIDEBAR_WIDTH}
-          aria-valuemax={MAX_SIDEBAR_WIDTH}
-          tabIndex={0}
-          onPointerDown={handleResizeStart}
-          onPointerMove={handleResizeMove}
-          onPointerUp={handleResizeEnd}
-          onPointerCancel={handleResizeEnd}
-          onDoubleClick={() => commitWidth(DEFAULT_SIDEBAR_WIDTH)}
-          onKeyDown={handleResizeKeyDown}
-          title="Glisser pour redimensionner (double-clic : largeur par défaut)"
-          style={{
-            position: 'absolute',
-            top: 0,
-            bottom: 0,
-            right: -3,
-            width: 5,
-            cursor: 'col-resize',
-            // Invisible until it is being used or hovered: the 1px border is
-            // already the visual edge, this only has to be grabbable.
-            background: resizing ? 'var(--ring)' : 'transparent',
-            transition: 'background 0.12s ease',
-            // Above the tree's rows, so a drag started right on the border is
-            // never stolen by whatever row happens to sit under it.
-            zIndex: 5,
-            touchAction: 'none',
-          }}
-          onMouseEnter={event => {
-            if (!resizing) event.currentTarget.style.background = 'color-mix(in oklch, var(--ring), transparent 60%)'
-          }}
-          onMouseLeave={event => {
-            if (!resizing) event.currentTarget.style.background = 'transparent'
-          }}
-        />
-        {newFolderDialog}
-      </div>
+              {/*
+                The badge sits OUTSIDE the button (absolutely positioned over it) so
+                the button's own hit area, its accessible name and its tooltip are
+                untouched by a number that changes on its own.
+              */}
+              <span style={{ position: 'relative', display: 'inline-flex' }}>
+                <CommandButton
+                  command="sync.now"
+                  icon={CloudSync}
+                  variant="outline"
+                  size="icon-sm"
+                  spinning={syncRunning}
+                  tooltipDetail={syncTooltipDetail}
+                />
+                {(pendingCount ?? 0) + (localOnlyCount ?? 0) > 0 && (
+                  <span
+                    role="status"
+                    style={{
+                      position: 'absolute',
+                      top: -4,
+                      right: -4,
+                      minWidth: 14,
+                      height: 14,
+                      padding: '0 3px',
+                      borderRadius: 999,
+                      background: 'var(--primary)',
+                      color: 'var(--primary-foreground)',
+                      fontSize: 9,
+                      fontWeight: 600,
+                      lineHeight: '14px',
+                      textAlign: 'center',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    {(pendingCount ?? 0) + (localOnlyCount ?? 0)}
+                  </span>
+                )}
+              </span>
+
+              <span style={{ marginLeft: 'auto' }} aria-hidden />
+
+              <CommandButton
+                command="view.toggleSidebar"
+                icon={PanelLeftClose}
+                label="Replier la barre latérale"
+                variant="ghost"
+                size="icon-sm"
+              />
+            </div>
+
+            {/*
+              The drag target for the resize. It straddles the border (a 5px strip
+              centred on it) rather than sitting inside the sidebar: a 1px border is
+              far too small a target to hit, and widening the border itself would
+              move the content. `role="separator"` with the aria-value* trio is the
+              standard split-pane contract, so the width is also adjustable with the
+              arrow keys once the handle has focus.
+            */}
+            <div
+              ref={handleRef}
+              role="separator"
+              aria-label="Redimensionner la barre latérale"
+              aria-orientation="vertical"
+              aria-valuenow={width}
+              aria-valuemin={MIN_SIDEBAR_WIDTH}
+              aria-valuemax={MAX_SIDEBAR_WIDTH}
+              tabIndex={0}
+              onPointerDown={handleResizeStart}
+              onPointerMove={handleResizeMove}
+              onPointerUp={handleResizeEnd}
+              onPointerCancel={handleResizeEnd}
+              onDoubleClick={() => commitWidth(DEFAULT_SIDEBAR_WIDTH)}
+              onKeyDown={handleResizeKeyDown}
+              title="Glisser pour redimensionner (double-clic : largeur par défaut)"
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                right: -3,
+                width: 5,
+                cursor: 'col-resize',
+                // Invisible until it is being used or hovered: the 1px border is
+                // already the visual edge, this only has to be grabbable.
+                background: resizing ? 'var(--ring)' : 'transparent',
+                transition: 'background 0.12s ease',
+                // Above the tree's rows, so a drag started right on the border is
+                // never stolen by whatever row happens to sit under it.
+                zIndex: 5,
+                touchAction: 'none',
+              }}
+              onMouseEnter={event => {
+                if (!resizing) event.currentTarget.style.background = 'color-mix(in oklch, var(--ring), transparent 60%)'
+              }}
+              onMouseLeave={event => {
+                if (!resizing) event.currentTarget.style.background = 'transparent'
+              }}
+            />
+            {newFolderDialog}
+            {folderCreation.dialog}
+          </div>
+        </ContextMenuTrigger>
+        {firstRoot !== undefined && (
+          <ContextMenuContent>{folderCreation.menuItems}</ContextMenuContent>
+        )}
+      </ContextMenu>
     </TooltipProvider>
   )
 }

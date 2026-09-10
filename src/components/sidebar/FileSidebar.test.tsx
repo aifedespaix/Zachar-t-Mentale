@@ -22,12 +22,28 @@ vi.mock('../../persistence/sessionState', () => ({
 }))
 vi.mock('../../hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
 vi.mock('../../persistence/syncState', () => ({ loadSyncState: vi.fn() }))
+// The empty-area context menu creates files in the first root folder; the real
+// fs helpers would try to reach the Tauri backend from jsdom.
+vi.mock('../../persistence/fileOps', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../persistence/fileOps')>()
+  return {
+    ...actual,
+    createMindMapFile: vi.fn(),
+    createSubfolder: vi.fn(),
+    freeSiblingPath: vi.fn(),
+  }
+})
+vi.mock('../../persistence/fileStore', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../persistence/fileStore')>()
+  return { ...actual, mindMapExists: vi.fn().mockResolvedValue(false) }
+})
 
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../../persistence/workspaceConfig'
 import { scanFolder } from '../../persistence/fileTree'
 import { open } from '@tauri-apps/plugin-dialog'
 import { loadSessionState } from '../../persistence/sessionState'
 import { loadSyncState } from '../../persistence/syncState'
+import { createMindMapFile, freeSiblingPath } from '../../persistence/fileOps'
 
 /**
  * The sidebar panel itself — the element the width is set on. It has no role
@@ -82,6 +98,8 @@ describe('FileSidebar', () => {
     vi.mocked(open).mockReset()
     vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
     vi.mocked(loadSyncState).mockReset().mockResolvedValue({})
+    vi.mocked(createMindMapFile).mockReset()
+    vi.mocked(freeSiblingPath).mockReset().mockResolvedValue('/cours-svt/Nouvelle carte mentale.json')
   })
 
   it('loads the configured workspace on mount and shows an empty state with no root folders', async () => {
@@ -522,5 +540,58 @@ describe('FileSidebar', () => {
     ]) {
       expect(bar.contains(screen.getByRole('button', { name }))).toBe(true)
     }
+  })
+
+  it('offers the FIRST folder’s creation actions from the sidebar’s empty space', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours-svt', '/autre'] })
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(freeSiblingPath).mockImplementation(async (folderPath, baseName, isFolder) => {
+      const separator = folderPath.includes('\\') ? '\\' : '/'
+      return `${folderPath}${separator}${isFolder ? baseName : `${baseName}.json`}`
+    })
+    vi.mocked(createMindMapFile).mockImplementation(async (folderPath, name) => `${folderPath}/${name}.json`)
+    const onOpenFile = vi.fn()
+    render(<FileSidebar onOpenFile={onOpenFile} />)
+    await screen.findByText('cours-svt')
+    await screen.findByText('autre')
+
+    // The heading is empty space: there is no row under the cursor, so the menu
+    // targets the first configured folder — the one the user is implicitly in.
+    fireEvent.contextMenu(screen.getByText('Cartes mentales'))
+
+    expect(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Nouveau sous-dossier' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Importer XMind' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('menuitem', { name: 'Nouvelle carte mentale' }))
+    const field = await screen.findByRole('textbox', { name: 'Nom de la nouvelle carte mentale' })
+    await user.clear(field)
+    await user.type(field, 'Chapitre 1{Enter}')
+
+    await waitFor(() => expect(createMindMapFile).toHaveBeenCalledWith('/cours-svt', 'Chapitre 1'))
+    expect(onOpenFile).toHaveBeenCalledWith('/cours-svt/Chapitre 1.json')
+  })
+
+  it('keeps a row’s own menu when the right-click lands on a folder row, not the first one', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours-svt', '/autre'] })
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(freeSiblingPath).mockImplementation(async (folderPath, baseName, isFolder) => {
+      const separator = folderPath.includes('\\') ? '\\' : '/'
+      return `${folderPath}${separator}${isFolder ? baseName : `${baseName}.json`}`
+    })
+    vi.mocked(createMindMapFile).mockImplementation(async (folderPath, name) => `${folderPath}/${name}.json`)
+    const onOpenFile = vi.fn()
+    render(<FileSidebar onOpenFile={onOpenFile} />)
+    await screen.findByText('autre')
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /autre/i }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Nouvelle carte mentale' }))
+    const field = await screen.findByRole('textbox', { name: 'Nom de la nouvelle carte mentale' })
+    await user.clear(field)
+    await user.type(field, 'B{Enter}')
+
+    await waitFor(() => expect(createMindMapFile).toHaveBeenCalledWith('/autre', 'B'))
   })
 })

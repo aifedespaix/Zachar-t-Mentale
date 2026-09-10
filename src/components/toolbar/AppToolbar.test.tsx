@@ -201,4 +201,13 @@ describe('AppToolbar', () => {
     await user.click(screen.getByRole('button', { name: 'Palette de commandes' }))
     expect(await screen.findByLabelText('Rechercher une commande')).toBeInTheDocument()
   })
+
+  it('explains the graph toolbar’s settings button in a tooltip', async () => {
+    const user = userEvent.setup()
+    renderToolbar()
+
+    await user.hover(screen.getByRole('button', { name: 'Paramètres et raccourcis' }))
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Paramètres et raccourcis')
+  })
 })

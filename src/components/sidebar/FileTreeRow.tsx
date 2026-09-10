@@ -1,23 +1,13 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useEffect, useRef, useState } from 'react'
-import { Folder, FolderOpen, FolderPlus, FileJson, FilePlus, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, FileUp, Copy, Lock, CloudUpload } from 'lucide-react'
+import { Folder, FolderOpen, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, Lock, CloudUpload } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
-import {
-  createMindMapFile,
-  createSubfolder,
-  renamePath,
-  deletePath,
-  duplicatePath,
-  freeMindMapPath,
-  freeSiblingPath,
-} from '../../persistence/fileOps'
+import { renamePath, deletePath, duplicatePath, freeSiblingPath } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
 import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, withMindMapExtension } from '../../persistence/paths'
-import { loadMindMap, saveMindMap, mindMapExists } from '../../persistence/fileStore'
-import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
-import { readXmindFile } from '../../xmind/importXmind'
+import { loadMindMap, mindMapExists } from '../../persistence/fileStore'
 import { isAssetsSidecarName } from '../../persistence/assets'
 import { validateCards } from '../../validation/cardsValidation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
@@ -25,6 +15,7 @@ import { Button } from '../ui/button'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu'
 import { ExportDialog } from './ExportDialog'
 import { NameDialog } from './NameDialog'
+import { useFolderCreation } from './useFolderCreation'
 import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
 import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
 import { usePublishMindMap } from '../../hooks/usePublishMindMap'
@@ -112,6 +103,10 @@ export function FileTreeRow({
   // file has nothing to publish, and a locked one is entered through
   // « Personnaliser » on the canvas.
   const publishable = canPublish(node.path, meta)
+  // The creation trio (« Nouvelle carte mentale », « Nouveau sous-dossier »,
+  // « Importer XMind ») is shared with the file sidebar's own empty-area menu,
+  // which targets the first root folder.
+  const { menuItems: folderCreationItems, dialog: folderCreationDialog } = useFolderCreation(node.path, onOpenFile)
 
   const indent = { paddingLeft: 8 + depth * 16 }
 
@@ -199,27 +194,6 @@ export function FileTreeRow({
     await refreshFolder(parentPath)
   }
 
-  async function handleImportXmind() {
-    let path: string | null = null
-    let sheetsWritten = 0
-    try {
-      path = await pickXmindFile()
-      if (!path) return
-      const bytes = await readBinaryFile(path)
-      const sheets = await readXmindFile(bytes)
-      for (const sheet of sheets) {
-        const target = await freeMindMapPath(node.path, sheet.sheetTitle)
-        await saveMindMap(target, sheet.cards)
-        sheetsWritten += 1
-      }
-      await refreshFolder(node.path)
-    } catch (error) {
-      if (sheetsWritten > 0) await refreshFolder(node.path)
-      const partial = sheetsWritten > 0 ? ` (${sheetsWritten} carte(s) mentale(s) déjà importée(s) avant l’échec)` : ''
-      setWorkspaceError(`Impossible d’importer « ${path ? fileNameOf(path) : 'le fichier XMind'} » : ${describeError(error)}${partial}`)
-    }
-  }
-
   async function openExport() {
     let raw: Card[] | null
     try {
@@ -237,58 +211,6 @@ export function FileTreeRow({
       return
     }
     setExportCards(raw)
-  }
-
-  async function openCreateMindMapDialog() {
-    const fullPath = await freeSiblingPath(node.path, 'Nouvelle carte mentale', false)
-    const name = mindMapBaseName(fileNameOf(fullPath))
-    setNamingAction({
-      title: 'Nouvelle carte mentale',
-      initialName: name,
-      confirmLabel: 'Créer',
-      onConfirm: submitCreateMindMap,
-      inputLabel: 'Nom de la nouvelle carte mentale',
-    })
-  }
-
-  async function submitCreateMindMap(name: string) {
-    setNamingAction(null)
-    const destPath = `${node.path}${separatorOf(node.path)}${withMindMapExtension(name)}`
-    if (await mindMapExists(destPath)) {
-      setWorkspaceError(
-        `Impossible de créer la carte mentale « ${name} » : un fichier « ${withMindMapExtension(name)} » existe déjà.`
-      )
-      return
-    }
-    try {
-      const path = await createMindMapFile(node.path, name)
-      await refreshFolder(node.path)
-      onOpenFile(path)
-    } catch (error) {
-      setWorkspaceError(`Impossible de créer la carte mentale « ${name} » : ${describeError(error)}`)
-    }
-  }
-
-  async function openCreateFolderDialog() {
-    const fullPath = await freeSiblingPath(node.path, 'Nouveau dossier', true)
-    const name = fileNameOf(fullPath)
-    setNamingAction({
-      title: 'Nouveau sous-dossier',
-      initialName: name,
-      confirmLabel: 'Créer',
-      onConfirm: submitCreateFolder,
-      inputLabel: 'Nom du nouveau dossier',
-    })
-  }
-
-  async function submitCreateFolder(name: string) {
-    setNamingAction(null)
-    try {
-      await createSubfolder(node.path, name)
-      await refreshFolder(node.path)
-    } catch (error) {
-      setWorkspaceError(`Impossible de créer le dossier « ${name} » : ${describeError(error)}`)
-    }
   }
 
   async function openDuplicateDialog() {
@@ -384,15 +306,7 @@ export function FileTreeRow({
               }
             }}
           >
-            <ContextMenuItem onSelect={openCreateMindMapDialog}>
-              <FilePlus size={14} /> Nouvelle carte mentale
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={openCreateFolderDialog}>
-              <FolderPlus size={14} /> Nouveau sous-dossier
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={handleImportXmind}>
-              <FileUp size={14} /> Importer XMind
-            </ContextMenuItem>
+            {folderCreationItems}
             {!isRoot && (
               <ContextMenuItem onSelect={openDuplicateDialog}>
                 <Copy size={14} /> Dupliquer
@@ -438,6 +352,10 @@ export function FileTreeRow({
             inputLabel={namingAction.inputLabel}
           />
         )}
+
+        {/* The creation trio owns its own dialog: it is shared with the file
+            sidebar's empty-area menu, so it cannot reuse `namingAction`. */}
+        {folderCreationDialog}
 
         {isExpanded &&
           node.children

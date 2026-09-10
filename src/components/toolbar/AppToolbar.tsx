@@ -377,11 +377,16 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
         </Tooltip>
 
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon" aria-label="Paramètres et raccourcis">
-              <Settings />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" aria-label="Paramètres et raccourcis">
+                  <Settings />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Paramètres et raccourcis</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Application</DropdownMenuLabel>
             <CommandDropdownItem command="app.settings" icon={Settings} />
