@@ -68,6 +68,26 @@ describe('SyncSettingsPanel', () => {
     expect(screen.getByRole('button', { name: /synchroniser/i })).toBeDisabled()
   })
 
+  it('turns automatic sync on, and remembers the interval', async () => {
+    const user = userEvent.setup()
+    const updateSettings = vi.fn().mockResolvedValue(undefined)
+    useSyncStore.setState({ updateSettings })
+    render(<SyncSettingsPanel />)
+
+    await user.click(await screen.findByRole('switch', { name: /synchroniser au lancement/i }))
+    expect(updateSettings).toHaveBeenCalledWith({ autoSyncOnLaunch: true })
+
+    await user.selectOptions(screen.getByLabelText('Intervalle de synchronisation automatique'), '15')
+    expect(updateSettings).toHaveBeenCalledWith({ autoSyncIntervalMinutes: 15 })
+  })
+
+  it('says when the last sync succeeded, without having to click anything', () => {
+    useSyncStore.setState({ lastSuccessAt: new Date(Date.now() - 12 * 60 * 1000).toISOString() })
+    render(<SyncSettingsPanel />)
+
+    expect(screen.getByText(/dernière synchro il y a 12 min/)).toBeInTheDocument()
+  })
+
   it('shows the last sync result summary', () => {
     useSyncStore.setState({
       currentUser: { username: 'aife', role: 'prof' },

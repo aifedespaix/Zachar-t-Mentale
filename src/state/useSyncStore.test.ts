@@ -9,6 +9,7 @@ vi.mock('../persistence/syncLog', () => ({ logSyncEvent: vi.fn().mockResolvedVal
 vi.mock('../persistence/syncStatus', () => ({ loadSyncStatus: vi.fn(), saveSyncStatus: vi.fn() }))
 
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
+import { DEFAULT_SYNC_SETTINGS } from '../types/syncSettings'
 import { loadSyncState, saveSyncState } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { countPendingPushes, sync } from '../sync/syncService'
@@ -45,7 +46,7 @@ describe('useSyncStore', () => {
   let store: SyncStore
 
   beforeEach(() => {
-    vi.mocked(loadSyncSettings).mockReset().mockResolvedValue({ serverUrl: '', syncFolderPath: null })
+    vi.mocked(loadSyncSettings).mockReset().mockResolvedValue({ ...DEFAULT_SYNC_SETTINGS })
     vi.mocked(saveSyncSettings).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadSyncState).mockReset().mockResolvedValue({})
     vi.mocked(saveSyncState).mockReset().mockResolvedValue(undefined)
@@ -59,7 +60,11 @@ describe('useSyncStore', () => {
   })
 
   it('init() loads persisted settings', async () => {
-    vi.mocked(loadSyncSettings).mockResolvedValue({ serverUrl: 'https://pi.local', syncFolderPath: '/cours' })
+    vi.mocked(loadSyncSettings).mockResolvedValue({
+      ...DEFAULT_SYNC_SETTINGS,
+      serverUrl: 'https://pi.local',
+      syncFolderPath: '/cours',
+    })
     await store.getState().init()
     expect(store.getState().serverUrl).toBe('https://pi.local')
     expect(store.getState().syncFolderPath).toBe('/cours')
@@ -155,7 +160,11 @@ describe('useSyncStore', () => {
       },
     }
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePb as any)
-    vi.mocked(loadSyncSettings).mockResolvedValue({ serverUrl: 'https://pi.local', syncFolderPath: null })
+    vi.mocked(loadSyncSettings).mockResolvedValue({
+      ...DEFAULT_SYNC_SETTINGS,
+      serverUrl: 'https://pi.local',
+      syncFolderPath: null,
+    })
 
     await store.getState().init()
     expect(store.getState().currentUser).toBeNull()
@@ -363,6 +372,54 @@ describe('useSyncStore', () => {
     expect(saveSyncStatus).not.toHaveBeenCalled()
     expect(store.getState().status).toBe('idle')
     expect(store.getState().progress).toBeNull()
+  })
+
+  it('updateSettings() mirrors the automatic-sync settings and persists them', async () => {
+    await store.getState().updateSettings({
+      autoSyncOnLaunch: true,
+      autoSyncIntervalMinutes: 15,
+      verboseLog: true,
+    })
+
+    expect(store.getState().autoSyncOnLaunch).toBe(true)
+    expect(store.getState().autoSyncIntervalMinutes).toBe(15)
+    expect(store.getState().verboseLog).toBe(true)
+    expect(saveSyncSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ autoSyncOnLaunch: true, autoSyncIntervalMinutes: 15, verboseLog: true })
+    )
+  })
+
+  it('a background run leaves the failure on screen alone; a manual one starts clean', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(sync).mockRejectedValue(Object.assign(new Error('Failed to fetch'), { status: 0 }))
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+
+    await store.getState().syncNow({ trigger: 'auto' })
+    const failure = store.getState().error
+    expect(failure).toMatch(/Serveur injoignable/)
+
+    // The next background tick must not blank the banner it just put up: that
+    // would make the same failure flicker every fifteen minutes.
+    const backgroundStarts: Array<string | null> = []
+    const stopBackground = store.subscribe(state => {
+      if (state.status === 'syncing') backgroundStarts.push(state.error)
+    })
+    await store.getState().syncNow({ trigger: 'auto' })
+    stopBackground()
+    expect(backgroundStarts).toEqual([failure])
+
+    // A click, on the other hand, is a fresh attempt and says so.
+    const manualStarts: Array<string | null> = []
+    const stopManual = store.subscribe(state => {
+      if (state.status === 'syncing') manualStarts.push(state.error)
+    })
+    await store.getState().syncNow()
+    stopManual()
+    // First thing a manual run does: clear the slate it is about to work on.
+    expect(manualStarts[0]).toBeNull()
   })
 
   it('cancelSync() is a no-op when nothing is running', () => {

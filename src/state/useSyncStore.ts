@@ -1,7 +1,7 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type PocketBase from 'pocketbase'
 import type { UserRole } from '../types/card'
-import { DEFAULT_SYNC_SETTINGS } from '../types/syncSettings'
+import { DEFAULT_SYNC_SETTINGS, type SyncSettings } from '../types/syncSettings'
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { loadSyncState, saveSyncState } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
@@ -14,6 +14,13 @@ import { syncResultLabel } from '../sync/syncResultLabel'
 export interface SyncUser {
   username: string
   role: UserRole
+}
+
+/** Who asked for a run: only a background one is allowed to stay quiet about a failure. */
+export type SyncTrigger = 'manual' | 'auto'
+
+export interface SyncTriggerOptions {
+  trigger?: SyncTrigger
 }
 
 interface SyncStoreState {
@@ -36,12 +43,18 @@ interface SyncStoreState {
   refreshPendingCount: () => Promise<void>
   /** Asks the run in flight to stop; a no-op when nothing is running. */
   cancelSync: () => void
+  /** Automatic sync, mirrored from the settings file and toggled from the panel. */
+  autoSyncOnLaunch: boolean
+  autoSyncIntervalMinutes: number
+  verboseLog: boolean
+  /** Merges into the persisted settings, and mirrors them in this store. */
+  updateSettings: (patch: Partial<SyncSettings>) => Promise<void>
   init: () => Promise<void>
   setServerUrl: (url: string) => Promise<void>
   setSyncFolderPath: (path: string | null) => Promise<void>
   login: (username: string, password: string) => Promise<void>
   logout: () => void
-  syncNow: () => Promise<void>
+  syncNow: (options?: SyncTriggerOptions) => Promise<void>
 }
 
 export type SyncStore = UseBoundStore<StoreApi<SyncStoreState>>
@@ -98,6 +111,17 @@ export function createSyncStore(): SyncStore {
       return client
     }
 
+    /**
+     * Records a failure — unless a BACKGROUND run is repeating, word for word,
+     * the message already on screen. A server that is down for the night must
+     * not put the same banner back every fifteen minutes; the journal keeps
+     * every occurrence either way.
+     */
+    function reportFailure(message: string, trigger: SyncTrigger): void {
+      if (trigger === 'auto' && get().error === message) return
+      set({ error: message })
+    }
+
     function userFromClient(pb: PocketBase | null | undefined): SyncUser | null {
       if (!pb) return null
       const record = pb.authStore.record as RawUserRecord | null
@@ -115,10 +139,31 @@ export function createSyncStore(): SyncStore {
       lastSuccessAt: null,
       pendingCount: null,
       progress: null,
+      autoSyncOnLaunch: DEFAULT_SYNC_SETTINGS.autoSyncOnLaunch,
+      autoSyncIntervalMinutes: DEFAULT_SYNC_SETTINGS.autoSyncIntervalMinutes,
+      verboseLog: DEFAULT_SYNC_SETTINGS.verboseLog,
+
+      updateSettings: async patch => {
+        set(patch)
+        const { serverUrl, syncFolderPath, autoSyncOnLaunch, autoSyncIntervalMinutes, verboseLog } = get()
+        await saveSyncSettings({
+          serverUrl,
+          syncFolderPath,
+          autoSyncOnLaunch,
+          autoSyncIntervalMinutes,
+          verboseLog,
+        })
+      },
 
       init: async () => {
         const settings = await loadSyncSettings()
-        set({ serverUrl: settings.serverUrl, syncFolderPath: settings.syncFolderPath })
+        set({
+          serverUrl: settings.serverUrl,
+          syncFolderPath: settings.syncFolderPath,
+          autoSyncOnLaunch: settings.autoSyncOnLaunch,
+          autoSyncIntervalMinutes: settings.autoSyncIntervalMinutes,
+          verboseLog: settings.verboseLog,
+        })
         if (settings.serverUrl) set({ currentUser: userFromClient(clientFor(settings.serverUrl)) })
         // The interface's own memory, kept apart from the settings: it has to
         // survive a restart to answer « quand ai-je synchronisé la dernière fois ? ».
@@ -156,14 +201,17 @@ export function createSyncStore(): SyncStore {
         }
       },
 
+      // Both go through `updateSettings`, which is the only place that knows the
+      // whole shape of what gets written: adding a setting must not mean
+      // remembering every setter.
       setServerUrl: async url => {
         set({ serverUrl: url, currentUser: null })
-        await saveSyncSettings({ serverUrl: url, syncFolderPath: get().syncFolderPath })
+        await get().updateSettings({})
       },
 
       setSyncFolderPath: async path => {
         set({ syncFolderPath: path })
-        await saveSyncSettings({ serverUrl: get().serverUrl, syncFolderPath: path })
+        await get().updateSettings({})
         await get().refreshPendingCount()
       },
 
@@ -197,18 +245,19 @@ export function createSyncStore(): SyncStore {
         set({ currentUser: null, pendingCount: null })
       },
 
-      syncNow: async () => {
-        // Two callers now reach this — the button in the sidebar footer and the
-        // one in the settings panel — and a manual sync is a whole folder's
+      syncNow: async (options?: SyncTriggerOptions) => {
+        const trigger: SyncTrigger = options?.trigger ?? 'manual'
+        // Three callers reach this now — the sidebar's button, the settings
+        // panel's, and the background timer — and a sync is a whole folder's
         // worth of network round-trips. Re-entering would push and pull the same
-        // files twice in parallel for no benefit, so the second caller is
+        // files twice in parallel for no benefit, so the later caller is
         // dropped rather than queued.
         if (get().status === 'syncing') return
 
         const { serverUrl, syncFolderPath, currentUser } = get()
         if (syncFolderPath === null || currentUser === null) {
           const message = 'Connectez-vous et choisissez un dossier de synchronisation avant de synchroniser.'
-          set({ error: message })
+          reportFailure(message, trigger)
           // Logged rather than dropped: "I clicked and nothing happened" is the
           // report this line answers.
           await logSyncEvent('info', `synchronisation ignorée : ${message}`)
@@ -216,12 +265,15 @@ export function createSyncStore(): SyncStore {
         }
         const controller = new AbortController()
         runningSync = controller
-        set({ status: 'syncing', error: null, progress: null })
+        // A manual attempt starts from a clean slate — it is fresh news. A
+        // BACKGROUND one leaves whatever is on screen alone: clearing it would
+        // make the same failure flicker back every tick.
+        set({ status: 'syncing', progress: null, ...(trigger === 'manual' ? { error: null } : {}) })
         // Written BEFORE the network work: if the app dies mid-sync, the log
         // still shows a run was under way.
         await logSyncEvent(
           'info',
-          `synchronisation demandée par « ${currentUser.username} » sur ${serverUrl}`
+          `synchronisation ${trigger === 'auto' ? 'automatique' : 'demandée'} par « ${currentUser.username} » sur ${serverUrl}`
         )
         try {
           const pb = clientFor(serverUrl)
@@ -263,7 +315,8 @@ export function createSyncStore(): SyncStore {
         } catch (error) {
           const message = describeSyncStoreError(error)
           await logSyncEvent('error', `synchronisation échouée : ${message}`, error)
-          set({ status: 'idle', error: message, progress: null })
+          reportFailure(message, trigger)
+          set({ status: 'idle', progress: null })
         } finally {
           // Cleared only if it is still OURS: a run that finished must not
           // disarm the controller of the one that replaced it.

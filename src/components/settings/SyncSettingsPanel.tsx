@@ -4,8 +4,10 @@ import { CloudSync, FolderOpen, LogIn, LogOut } from 'lucide-react'
 import { useSyncStore } from '../../state/useSyncStore'
 import { describeError } from '../../state/useWorkspaceStore'
 import { syncResultLabel } from '../../sync/syncResultLabel'
+import { formatRelativeTime } from '../../utils/relativeTime'
 import { revealSyncLog } from '../../persistence/syncLog'
 import { SettingsSection } from './SettingsSection'
+import { SettingToggle } from './SettingToggle'
 import { Button } from '../ui/button'
 
 /**
@@ -41,6 +43,10 @@ export function SyncSettingsPanel() {
   const lastResult = useSyncStore(s => s.lastResult)
   const progress = useSyncStore(s => s.progress)
   const cancelSync = useSyncStore(s => s.cancelSync)
+  const autoSyncOnLaunch = useSyncStore(s => s.autoSyncOnLaunch)
+  const autoSyncIntervalMinutes = useSyncStore(s => s.autoSyncIntervalMinutes)
+  const lastSuccessAt = useSyncStore(s => s.lastSuccessAt)
+  const updateSettings = useSyncStore(s => s.updateSettings)
   const setServerUrl = useSyncStore(s => s.setServerUrl)
   const setSyncFolderPath = useSyncStore(s => s.setSyncFolderPath)
   const login = useSyncStore(s => s.login)
@@ -138,6 +144,33 @@ export function SyncSettingsPanel() {
         )}
       </SettingsSection>
 
+      <SettingsSection
+        title="Automatique"
+        description="Sans ces options, la synchronisation ne part que lorsque vous cliquez."
+      >
+        <SettingToggle
+          label="Synchroniser au lancement"
+          description="Une synchronisation dès que l’application s’ouvre, si vous êtes connecté."
+          checked={autoSyncOnLaunch}
+          onCheckedChange={checked => void updateSettings({ autoSyncOnLaunch: checked })}
+        />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+          <span style={{ flex: 1 }}>Synchroniser régulièrement</span>
+          <select
+            aria-label="Intervalle de synchronisation automatique"
+            value={String(autoSyncIntervalMinutes)}
+            onChange={event => void updateSettings({ autoSyncIntervalMinutes: Number(event.target.value) })}
+            style={{ ...inputStyle, padding: '6px 8px' }}
+          >
+            <option value="0">jamais</option>
+            <option value="5">toutes les 5 minutes</option>
+            <option value="15">toutes les 15 minutes</option>
+            <option value="30">toutes les 30 minutes</option>
+            <option value="60">toutes les heures</option>
+          </select>
+        </label>
+      </SettingsSection>
+
       <SettingsSection title="Dossier de synchronisation" description="Le dossier local dont le contenu est envoyé/reçu.">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 13, color: syncFolderPath ? 'inherit' : 'var(--muted-foreground)' }}>
@@ -167,6 +200,11 @@ export function SyncSettingsPanel() {
           {lastResult && (
             <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)' }}>
               {syncResultLabel(lastResult)}
+            </span>
+          )}
+          {lastSuccessAt !== null && (
+            <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)' }}>
+              dernière synchro {formatRelativeTime(lastSuccessAt) ?? 'inconnue'}
             </span>
           )}
         </div>
