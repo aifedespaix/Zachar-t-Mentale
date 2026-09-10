@@ -73,6 +73,11 @@ export interface SyncResult {
   /** The run stopped on the caller's signal instead of finishing its own walk. */
   cancelled: boolean
   /**
+   * Every file that actually moved, in order. The counters summarise; this is
+   * what a verbose log lists, and what a future "show me what changed" UI needs.
+   */
+  transferred: { fileId: string; path: string; direction: 'push' | 'pull' }[]
+  /**
    * Files the two sides disagree on. They are NOT pushed and NOT overwritten:
    * both versions contain work someone did, and only the user can choose.
    */
@@ -253,7 +258,14 @@ export async function sync({
   signal,
   onProgress,
 }: SyncParams): Promise<SyncResult> {
-  const result: SyncResult = { pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [] }
+  const result: SyncResult = {
+    pushed: 0,
+    pulled: 0,
+    errors: [],
+    cancelled: false,
+    conflicts: [],
+    transferred: [],
+  }
 
   const remoteRecords = await client.mindMaps.getFullList({ signal })
   const remoteAssets = await client.assets.getFullList({ signal })
@@ -328,6 +340,7 @@ export async function sync({
         : await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content }, { signal })
       state[meta.id] = { lastSyncedModified: meta.lastModified, lastSyncedUpdated: savedRecord.updated }
       result.pushed += 1
+      result.transferred.push({ fileId: meta.id, path: relPath, direction: 'push' })
     } catch (error) {
       // A cancelled request is not a file that failed: the run stops, without
       // blaming a file the user themselves interrupted.
@@ -386,6 +399,7 @@ export async function sync({
       await pullAssetsFor(client, localPath, referencedAssets(record.content, remoteAssets), { signal })
       state[record.file_id] = { lastSyncedModified: meta?.lastModified ?? record.updated, lastSyncedUpdated: record.updated }
       result.pulled += 1
+      result.transferred.push({ fileId: record.file_id, path: record.path, direction: 'pull' })
       void cards // validated by deserializeMindMap succeeding; the written file is the record's own content verbatim
     } catch (error) {
       if (aborted() || isAbortError(error)) {

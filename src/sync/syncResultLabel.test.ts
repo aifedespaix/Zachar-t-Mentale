@@ -4,7 +4,7 @@ import type { SyncResult } from './syncService'
 
 /** A finished run, with only what a test cares about spelled out. */
 function result(overrides: Partial<SyncResult> = {}): SyncResult {
-  return { pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [], ...overrides }
+  return { pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [], transferred: [], ...overrides }
 }
 
 describe('syncResultLabel', () => {

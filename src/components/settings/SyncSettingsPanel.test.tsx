@@ -3,10 +3,14 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SyncSettingsPanel } from './SyncSettingsPanel'
 import { useSyncStore } from '../../state/useSyncStore'
-import { revealSyncLog } from '../../persistence/syncLog'
+import { clearSyncLog, openSyncLog, revealSyncLog } from '../../persistence/syncLog'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
-vi.mock('../../persistence/syncLog', () => ({ revealSyncLog: vi.fn() }))
+vi.mock('../../persistence/syncLog', () => ({
+  revealSyncLog: vi.fn(),
+  openSyncLog: vi.fn(),
+  clearSyncLog: vi.fn(),
+}))
 
 function resetSyncStore() {
   useSyncStore.setState({
@@ -92,7 +96,7 @@ describe('SyncSettingsPanel', () => {
     useSyncStore.setState({
       currentUser: { username: 'aife', role: 'prof' },
       syncFolderPath: '/cours',
-      lastResult: { pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [] },
+      lastResult: { pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [], transferred: [] },
     })
     render(<SyncSettingsPanel />)
     expect(screen.getByText(/2 envoyé\(s\), 1 reçu\(s\)/)).toBeInTheDocument()
@@ -115,6 +119,7 @@ describe('SyncSettingsPanel', () => {
             remoteUpdated: '2026-02-01 09:00:00.000Z',
           },
         ],
+        transferred: [],
       },
     })
     render(<SyncSettingsPanel />)
@@ -128,7 +133,7 @@ describe('SyncSettingsPanel', () => {
     useSyncStore.setState({
       currentUser: { username: 'aife', role: 'prof' },
       syncFolderPath: '/cours',
-      lastResult: { pushed: 0, pulled: 0, errors: [{ fileId: 'f1', message: 'un message de test' }], cancelled: false, conflicts: [] },
+      lastResult: { pushed: 0, pulled: 0, errors: [{ fileId: 'f1', message: 'un message de test' }], cancelled: false, conflicts: [], transferred: [] },
     })
     render(<SyncSettingsPanel />)
     expect(screen.getByText(/f1/)).toBeInTheDocument()
@@ -140,6 +145,55 @@ describe('SyncSettingsPanel — journal de débogage', () => {
   beforeEach(() => {
     resetSyncStore()
     vi.mocked(revealSyncLog).mockReset().mockResolvedValue('/config/sync-debug.log')
+    vi.mocked(openSyncLog).mockReset().mockResolvedValue('/config/sync-debug.log')
+    vi.mocked(clearSyncLog).mockReset().mockResolvedValue(true)
+  })
+
+  it('opens the log file itself, and says why when there is nothing to open yet', async () => {
+    const user = userEvent.setup()
+    render(<SyncSettingsPanel />)
+
+    await user.click(screen.getByRole('button', { name: /ouvrir le journal/i }))
+    expect(openSyncLog).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('/config/sync-debug.log')).toBeInTheDocument()
+
+    vi.mocked(openSyncLog).mockRejectedValue(new Error('Le journal est encore vide'))
+    await user.click(screen.getByRole('button', { name: /ouvrir le journal/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/encore vide/)
+  })
+
+  it('empties the log, and treats "already empty" as the non-event it is', async () => {
+    const user = userEvent.setup()
+    render(<SyncSettingsPanel />)
+
+    await user.click(screen.getByRole('button', { name: /vider/i }))
+    expect(clearSyncLog).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('Journal vidé.')).toBeInTheDocument()
+
+    vi.mocked(clearSyncLog).mockResolvedValue(false)
+    await user.click(screen.getByRole('button', { name: /vider/i }))
+    expect(await screen.findByText('Le journal était déjà vide.')).toBeInTheDocument()
+  })
+
+  it('reports a failed wipe instead of pretending it worked', async () => {
+    const user = userEvent.setup()
+    vi.mocked(clearSyncLog).mockRejectedValue(new Error('disque en lecture seule'))
+    render(<SyncSettingsPanel />)
+
+    await user.click(screen.getByRole('button', { name: /vider/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/disque en lecture seule/)
+  })
+
+  it('turns the detailed journal on', async () => {
+    const user = userEvent.setup()
+    const updateSettings = vi.fn().mockResolvedValue(undefined)
+    useSyncStore.setState({ updateSettings })
+    render(<SyncSettingsPanel />)
+
+    await user.click(screen.getByRole('switch', { name: /journal détaillé/i }))
+
+    expect(updateSettings).toHaveBeenCalledWith({ verboseLog: true })
   })
 
   it('opens the log from its button, and prints where it is', async () => {

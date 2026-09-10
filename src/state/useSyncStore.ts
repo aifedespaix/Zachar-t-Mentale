@@ -296,6 +296,17 @@ export function createSyncStore(): SyncStore {
           }
 
           await logSyncEvent('info', `synchronisation : ${syncResultLabel(result)}`)
+          if (get().verboseLog) {
+            // The counters say how many; this says WHICH, which is the question
+            // that follows as soon as something looks wrong.
+            for (const moved of result.transferred) {
+              await logSyncEvent(
+                'debug',
+                `${moved.direction === 'push' ? 'envoyé' : 'reçu'} « ${moved.path} »`,
+                { fileId: moved.fileId }
+              )
+            }
+          }
           if (result.errors.length > 0) {
             // The per-file detail, which is what a bug report actually needs.
             await logSyncEvent('error', 'fichiers en erreur pendant la synchronisation', result.errors)

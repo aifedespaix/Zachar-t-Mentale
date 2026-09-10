@@ -275,6 +275,47 @@ describe('sync — push', () => {
   })
 })
 
+describe('sync — journal des transferts', () => {
+  it('lists what actually moved, in order, for a detailed journal', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
+      { type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' },
+    ])
+    vi.mocked(loadMindMapMeta).mockImplementation(async path => ({
+      ...AIFE,
+      id: path.includes('a.zmap') ? 'file-1' : 'file-2',
+    }))
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const foreign: RemoteMindMapRecord = {
+      id: 'rec-3',
+      file_id: 'file-3',
+      author: 'prof',
+      path: 'sous/c.zmap',
+      content: JSON.stringify({ cards: [] }),
+      updated: '2026-01-02 00:00:00.000Z',
+    }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([foreign]) } as any })
+
+    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+
+    expect(result.transferred).toEqual([
+      { fileId: 'file-1', path: 'a.zmap', direction: 'push' },
+      { fileId: 'file-2', path: 'b.zmap', direction: 'push' },
+      { fileId: 'file-3', path: 'sous/c.zmap', direction: 'pull' },
+    ])
+  })
+
+  it('lists nothing for files it skipped', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, author: 'quelqu-un-dautre' })
+    const client = fakeClient()
+
+    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+
+    expect(result.transferred).toEqual([])
+  })
+})
+
 describe('sync — progression et annulation', () => {
   it('reports one step per file handled, over everything it knows about', async () => {
     vi.mocked(scanFolder).mockResolvedValue([

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { CloudSync, FolderOpen, LogIn, LogOut } from 'lucide-react'
+import { CloudSync, Eraser, FileText, FolderOpen, LogIn, LogOut } from 'lucide-react'
 import { useSyncStore } from '../../state/useSyncStore'
 import { describeError } from '../../state/useWorkspaceStore'
 import { syncResultLabel } from '../../sync/syncResultLabel'
 import { formatRelativeTime } from '../../utils/relativeTime'
-import { revealSyncLog } from '../../persistence/syncLog'
+import { clearSyncLog, openSyncLog, revealSyncLog } from '../../persistence/syncLog'
 import { SettingsSection } from './SettingsSection'
 import { SettingToggle } from './SettingToggle'
 import { Button } from '../ui/button'
@@ -46,6 +46,7 @@ export function SyncSettingsPanel() {
   const autoSyncOnLaunch = useSyncStore(s => s.autoSyncOnLaunch)
   const autoSyncIntervalMinutes = useSyncStore(s => s.autoSyncIntervalMinutes)
   const lastSuccessAt = useSyncStore(s => s.lastSuccessAt)
+  const verboseLog = useSyncStore(s => s.verboseLog)
   const updateSettings = useSyncStore(s => s.updateSettings)
   const setServerUrl = useSyncStore(s => s.setServerUrl)
   const setSyncFolderPath = useSyncStore(s => s.setSyncFolderPath)
@@ -58,7 +59,9 @@ export function SyncSettingsPanel() {
   const [serverUrlDraft, setServerUrlDraft] = useState(serverUrl)
   const [logPath, setLogPath] = useState<string | null>(null)
   const [logError, setLogError] = useState<string | null>(null)
+  const [logNotice, setLogNotice] = useState<string | null>(null)
   const [openingLogs, setOpeningLogs] = useState(false)
+  const [clearingLog, setClearingLog] = useState(false)
   useEffect(() => {
     setServerUrlDraft(serverUrl)
   }, [serverUrl])
@@ -84,6 +87,36 @@ export function SyncSettingsPanel() {
       setLogError(`Impossible d’ouvrir le dossier des logs : ${describeError(error)}`)
     } finally {
       setOpeningLogs(false)
+    }
+  }
+
+  /** The file itself, for when the question is "what does it SAY". */
+  async function openLogFile() {
+    setLogError(null)
+    setLogNotice(null)
+    try {
+      setLogPath(await openSyncLog())
+    } catch (error) {
+      setLogError(describeError(error))
+    }
+  }
+
+  /**
+   * Empties the log so the next attempt can be read on its own. The confirmation
+   * is deliberately worded for both cases: clearing a file that does not exist
+   * is not a failure.
+   */
+  async function clearLog() {
+    setClearingLog(true)
+    setLogError(null)
+    setLogNotice(null)
+    try {
+      const cleared = await clearSyncLog()
+      setLogNotice(cleared ? 'Journal vidé.' : 'Le journal était déjà vide.')
+    } catch (error) {
+      setLogError(`Impossible de vider le journal : ${describeError(error)}`)
+    } finally {
+      setClearingLog(false)
     }
   }
 
@@ -245,17 +278,36 @@ export function SyncSettingsPanel() {
           <Button variant="outline" onClick={() => void openLogs()} disabled={openingLogs}>
             <FolderOpen size={14} /> Ouvrir le dossier des logs
           </Button>
+          <Button variant="outline" onClick={() => void openLogFile()}>
+            <FileText size={14} /> Ouvrir le journal
+          </Button>
+          <Button variant="outline" onClick={() => void clearLog()} disabled={clearingLog}>
+            <Eraser size={14} /> Vider
+          </Button>
           {logPath && (
             <span title={logPath} style={{ fontSize: 12, color: 'var(--muted-foreground)', wordBreak: 'break-all' }}>
               {logPath}
             </span>
           )}
         </div>
+        {logNotice && (
+          <p role="status" style={{ fontSize: 12.5, color: 'var(--muted-foreground)', marginTop: 8 }}>
+            {logNotice}
+          </p>
+        )}
         {logError && (
           <p role="alert" style={{ fontSize: 12.5, color: 'var(--warning-fg)', marginTop: 8 }}>
             ⚠ {logError}
           </p>
         )}
+        <div style={{ marginTop: 10 }}>
+          <SettingToggle
+            label="Journal détaillé"
+            description="Ajoute une ligne par fichier réellement envoyé ou reçu — utile quand les compteurs ne suffisent pas."
+            checked={verboseLog}
+            onCheckedChange={checked => void updateSettings({ verboseLog: checked })}
+          />
+        </div>
       </SettingsSection>
     </div>
   )
