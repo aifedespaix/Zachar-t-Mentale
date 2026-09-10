@@ -54,6 +54,13 @@ export function createSyncStore(): SyncStore {
       if (client === null || clientServerUrl !== serverUrl) {
         client = createPocketBaseClient(serverUrl)
         clientServerUrl = serverUrl
+        // Session restore from AsyncAuthStore's persisted file resolves
+        // asynchronously (after this function returns) — this keeps
+        // currentUser in sync once that resolves, instead of only checking
+        // once, synchronously, before it possibly has.
+        client?.authStore.onChange(() => {
+          set({ currentUser: userFromClient(client!) })
+        })
       }
       return client
     }

@@ -29,6 +29,7 @@ function fakePocketBase(authWithPassword: ReturnType<typeof vi.fn>) {
       get isValid() {
         return record !== null
       },
+      onChange: () => {},
       clear: () => {
         record = null
       },
@@ -54,6 +55,38 @@ describe('useSyncStore', () => {
     await store.getState().init()
     expect(store.getState().serverUrl).toBe('https://pi.local')
     expect(store.getState().syncFolderPath).toBe('/cours')
+  })
+
+  it('picks up a session that resolves asynchronously via AsyncAuthStore onChange', async () => {
+    let onChangeCallback: (() => void) | undefined
+    let currentRecord: { username: string; role: string } | null = null
+    const fakePb = {
+      collection: () => ({ authWithPassword: vi.fn() }),
+      authStore: {
+        get record() {
+          return currentRecord
+        },
+        get isValid() {
+          return currentRecord !== null
+        },
+        onChange: (cb: () => void) => {
+          onChangeCallback = cb
+        },
+        clear: () => {
+          currentRecord = null
+        },
+      },
+    }
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePb as any)
+    vi.mocked(loadSyncSettings).mockResolvedValue({ serverUrl: 'https://pi.local', syncFolderPath: null })
+
+    await store.getState().init()
+    expect(store.getState().currentUser).toBeNull()
+
+    currentRecord = { username: 'aife', role: 'prof' }
+    onChangeCallback?.()
+
+    expect(store.getState().currentUser).toEqual({ username: 'aife', role: 'prof' })
   })
 
   it('login() sets currentUser on success', async () => {
