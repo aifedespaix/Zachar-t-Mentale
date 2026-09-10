@@ -130,6 +130,12 @@ export async function sync({ client, currentUser, syncFolderPath, state }: SyncP
   const localTree = await scanFolder(syncFolderPath)
   const localPaths = flattenMindMapPaths(localTree)
 
+  // Guards a single sync run against two local files claiming the same
+  // `meta.id`: without it, alternating pushes of two different files would
+  // corrupt one shared remote record. This does not (and isn't meant to)
+  // prevent such a duplicate from arising in the first place.
+  const seenFileIds = new Set<string>()
+
   for (const path of localPaths) {
     let meta: MindMapMeta | null
     try {
@@ -140,6 +146,12 @@ export async function sync({ client, currentUser, syncFolderPath, state }: SyncP
     }
     if (meta === null || meta.author !== currentUser) continue
 
+    if (seenFileIds.has(meta.id)) {
+      result.errors.push({ fileId: meta.id, message: 'plusieurs fichiers locaux partagent le même identifiant de synchronisation' })
+      continue
+    }
+    seenFileIds.add(meta.id)
+
     const known = state[meta.id]
     if (known && known.lastSyncedModified >= meta.lastModified) continue
 
@@ -148,11 +160,16 @@ export async function sync({ client, currentUser, syncFolderPath, state }: SyncP
       if (cards === null) continue
       const content = serializeMindMap(meta, cards)
       const relPath = relativeTo(syncFolderPath, path)
+      // Assets are pushed BEFORE the record that references them: an
+      // observer's getFullList() must never see a record whose content
+      // names an asset hash with no matching asset row yet — that image
+      // would then never be retried (the pull-side `>=` skip check treats
+      // the record's `updated` as fully synced regardless of its assets).
+      await pushAssetsFor(client, path, knownHashes)
       const existing = remoteByFileId.get(meta.id)
       const savedRecord = existing
         ? await client.mindMaps.update(existing.id, { content, path: relPath })
         : await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content })
-      await pushAssetsFor(client, path, knownHashes)
       state[meta.id] = { lastSyncedModified: meta.lastModified, lastSyncedUpdated: savedRecord.updated }
       result.pushed += 1
     } catch (error) {
@@ -168,6 +185,24 @@ export async function sync({ client, currentUser, syncFolderPath, state }: SyncP
     try {
       const { meta, cards } = deserializeMindMap(record.content)
       const localPath = await join(syncFolderPath, record.path)
+
+      // A locally-created file can already sit at the path a remote record
+      // resolves to — most dangerously, one that has never been synced
+      // (`meta === null`) and so is invisible to the push loop above and
+      // backed up nowhere. Only overwrite when the file already there is a
+      // previous pull/update of THIS SAME record; anything else is left
+      // alone and reported instead of silently destroyed.
+      if (await exists(localPath)) {
+        const localMeta = await loadMindMapMeta(localPath)
+        if (localMeta === null || localMeta.id !== record.file_id) {
+          result.errors.push({
+            fileId: record.file_id,
+            message: 'un fichier local existe déjà à cet emplacement et n’est pas ce fichier synchronisé',
+          })
+          continue
+        }
+      }
+
       await ensureLocalFolder(localPath)
       await writeTextFile(localPath, record.content)
       await pullAssetsFor(client, localPath, referencedAssets(record.content, remoteAssets))
