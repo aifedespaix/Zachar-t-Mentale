@@ -4,7 +4,11 @@ import type { SyncResult } from './syncService'
 
 /** A finished run, with only what a test cares about spelled out. */
 function result(overrides: Partial<SyncResult> = {}): SyncResult {
-  return { pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [], transferred: [], ...overrides }
+  return {
+    pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [], transferred: [],
+    relocated: 0, moved: [], notices: [],
+    ...overrides,
+  }
 }
 
 describe('syncResultLabel', () => {
@@ -28,5 +32,14 @@ describe('syncResultLabel', () => {
   it('counts the conflicts, which are reported but never resolved', () => {
     const conflicts = [{ fileId: 'f1', path: 'a.zmap', localModified: 'x', remoteUpdated: 'y' }]
     expect(syncResultLabel(result({ conflicts }))).toBe('0 envoyé(s), 0 reçu(s), 1 conflit(s)')
+  })
+
+  it('says how many files followed a path decided elsewhere', () => {
+    expect(syncResultLabel(result({ relocated: 2 }))).toBe('0 envoyé(s), 0 reçu(s), 2 déplacé(s)')
+  })
+
+  it('counts a both-sides move as a remark, not as a failure', () => {
+    const notices = [{ fileId: 'file-1', message: 'déplacé des deux côtés' }]
+    expect(syncResultLabel(result({ relocated: 1, notices }))).toBe('0 envoyé(s), 0 reçu(s), 1 déplacé(s), 1 remarque(s)')
   })
 })
