@@ -2,6 +2,7 @@ import { exists, mkdir, readDir, readTextFile, writeTextFile } from '@tauri-apps
 import { join } from '@tauri-apps/api/path'
 import { loadMindMap, loadMindMapMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
+import { renamePath } from '../persistence/fileOps'
 import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
 import { serializeMindMap, deserializeMindMap } from '../persistence/serialization'
 import { fileNameOf, parentDirOf, separatorOf } from '../persistence/paths'
@@ -10,6 +11,7 @@ import type { MindMapMeta, SyncUser, UserRole } from '../types/card'
 import { serverStateOf, type SyncState, type SyncStateEntry } from '../persistence/syncState'
 import { canReorder } from './permissions'
 import { hashContent } from './contentHash'
+import { reconcilePath, seedLastSyncedPath } from './pathReconciliation'
 
 export interface RemoteMindMapRecord {
   id: string
@@ -40,9 +42,15 @@ export interface MindMapsApi {
     data: { file_id: string; author: string; path: string; content: string },
     options?: RequestOptions
   ): Promise<RemoteMindMapRecord>
+  /**
+   * Un payload PARTIEL, et c'est le cœur du partage de l'agencement : PocketBase
+   * fait un PATCH, donc un champ absent est laissé intact côté serveur. L'auteur
+   * envoie `{ content }` et ne peut pas écraser le chemin choisi par un prof ; un
+   * prof envoie `{ path }` sans jamais toucher au contenu.
+   */
   update(
     id: string,
-    data: { path: string; content: string },
+    data: { path?: string; content?: string },
     options?: RequestOptions
   ): Promise<RemoteMindMapRecord>
 }
@@ -84,9 +92,28 @@ export interface SyncResult {
    * both versions contain work someone did, and only the user can choose.
    */
   conflicts: SyncConflict[]
+  /**
+   * Combien de fichiers locaux ont suivi un chemin décidé ailleurs.
+   *
+   * Ces trois champs sont OPTIONNELS dans le type — et pas par timidité :
+   * plusieurs tests hors du périmètre de ce commit construisent des littéraux
+   * `SyncResult` (`useSyncStore.test.ts`, `syncResultLabel.test.ts`,
+   * `FileSidebar.test.tsx`, `SyncSettingsPanel.test.tsx`), et `tsconfig` inclut
+   * tout `src` : les rendre obligatoires les casserait au `tsc` sans qu'on ait
+   * le droit de les committer. `sync()` les renseigne TOUJOURS ; les lecteurs,
+   * eux, les prennent avec `?? []`.
+   */
+  relocated?: number
+  /** Le détail, en chemins ABSOLUS : l'interface en a besoin pour suivre le fichier ouvert. */
+  moved?: { fileId: string; from: string; to: string }[]
+  /** Ce qui n'est ni un échec ni un transfert : « les deux côtés avaient bougé ». */
+  notices?: { fileId: string; message: string }[]
 }
 
-interface SyncParams {
+/** Le résultat tel que `sync()` le construit : les trois champs de déplacement y sont toujours là. */
+type SyncRunResult = SyncResult & Required<Pick<SyncResult, 'relocated' | 'moved' | 'notices'>>
+
+export interface SyncParams {
   client: SyncClient
   currentUser: string
   currentRole: UserRole
@@ -226,6 +253,43 @@ export async function surveySyncFolder(params: {
   return survey
 }
 
+export type LocalMapScan =
+  | { path: string; kind: 'map'; meta: MindMapMeta }
+  | { path: string; kind: 'local-only' }
+  | { path: string; kind: 'not-a-map' }
+  | { path: string; kind: 'unreadable'; error: unknown }
+
+/**
+ * L'entrée « carte lisible », extraite de l'union : `Extract` plutôt qu'une
+ * intersection `LocalMapScan & { kind: 'map' }`, qui laisserait les autres
+ * membres accessibles et ferait échouer l'accès à `.meta`.
+ */
+export type MapScan = Extract<LocalMapScan, { kind: 'map' }>
+
+/**
+ * Une seule lecture de `meta` par fichier, pour tout le passage.
+ *
+ * La réconciliation des chemins et la boucle d'envoi ont besoin de la même
+ * information ; la lire deux fois doublerait les accès disque d'un dossier
+ * entier à chaque sync. Les quatre cas sont distingués ici une fois pour
+ * toutes — `.json` qui n'est pas une carte (silence, ce n'est pas à nous),
+ * carte sans identité de sync (le compteur « à publier »), fichier illisible
+ * (une vraie erreur, reportée).
+ */
+export async function scanLocalMaps(syncFolderPath: string): Promise<LocalMapScan[]> {
+  const tree = await scanFolder(syncFolderPath)
+  const scans: LocalMapScan[] = []
+  for (const path of flattenMindMapPaths(tree)) {
+    try {
+      const meta = await loadMindMapMeta(path)
+      scans.push(meta === null ? { path, kind: 'local-only' } : { path, kind: 'map', meta })
+    } catch (error) {
+      scans.push((await isNonMindMapFile(path)) ? { path, kind: 'not-a-map' } : { path, kind: 'unreadable', error })
+    }
+  }
+  return scans
+}
+
 /**
  * Whether a `.json` file is readable but is NOT a mind map — a data export, a
  * settings file, anything that happens to live in the synced folder.
@@ -261,7 +325,12 @@ export function flattenMindMapPaths(nodes: FileTreeNode[]): string[] {
 
 function relativeTo(root: string, path: string): string {
   const separator = separatorOf(path)
-  return path.startsWith(root + separator) ? path.slice(root.length + 1) : fileNameOf(path)
+  const relative = path.startsWith(root + separator) ? path.slice(root.length + 1) : fileNameOf(path)
+  // Le `path` distant est la forme CANONIQUE, à slashes : un dossier poussé
+  // depuis une machine POSIX et relu sous Windows se comparerait sinon
+  // `Chimie/atomes.zmap` à `Chimie\atomes.zmap`, et chaque fichier serait lu
+  // comme « déplacé », en attente perpétuelle.
+  return relative.replace(/\\/g, '/')
 }
 
 function describeSyncError(error: unknown): string {
@@ -326,7 +395,12 @@ async function ensureLocalFolder(path: string): Promise<void> {
 }
 
 /**
- * Push then pull, one `.zmap` at a time. The fork model guarantees a given
+ * Réconcilie les chemins, puis push, puis pull, un `.zmap` à la fois. La
+ * réconciliation passe en PREMIER et pour tout le monde : le tirage ignore les
+ * enregistrements dont on est l'auteur, donc sans elle un fichier que le
+ * serveur a déplacé ne reviendrait jamais à sa place.
+ *
+ * The fork model guarantees a given
  * file is writable server-side by exactly one author, so nothing here
  * resolves a conflict — the newer side (by `meta.lastModified` for a push,
  * by the server's `updated` for a pull) simply wins, and a per-file failure
@@ -342,13 +416,16 @@ export async function sync({
   signal,
   onProgress,
 }: SyncParams): Promise<SyncResult> {
-  const result: SyncResult = {
+  const result: SyncRunResult = {
     pushed: 0,
     pulled: 0,
     errors: [],
     cancelled: false,
     conflicts: [],
     transferred: [],
+    relocated: 0,
+    moved: [],
+    notices: [],
   }
 
   const remoteRecords = await client.mindMaps.getFullList({ signal })
@@ -361,19 +438,92 @@ export async function sync({
   // L'identité complète, pour ce qui dépend du rôle : `planPush` autorise un
   // prof à répercuter le chemin d'une carte d'élève.
   const viewer: SyncUser = { username: currentUser, role: currentRole }
+  const aborted = () => signal?.aborted === true
 
-  const localTree = await scanFolder(syncFolderPath)
-  const localPaths = flattenMindMapPaths(localTree)
+  // ── Passe 1 : réconciliation des chemins ────────────────────────────────
+  //
+  // Avant tout le reste, et pour TOUT LE MONDE : le tirage ignore les
+  // enregistrements dont on est l'auteur, donc sans cette passe un fichier que
+  // le serveur a déplacé ne serait jamais ramené à sa place.
+  const rootChanged = server.syncFolderPath !== null && server.syncFolderPath !== syncFolderPath
+  server.syncFolderPath = syncFolderPath
+
+  const scans = await scanLocalMaps(syncFolderPath)
+
+  async function reconcileOne(scan: MapScan): Promise<void> {
+    const entry = entries[scan.meta.id]
+    if (entry === undefined) return // jamais synchronisé : la création enverra le chemin
+    const remote = remoteByFileId.get(scan.meta.id)
+    const relPath = relativeTo(syncFolderPath, scan.path)
+    const lastSyncedPath = seedLastSyncedPath({
+      lastSyncedPath: entry.lastSyncedPath,
+      rootChanged,
+      relPath,
+      remotePath: remote?.path,
+    })
+    entry.lastSyncedPath = lastSyncedPath
+
+    const action = reconcilePath({
+      relPath,
+      lastSyncedPath,
+      remotePath: remote?.path,
+    })
+    // Les deux côtés ont bougé vers le MÊME chemin : `reconcilePath` n'a rien à
+    // faire, mais la base doit suivre le chemin distant. Sans ça, un fichier
+    // dont le push de chemin est refusé (élève sur la carte d'un prof) garde
+    // une base périmée, et un renommage local ULTÉRIEUR serait lu comme « les
+    // deux ont bougé différemment » puis annulé par une relocalisation — une
+    // action de l'utilisateur silencieusement défaite.
+    if (remote !== undefined && remote.path === relPath) entry.lastSyncedPath = remote.path
+    if (action.kind !== 'relocate') return
+
+    const destination = await join(syncFolderPath, action.to)
+    try {
+      if (await exists(destination)) {
+        // Sous Windows `exists()` ignore la casse : relire l'identité de ce qui
+        // occupe la destination évite de refuser à CHAQUE sync un renommage qui
+        // ne change que la casse du même `file_id`, tout en protégeant le
+        // fichier d'un autre.
+        const occupant = await loadMindMapMeta(destination)
+        if (occupant === null || occupant.id !== scan.meta.id) {
+          result.errors.push({
+            fileId: scan.meta.id,
+            message: `impossible de replacer « ${relPath} » : « ${action.to} » existe déjà`,
+          })
+          return
+        }
+      }
+      await ensureLocalFolder(destination)
+      await renamePath(scan.path, destination)
+      const from = scan.path
+      scan.path = destination
+      entry.lastSyncedPath = action.to
+      result.relocated += 1
+      result.moved.push({ fileId: scan.meta.id, from, to: destination })
+      if (action.bothMoved) {
+        result.notices.push({ fileId: scan.meta.id, message: `« ${action.to} » a été déplacé des deux côtés : le chemin du serveur a été appliqué` })
+      }
+    } catch (error) {
+      result.errors.push({ fileId: scan.meta.id, message: describeSyncError(error) })
+    }
+  }
+
+  for (const scan of scans) {
+    if (aborted()) {
+      result.cancelled = true
+      break
+    }
+    if (scan.kind === 'map') await reconcileOne(scan)
+  }
 
   // Both halves are known up front, so the caller can show « 4/12 » from the
   // first file rather than a spinner with no end in sight.
-  const total = localPaths.length + remoteRecords.length
+  const total = scans.length + remoteRecords.length
   let done = 0
   const report = () => {
     done += 1
     onProgress?.(done, total)
   }
-  const aborted = () => signal?.aborted === true
 
   // Guards a single sync run against two local files claiming the same
   // `meta.id`: without it, alternating pushes of two different files would
@@ -382,19 +532,8 @@ export async function sync({
   const seenFileIds = new Set<string>()
 
   /** Everything the push pass does for ONE local file. */
-  async function pushOne(path: string): Promise<void> {
-    let meta: MindMapMeta | null
-    try {
-      meta = await loadMindMapMeta(path)
-    } catch (error) {
-      // A .json that is not a mind map is simply not ours; one that cannot be
-      // read is a real problem and is still reported.
-      if (!(await isNonMindMapFile(path))) {
-        result.errors.push({ fileId: path, message: describeSyncError(error) })
-      }
-      return
-    }
-    if (meta === null || meta.author !== currentUser) return
+  async function pushOne(scan: MapScan): Promise<void> {
+    const meta = scan.meta
 
     if (seenFileIds.has(meta.id)) {
       result.errors.push({ fileId: meta.id, message: 'plusieurs fichiers locaux partagent le même identifiant de synchronisation' })
@@ -403,19 +542,22 @@ export async function sync({
     seenFileIds.add(meta.id)
 
     const known = entries[meta.id]
-    // Le compteur de l'interface et cette boucle lisent la MÊME décision : sinon
-    // un fichier simplement renommé serait annoncé « à envoyer » sans jamais
-    // partir. Le payload reste global ici — la séparation contenu/chemin est le
-    // fait de la tâche suivante.
-    const plan = planPush({ meta, relPath: relativeTo(syncFolderPath, path), currentUser: viewer, entry: known })
+    const remote = remoteByFileId.get(meta.id)
+    // Le compteur de l'interface et cette boucle lisent la MÊME décision :
+    // `planPush` encode « le contenu à son auteur, le chemin à qui peut
+    // réarranger ». Le garde d'auteur a disparu — il sortait AVANT de consulter
+    // ce plan, donc un prof ne pouvait jamais répercuter le rangement d'un
+    // élève, et le badge « à envoyer » mentait pour toujours.
+    const plan = planPush({ meta, relPath: relativeTo(syncFolderPath, scan.path), currentUser: viewer, entry: known })
     if (!plan.content && !plan.path) return
 
-    const remote = remoteByFileId.get(meta.id)
-    if (isConflict(meta, known, remote, remote === undefined ? '' : await hashContent(remote.content))) {
+    // Un conflit porte sur du CONTENU, jamais sur un rangement : le contrôle ne
+    // s'applique donc que si c'est du contenu qu'on s'apprête à envoyer.
+    if (plan.content && isConflict(meta, known, remote, remote === undefined ? '' : await hashContent(remote.content))) {
       // Reported, never resolved here: both versions hold work someone did.
       result.conflicts.push({
         fileId: meta.id,
-        path: relativeTo(syncFolderPath, path),
+        path: relativeTo(syncFolderPath, scan.path),
         localModified: meta.lastModified,
         remoteUpdated: remote.updated,
       })
@@ -423,21 +565,52 @@ export async function sync({
     }
 
     try {
-      const cards = await loadMindMap(path)
-      if (cards === null) return
-      const content = serializeMindMap(meta, cards)
-      const relPath = relativeTo(syncFolderPath, path)
-      // Assets are pushed BEFORE the record that references them: an
-      // observer's getFullList() must never see a record whose content
-      // names an asset hash with no matching asset row yet — that image
-      // would then never be retried (the pull-side `>=` skip check treats
-      // the record's `updated` as fully synced regardless of its assets).
-      await pushAssetsFor(client, path, knownHashes, { signal })
-      const existing = remoteByFileId.get(meta.id)
-      const savedRecord = existing
-        ? await client.mindMaps.update(existing.id, { content, path: relPath }, { signal })
-        : await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content }, { signal })
-      entries[meta.id] = { lastSyncedModified: meta.lastModified, lastSyncedUpdated: savedRecord.updated }
+      // Un `create` n'a AUCUN contenu distant à protéger, mais son payload
+      // exige le champ `content` : c'est le seul cas où un envoi de chemin lit
+      // encore le fichier — et il n'écrase alors rien.
+      const sendsContent = plan.content || remote === undefined
+      let content: string | undefined
+      let contentHash: string | undefined
+      if (sendsContent) {
+        const cards = await loadMindMap(scan.path)
+        if (cards === null) return
+        // La sérialisation est calculée UNE fois : cette chaîne est celle
+        // envoyée au serveur ET celle dont on prend l'empreinte. Hacher un
+        // jumeau sérialisé différemment rendrait la comparaison de conflit
+        // « toujours différente » pour tout fichier modifié, sans qu'aucun
+        // test ne tombe.
+        content = serializeMindMap(meta, cards)
+        contentHash = await hashContent(content)
+        // Assets are pushed BEFORE the record that references them: an
+        // observer's getFullList() must never see a record whose content
+        // names an asset hash with no matching asset row yet — that image
+        // would then never be retried (the pull-side `>=` skip check treats
+        // the record's `updated` as fully synced regardless of its assets).
+        await pushAssetsFor(client, scan.path, knownHashes, { signal })
+      }
+      const relPath = relativeTo(syncFolderPath, scan.path)
+      let savedRecord: RemoteMindMapRecord
+      if (remote === undefined) {
+        if (content === undefined) return
+        savedRecord = await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content }, { signal })
+      } else {
+        // Le champ qu'on a le droit d'écrire, et lui seul : le contenu à son
+        // auteur, le chemin à qui peut réarranger. Envoyer les deux à chaque
+        // fois laisserait l'élève annuler sans le savoir le rangement du prof.
+        const payload: { path?: string; content?: string } = {}
+        if (plan.content) payload.content = content
+        if (plan.path) payload.path = relPath
+        savedRecord = await client.mindMaps.update(remote.id, payload, { signal })
+      }
+
+      entries[meta.id] = {
+        // Un push de chemin SEUL ne réécrit pas la révision de contenu vue par
+        // ce client : un prof n'écrit pas le contenu d'un élève.
+        lastSyncedModified: sendsContent ? meta.lastModified : (known?.lastSyncedModified ?? meta.lastModified),
+        lastSyncedUpdated: savedRecord.updated,
+        lastSyncedPath: relPath,
+        lastSyncedContentHash: sendsContent ? contentHash : known?.lastSyncedContentHash,
+      }
       result.pushed += 1
       result.transferred.push({ fileId: meta.id, path: relPath, direction: 'push' })
     } catch (error) {
@@ -451,12 +624,16 @@ export async function sync({
     }
   }
 
-  for (const path of localPaths) {
+  for (const scan of scans) {
     if (aborted()) {
       result.cancelled = true
       break
     }
-    await pushOne(path)
+    if (scan.kind === 'unreadable') {
+      result.errors.push({ fileId: scan.path, message: describeSyncError(scan.error) })
+    } else if (scan.kind === 'map') {
+      await pushOne(scan)
+    }
     report()
     if (result.cancelled) break
   }
@@ -496,7 +673,16 @@ export async function sync({
       await ensureLocalFolder(localPath)
       await writeTextFile(localPath, record.content)
       await pullAssetsFor(client, localPath, referencedAssets(record.content, remoteAssets), { signal })
-      entries[record.file_id] = { lastSyncedModified: meta?.lastModified ?? record.updated, lastSyncedUpdated: record.updated }
+      // L'empreinte est prise sur `record.content`, la chaîne REÇUE, jamais sur
+      // une re-sérialisation locale : c'est la seule qui corresponde à ce que
+      // le serveur détient, donc la seule qui rende la comparaison de conflit
+      // exacte au prochain passage.
+      entries[record.file_id] = {
+        lastSyncedModified: meta?.lastModified ?? record.updated,
+        lastSyncedUpdated: record.updated,
+        lastSyncedPath: record.path,
+        lastSyncedContentHash: await hashContent(record.content),
+      }
       result.pulled += 1
       result.transferred.push({ fileId: record.file_id, path: record.path, direction: 'pull' })
       void cards // validated by deserializeMindMap succeeding; the written file is the record's own content verbatim

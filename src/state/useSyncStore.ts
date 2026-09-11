@@ -376,6 +376,12 @@ export function createSyncStore(): SyncStore {
                 { fileId: moved.fileId }
               )
             }
+            // Un déplacement n'est ni un envoi ni une réception ordinaires : il
+            // change l'emplacement d'un fichier que les deux côtés avaient déjà.
+            // `?? []` parce que le champ est optionnel dans `SyncResult`.
+            for (const moved of result.moved ?? []) {
+              await logSyncEvent('debug', `déplacé « ${moved.from} » vers « ${moved.to} »`, { fileId: moved.fileId })
+            }
           }
           if (result.errors.length > 0) {
             // The per-file detail, which is what a bug report actually needs.
