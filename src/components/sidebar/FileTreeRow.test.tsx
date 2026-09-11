@@ -888,6 +888,42 @@ describe('FileTreeRow', () => {
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/1 carte.*mentale.*déjà importée/))
     expect(scanFolder).toHaveBeenCalledWith('/cours')
   })
+
+  it('badges a synced map that sits outside the sync folder, and explains why it stopped being sent', async () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'file-1', author: 'aife', role: 'prof', lastModified: 'm' })
+    useSyncStore.setState({ syncFolderPath: '/autre', currentUser: { username: 'aife', role: 'prof' } })
+
+    render(<FileTreeRow node={{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }} depth={0} onOpenFile={vi.fn()} />)
+
+    expect(screen.getByLabelText('Hors du dossier de synchronisation')).toBeInTheDocument()
+  })
+
+  it('shows no such badge inside the sync folder, nor for a map that was never published', async () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue(null)
+    useSyncStore.setState({ syncFolderPath: '/cours' })
+
+    render(<FileTreeRow node={{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }} depth={0} onOpenFile={vi.fn()} />)
+
+    expect(screen.queryByLabelText('Hors du dossier de synchronisation')).not.toBeInTheDocument()
+  })
+
+  it('shows no such badge for a map that was never published, even outside the sync folder', async () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue(null)
+    useSyncStore.setState({ syncFolderPath: '/cours' })
+
+    render(<FileTreeRow node={{ type: 'mindmap', name: 'a.zmap', path: '/autre/a.zmap' }} depth={0} onOpenFile={vi.fn()} />)
+
+    expect(screen.queryByLabelText('Hors du dossier de synchronisation')).not.toBeInTheDocument()
+  })
+
+  it('shows no such badge for a published map that is still inside the sync folder', async () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'file-1', author: 'aife', role: 'prof', lastModified: 'm' })
+    useSyncStore.setState({ syncFolderPath: '/cours' })
+
+    render(<FileTreeRow node={{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }} depth={0} onOpenFile={vi.fn()} />)
+
+    expect(screen.queryByLabelText('Hors du dossier de synchronisation')).not.toBeInTheDocument()
+  })
 })
 
 describe('FileTreeRow — verrouillage non-auteur', () => {

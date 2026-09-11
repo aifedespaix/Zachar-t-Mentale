@@ -1,12 +1,12 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useEffect, useRef, useState } from 'react'
-import { Folder, FolderOpen, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, Lock, CloudUpload } from 'lucide-react'
+import { Folder, FolderOpen, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, Lock, CloudUpload, CloudOff } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { renamePath, deletePath, duplicatePath, freeSiblingPath } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
-import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, withMindMapExtension } from '../../persistence/paths'
+import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, withMindMapExtension, isInsideFolder } from '../../persistence/paths'
 import { loadMindMap, mindMapExists } from '../../persistence/fileStore'
 import { isAssetsSidecarName } from '../../persistence/assets'
 import { validateCards } from '../../validation/cardsValidation'
@@ -97,6 +97,13 @@ export function FileTreeRow({
   const currentUser = useSyncStore(s => s.currentUser)
   const meta = useMindMapAuthor(node.type === 'mindmap' ? node.path : null)
   const isLocked = meta !== null && meta.author !== currentUser?.username
+  const syncFolderPath = useSyncStore(s => s.syncFolderPath)
+  /**
+   * Une carte publiée mais sortie du dossier de synchronisation : elle a un
+   * enregistrement distant, et plus rien ne la poussera. Le badge est le seul
+   * endroit qui l'explique — sinon le fichier disparaît du compteur sans un mot.
+   */
+  const outOfSyncFolder = meta !== null && syncFolderPath !== null && !isInsideFolder(node.path, syncFolderPath)
   const { canPublish, publish } = usePublishMindMap()
   // Offered only where the action means something (see the hook): a local map,
   // inside the sync folder, with an account to stamp it with. An already-synced
@@ -433,6 +440,11 @@ export function FileTreeRow({
                     <FileJson size={16} />
                   )}
                   <span>{displayName}</span>
+                  {outOfSyncFolder && (
+                    <CloudOff size={13} aria-label="Hors du dossier de synchronisation" style={{ opacity: 0.7, flexShrink: 0 }}>
+                      <title>Hors du dossier de synchronisation : cette carte ne sera plus envoyée.</title>
+                    </CloudOff>
+                  )}
                 </button>
               )}
             </div>
