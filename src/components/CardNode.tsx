@@ -40,6 +40,7 @@ import { RecallDialog } from './quiz/RecallDialog'
 import { FlipCard } from './FlipCard'
 import { useCardDetailStore } from '../state/useCardDetailStore'
 import { useCardSelectionStore } from '../state/useCardSelectionStore'
+import { useCardHoverStore } from '../state/useCardHoverStore'
 import { CardContextMenu } from './commands/CardContextMenu'
 import { CONTENT_KIND_ICONS } from '../content/ContentKindBadges'
 import { contentOf, nonTextKinds } from '../content/blocks'
@@ -382,6 +383,12 @@ export function CardNode({ data }: CardNodeProps) {
   const showFiche = useCardDetailStore(s => s.show)
   const editFiche = useCardDetailStore(s => s.setEditing)
   const ficheOpen = useCardDetailStore(s => s.open.some(entry => entry.cardId === card.id))
+  // Whether the pointer is on THIS card or on its fiche in the right panel: one
+  // shared id makes the highlight symmetric, so "hover the description" and
+  // "hover the card" are the same state seen from two places.
+  const hovered = useCardHoverStore(s => s.hoveredCardId === card.id)
+  const hoverCard = useCardHoverStore(s => s.hover)
+  const unhoverCard = useCardHoverStore(s => s.unhover)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const isDetached = card.detached === true
   // A floating card is painted grey whatever level it last had: its level is
@@ -590,6 +597,11 @@ export function CardNode({ data }: CardNodeProps) {
       data-flipped={flipped}
       data-reparent-target={isReparentTarget}
       data-detached={isDetached}
+      data-hovered={hovered}
+      // Publishes the hover so the fiche panel can light up the same card's
+      // description (and vice-versa) — see `useCardHoverStore`.
+      onMouseEnter={() => hoverCard(card.id)}
+      onMouseLeave={() => unhoverCard(card.id)}
       className={[
         'card-node',
         isDetached ? 'card-node--detached' : null,
@@ -637,6 +649,13 @@ export function CardNode({ data }: CardNodeProps) {
         // A card that responds to a click says so: pending (to answer) or
         // holding a definition (to read).
         cursor: isPending || (!quizActive && hasContent) ? 'pointer' : 'default',
+        // The card half of the cross-highlight: a level-coloured halo drawn
+        // with box-shadow, never a thicker border or a scale — the card's
+        // footprint must not move because the pointer entered it (règle
+        // anti-décalage 1). While the card is a reparent target its CSS pulse
+        // animation wins over this inline shadow, so the drop cue is untouched.
+        boxShadow: hovered ? `0 0 0 2px ${toCss(colors.border)}` : undefined,
+        transition: 'box-shadow 140ms ease',
       }}
     >
       {/*

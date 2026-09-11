@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -9,6 +10,7 @@ import { ChevronDown, ChevronRight, Eraser, Layers, Pencil, Pin, PinOff, Plus, T
 import type { Card } from '../../types/card'
 import { useCardsStore, selectEditsBlocked } from '../../state/useCardsStore'
 import { useCardDetailStore } from '../../state/useCardDetailStore'
+import { useCardHoverStore } from '../../state/useCardHoverStore'
 import { useWorkspaceStore } from '../../state/useWorkspaceStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
@@ -97,6 +99,31 @@ export function CardDetailPanel() {
   const [width, setWidth] = useState(loadCardDetailWidth)
   const [resizing, setResizing] = useState(false)
   const handleRef = useRef<HTMLDivElement>(null)
+
+  const hoveredCardId = useCardHoverStore(s => s.hoveredCardId)
+  // Where each open fiche lives in the DOM, keyed by card id: the auto-scroll
+  // needs the element, and a callback ref on `CardFiche` is the one place where
+  // the card id and its node are both in scope.
+  const ficheRefs = useRef(new Map<string, HTMLElement>())
+
+  /**
+   * Brings the hovered card's fiche into view.
+   *
+   * `block: 'nearest'` scrolls the panel the SMALLEST amount that makes the fiche
+   * visible, so hovering the fiche itself (already on screen) is a natural
+   * no-op, and one that sits above or below glides just to the edge instead of
+   * jumping to the middle. No hovered card, or no fiche open for it, is nothing
+   * to scroll.
+   */
+  useEffect(() => {
+    if (hoveredCardId === null) return
+    const fiche = ficheRefs.current.get(hoveredCardId)
+    if (fiche === undefined) return
+    const reduceMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    fiche.scrollIntoView?.({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' })
+  }, [hoveredCardId])
 
   // Same rationale as the file sidebar's: writing on every pointer move would
   // hammer `localStorage` a hundred times a drag for a value only the next
@@ -256,6 +283,10 @@ export function CardDetailPanel() {
                   onClose={() => close(card.id)}
                   onToggleCollapsed={() => toggleCollapsed(card.id)}
                   onEdit={() => setEditing(card.id)}
+                  sectionRef={element => {
+                    if (element === null) ficheRefs.current.delete(card.id)
+                    else ficheRefs.current.set(card.id, element)
+                  }}
                 />
               )
             })}
@@ -286,6 +317,7 @@ function CardFiche({
   onClose,
   onToggleCollapsed,
   onEdit,
+  sectionRef,
 }: {
   card: Card
   cards: Card[]
@@ -296,6 +328,8 @@ function CardFiche({
   onClose: () => void
   onToggleCollapsed: () => void
   onEdit: () => void
+  /** Registers the fiche's DOM node with the panel, for the hover auto-scroll. */
+  sectionRef?: (element: HTMLElement | null) => void
 }) {
   const locked = useCardsStore(selectEditsBlocked)
   const updateContent = useCardsStore(s => s.updateContent)
@@ -308,13 +342,33 @@ function CardFiche({
   const blocks = contentOf(card)
   const breadcrumb = ancestorTitles(cards, card.id)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  // The fiche half of the cross-highlight — see `useCardHoverStore`. Hovering
+  // here lights up the card on the canvas AND this fiche, so the two always read
+  // as one object whichever side the pointer entered.
+  const hovered = useCardHoverStore(s => s.hoveredCardId === card.id)
+  const hoverCard = useCardHoverStore(s => s.hover)
+  const unhoverCard = useCardHoverStore(s => s.unhover)
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <section
+          ref={sectionRef}
           aria-label={`Fiche de ${card.title}`}
-          style={{ borderBottom: '1px solid var(--border)' }}
+          data-hovered={hovered}
+          onMouseEnter={() => hoverCard(card.id)}
+          onMouseLeave={() => unhoverCard(card.id)}
+          style={{
+            borderBottom: '1px solid var(--border)',
+            // Discreet and symmetric with the card's halo: a faint level-tinted
+            // wash plus a crisp 2px accent bar at the panel's edge. The bar is an
+            // INSET SHADOW, not a border, so switching it on moves nothing.
+            background: hovered
+              ? `color-mix(in oklch, ${toCss(colors.bg)}, transparent 92%)`
+              : undefined,
+            boxShadow: `inset 2px 0 0 ${hovered ? toCss(colors.border) : 'transparent'}`,
+            transition: 'background 140ms ease, box-shadow 140ms ease',
+          }}
         >
           <header style={{ display: 'flex', alignItems: 'flex-start', gap: 4, padding: '8px 8px 8px 10px' }}>
             {/* The level colour is the same one the card wears on the canvas: with
@@ -425,12 +479,6 @@ function CardFiche({
                     {blocks.length > 0 ? <Pencil /> : <Plus />}
                     {blocks.length > 0 ? 'Modifier' : 'Ajouter une description'}
                   </Button>
-                  {blocks.length > 0 && (
-                    <Button variant="destructive" size="sm" onClick={() => setConfirmDeleteOpen(true)}>
-                      <Trash2 />
-                      Supprimer
-                    </Button>
-                  )}
                 </div>
               )}
             </div>
