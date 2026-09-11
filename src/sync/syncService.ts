@@ -477,8 +477,20 @@ export async function sync({
     if (remote !== undefined && remote.path === relPath) entry.lastSyncedPath = remote.path
     if (action.kind !== 'relocate') return
 
-    const destination = await join(syncFolderPath, action.to)
+    // Le `path` d'un enregistrement est une entrée distante NON fiable — le
+    // tirage le valide déjà, pour la même raison : `join(root, 'C:/x')` ou
+    // `join(root, '../..')` remplacerait la racine du dossier de
+    // synchronisation, et `ensureLocalFolder` créerait même les dossiers
+    // parents. Rien n'est tenté tant que le chemin n'est pas prouvé relatif.
+    if (!isSafeRelativePath(action.to)) {
+      result.errors.push({ fileId: scan.meta.id, message: 'chemin distant invalide, fichier ignoré' })
+      return
+    }
+
     try {
+      // Dans le `try` : un chemin que `join` ne sait pas résoudre est l'échec de
+      // CE fichier, jamais l'abandon de tout le lot.
+      const destination = await join(syncFolderPath, action.to)
       if (await exists(destination)) {
         // Sous Windows `exists()` ignore la casse : relire l'identité de ce qui
         // occupe la destination évite de refuser à CHAQUE sync un renommage qui
@@ -565,13 +577,18 @@ export async function sync({
     }
 
     try {
-      // Un `create` n'a AUCUN contenu distant à protéger, mais son payload
-      // exige le champ `content` : c'est le seul cas où un envoi de chemin lit
-      // encore le fichier — et il n'écrase alors rien.
-      const sendsContent = plan.content || remote === undefined
+      // Un `create` exige le champ `content`, et le contenu n'appartient qu'à
+      // son auteur : quand l'enregistrement distant a disparu et que ce n'est
+      // PAS notre contenu, on ne recrée rien. Publier la carte d'un élève sous
+      // son nom ferait de son prochain push un conflit, et de son prochain
+      // tirage l'écrasement de son fichier par la copie du prof. Un
+      // enregistrement disparu côté serveur est l'affaire du plan de
+      // suppression, pas d'un ré-envoi silencieux.
+      if (remote === undefined && !plan.content) return
+
       let content: string | undefined
       let contentHash: string | undefined
-      if (sendsContent) {
+      if (plan.content) {
         const cards = await loadMindMap(scan.path)
         if (cards === null) return
         // La sérialisation est calculée UNE fois : cette chaîne est celle
@@ -589,8 +606,13 @@ export async function sync({
         await pushAssetsFor(client, scan.path, knownHashes, { signal })
       }
       const relPath = relativeTo(syncFolderPath, scan.path)
+      // Le chemin n'est enregistré que s'il a RÉELLEMENT été envoyé : `create`
+      // le porte toujours, `update` seulement quand le plan le demande.
+      const sentPath = plan.path || remote === undefined
       let savedRecord: RemoteMindMapRecord
       if (remote === undefined) {
+        // Inatteignable : `plan.content` est vrai ici, donc `content` est un
+        // string — l'affirmation n'existe que pour le type.
         if (content === undefined) return
         savedRecord = await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content }, { signal })
       } else {
@@ -606,10 +628,15 @@ export async function sync({
       entries[meta.id] = {
         // Un push de chemin SEUL ne réécrit pas la révision de contenu vue par
         // ce client : un prof n'écrit pas le contenu d'un élève.
-        lastSyncedModified: sendsContent ? meta.lastModified : (known?.lastSyncedModified ?? meta.lastModified),
+        lastSyncedModified: plan.content ? meta.lastModified : (known?.lastSyncedModified ?? meta.lastModified),
         lastSyncedUpdated: savedRecord.updated,
-        lastSyncedPath: relPath,
-        lastSyncedContentHash: sendsContent ? contentHash : known?.lastSyncedContentHash,
+        // Enregistrer un chemin qui n'a PAS été envoyé ferait dire à l'entrée
+        // que le serveur est au chemin local alors qu'il garde l'ancien : la
+        // passe suivante lirait ça comme « le serveur a bougé » et ramènerait
+        // le fichier de l'utilisateur à l'ancien emplacement — le renommage de
+        // l'utilisateur silencieusement défait.
+        lastSyncedPath: sentPath ? relPath : known?.lastSyncedPath,
+        lastSyncedContentHash: plan.content ? contentHash : known?.lastSyncedContentHash,
       }
       result.pushed += 1
       result.transferred.push({ fileId: meta.id, path: relPath, direction: 'push' })

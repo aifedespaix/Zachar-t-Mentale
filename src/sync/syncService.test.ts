@@ -21,7 +21,7 @@ vi.mock('../persistence/assets', () => ({
   sidecarDirOf: (path: string) => path.replace(/\.zmap$/, '.assets'),
 }))
 
-import { exists, writeTextFile, readDir, rename } from '@tauri-apps/plugin-fs'
+import { exists, writeTextFile, readDir, rename, mkdir } from '@tauri-apps/plugin-fs'
 import { loadMindMap, loadMindMapMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { readAssetBytes, writeAsset } from '../persistence/assets'
@@ -86,6 +86,7 @@ beforeEach(() => {
   vi.mocked(loadMindMapMeta).mockReset()
   vi.mocked(scanFolder).mockReset()
   vi.mocked(rename).mockReset().mockResolvedValue(undefined)
+  vi.mocked(mkdir).mockReset().mockResolvedValue(undefined)
   vi.mocked(readAssetBytes).mockReset()
   vi.mocked(writeAsset).mockReset()
 })
@@ -850,6 +851,45 @@ describe('sync — reconciliation des chemins', () => {
     expect(result.errors[0]?.message).toContain('existe déjà')
   })
 
+  it.each(['../evil.zmap', '/evil.zmap', 'C:/evil.zmap'])(
+    'refuses to relocate to the unsafe remote path « %s » rather than escaping the sync folder',
+    async unsafePath => {
+      // Le `path` d'un enregistrement est une entrée distante non fiable : le
+      // tirage le valide, la relocalisation doit le valider aussi, sinon
+      // `join` laisse le chemin remplacer la racine du dossier de
+      // synchronisation et `ensureLocalFolder` crée même les dossiers parents.
+      vi.mocked(scanFolder).mockResolvedValue([
+        { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
+        { type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' },
+      ])
+      vi.mocked(loadMindMapMeta).mockImplementation(async path =>
+        path.includes('a.zmap') ? AIFE : { ...AIFE, id: 'file-2', lastModified: '2026-02-01T00:00:00.000Z' }
+      )
+      vi.mocked(loadMindMap).mockResolvedValue([])
+      const client = fakeClient({
+        mindMaps: {
+          getFullList: vi.fn().mockResolvedValue([
+            { id: 'rec-1', file_id: 'file-1', author: 'aife', path: unsafePath, content: '[]', updated: 'u1' },
+            { id: 'rec-2', file_id: 'file-2', author: 'aife', path: 'b.zmap', content: '[]', updated: 'u1' },
+          ]),
+        } as any,
+      })
+      const state = memory({
+        'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0', lastSyncedPath: 'a.zmap' },
+        'file-2': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u9', lastSyncedPath: 'b.zmap' },
+      })
+
+      const result = await runSync({ client, state })
+
+      expect(rename).not.toHaveBeenCalled()
+      expect(mkdir).not.toHaveBeenCalled()
+      expect(result.errors).toEqual([{ fileId: 'file-1', message: 'chemin distant invalide, fichier ignoré' }])
+      // L'échec d'un fichier n'emporte pas les autres : le fichier sain de la
+      // même passe part normalement.
+      expect(result.pushed).toBe(1)
+    }
+  )
+
   it('treats a rename that only changes the case as the same file, not as a collision', async () => {
     // Sous Windows `exists()` ignore la casse : refuser ici condamnerait le
     // fichier à une relocalisation refusée à CHAQUE synchronisation, pour
@@ -959,7 +999,13 @@ describe('sync — reconciliation des chemins', () => {
       state: memory({ 'file-1': { lastSyncedModified: '2026-01-01T00:00:00.000Z', lastSyncedUpdated: 'u1' } }),
     })
 
-    expect(update).toHaveBeenCalled()
+    // Le PAYLOAD, pas seulement l'appel : la réparation promise est celle du
+    // CHEMIN, et `toHaveBeenCalled()` était déjà vrai avant ce chantier.
+    expect(update).toHaveBeenCalledWith(
+      'rec-1',
+      { path: 'Chapitre 2.zmap', content: expect.any(String) },
+      expect.anything()
+    )
   })
 })
 
@@ -1094,5 +1140,53 @@ describe('sync — push par champ', () => {
     const sent = vi.mocked(client.mindMaps.create).mock.calls[0][0]
     expect(sent.content).toContain('"file-1"')
     expect(state.servers['https://pb.test'].entries['file-1'].lastSyncedContentHash).toBe(await hashContent(sent.content))
+  })
+
+  it('never recreates a remote record that vanished from an eleve s content', async () => {
+    // `create` exige un contenu, et le contenu n'appartient qu'à son auteur :
+    // recréer ici publierait la carte d'un élève sous son nom, ferait de son
+    // prochain push un conflit et de son prochain tirage l'écrasement de son
+    // fichier par la copie du prof. Un enregistrement disparu côté serveur est
+    // l'affaire du plan de suppression.
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'Chimie/b.zmap', path: '/cours/Chimie/b.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, id: 'file-2', author: 'eleve1', role: 'eleve' })
+    const client = fakeClient()
+    const state = memory({ 'file-2': { lastSyncedModified: 'm-eleve', lastSyncedUpdated: 'u1', lastSyncedPath: 'b.zmap' } })
+
+    const result = await runSync({ client, state })
+
+    expect(client.mindMaps.create).not.toHaveBeenCalled()
+    expect(client.mindMaps.update).not.toHaveBeenCalled()
+    expect(loadMindMap).not.toHaveBeenCalled()
+    expect(writeTextFile).not.toHaveBeenCalled()
+    // Le chemin LOCAL n'est pas enregistré : rien n'a été envoyé.
+    expect(state.servers['https://pb.test'].entries['file-2'].lastSyncedPath).toBe('b.zmap')
+    expect(result.pushed).toBe(0)
+  })
+
+  it('never records a path the push did not actually send', async () => {
+    // Entrée d'état PERDUE alors que l'enregistrement distant existe : le plan
+    // ne connaît pas son chemin, donc l'`update` ne porte que le contenu.
+    // Enregistrer quand même le chemin local ferait dire à l'entrée que le
+    // serveur est à ce chemin, et la passe suivante lirait ça comme « le serveur
+    // a bougé » puis ramènerait le fichier de l'utilisateur à l'ancien — le
+    // renommage de l'utilisateur silencieusement défait.
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'Chimie/a.zmap', path: '/cours/Chimie/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z' })
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const update = vi.fn().mockResolvedValue({ id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'vieux.zmap', content: 'c', updated: 'u2' })
+    const client = fakeClient({
+      mindMaps: {
+        getFullList: vi.fn().mockResolvedValue([{ id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'vieux.zmap', content: 'vieux', updated: 'u1' }]),
+        update,
+      } as any,
+    })
+    const state = memory()
+
+    await runSync({ client, state })
+
+    expect(update).toHaveBeenCalledWith('rec-1', { content: expect.any(String) }, expect.anything())
+    expect(vi.mocked(update).mock.calls[0][1]).not.toHaveProperty('path')
+    expect(state.servers['https://pb.test'].entries['file-1'].lastSyncedPath).toBeUndefined()
   })
 })
