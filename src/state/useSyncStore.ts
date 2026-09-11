@@ -252,7 +252,7 @@ export function createSyncStore(): SyncStore {
           const state = await loadServerSyncState(get().serverUrl, syncFolderPath)
           const survey = await surveySyncFolder({
             syncFolderPath,
-            currentUser: currentUser.username,
+            currentUser,
             entries: serverStateOf(state, get().serverUrl, syncFolderPath).entries,
           })
           set({

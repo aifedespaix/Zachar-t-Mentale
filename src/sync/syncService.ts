@@ -6,8 +6,9 @@ import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
 import { serializeMindMap, deserializeMindMap } from '../persistence/serialization'
 import { fileNameOf, parentDirOf, separatorOf } from '../persistence/paths'
 import type { FileTreeNode } from '../types/workspace'
-import type { MindMapMeta, UserRole } from '../types/card'
+import type { MindMapMeta, SyncUser, UserRole } from '../types/card'
 import { serverStateOf, type SyncState, type SyncStateEntry } from '../persistence/syncState'
+import { canReorder } from './permissions'
 
 export interface RemoteMindMapRecord {
   id: string
@@ -105,22 +106,46 @@ function isAbortError(error: unknown): boolean {
   return error !== null && typeof error === 'object' && (error as { isAbort?: unknown }).isAbort === true
 }
 
+export interface PushPlan {
+  content: boolean
+  path: boolean
+}
+
 /**
- * Whether a local map still has to be sent: the ONE definition of "pending
- * push", shared by the sync loop and the sidebar's counter so the number the
- * user reads can never disagree with what a sync would actually do.
+ * Ce qu'un sync enverrait pour ce fichier — contenu et chemin séparément.
  *
- * A file is pending when it is the current account's own (ownership is what
- * makes it writable), and its `lastModified` is newer than the last state we
- * pushed — or when we have never pushed it at all.
+ * LE point de vérité unique, partagé par la boucle d'envoi et par le compteur
+ * « à envoyer » de l'interface : le nombre affiché ne peut donc pas contredire
+ * ce qu'un sync ferait réellement. Il intègre désormais le CHEMIN, sans quoi un
+ * fichier simplement renommé resterait invisible dans le compteur tout en
+ * n'étant jamais envoyé — le trou exact que ce chantier répare.
+ *
+ * Le contenu n'appartient qu'à son auteur. Le chemin suit `canReorder` : son
+ * auteur, ou un prof.
+ *
+ * `lastSyncedPath` ABSENT veut dire « inconnu », pas « différent » : une entrée
+ * migrée depuis la v1 n'en a pas, et la lire comme un déplacement ferait
+ * annoncer « N à envoyer » au premier lancement pour des fichiers qu'un sync
+ * n'enverrait pas. La réparation des chemins périmés ne passe pas par ici : la
+ * passe de réconciliation les amarre sur le chemin distant avant d'en décider.
  */
-export function isPushPending(
-  meta: MindMapMeta | null,
-  author: string,
-  stateEntry: SyncStateEntry | undefined
-): boolean {
-  if (meta === null || meta.author !== author) return false
-  return stateEntry === undefined || stateEntry.lastSyncedModified < meta.lastModified
+export function planPush(params: {
+  meta: MindMapMeta
+  relPath: string
+  currentUser: SyncUser
+  entry: SyncStateEntry | undefined
+}): PushPlan {
+  const { meta, relPath, currentUser, entry } = params
+  const content =
+    meta.author === currentUser.username && (entry === undefined || entry.lastSyncedModified < meta.lastModified)
+  // Entrée absente : l'enregistrement n'existe pas encore, donc le `create`
+  // enverra le chemin de toute façon — inutile de le compter deux fois.
+  const path =
+    entry !== undefined &&
+    entry.lastSyncedPath !== undefined &&
+    entry.lastSyncedPath !== relPath &&
+    canReorder(meta, currentUser)
+  return { content, path }
 }
 
 /**
@@ -171,7 +196,7 @@ export interface SyncSurvey {
  */
 export async function surveySyncFolder(params: {
   syncFolderPath: string
-  currentUser: string
+  currentUser: SyncUser
   entries: Record<string, SyncStateEntry>
 }): Promise<SyncSurvey> {
   const tree = await scanFolder(params.syncFolderPath)
@@ -182,8 +207,17 @@ export async function surveySyncFolder(params: {
     // survey has to tell apart.
     const meta = await loadMindMapMeta(path).catch(() => undefined)
     if (meta === undefined) continue
-    if (meta === null) survey.localOnly.push(path)
-    else if (isPushPending(meta, params.currentUser, params.entries[meta.id])) survey.pending.push(path)
+    if (meta === null) {
+      survey.localOnly.push(path)
+      continue
+    }
+    const plan = planPush({
+      meta,
+      relPath: relativeTo(params.syncFolderPath, path),
+      currentUser: params.currentUser,
+      entry: params.entries[meta.id],
+    })
+    if (plan.content || plan.path) survey.pending.push(path)
   }
   return survey
 }
@@ -297,6 +331,7 @@ async function ensureLocalFolder(path: string): Promise<void> {
 export async function sync({
   client,
   currentUser,
+  currentRole,
   serverUrl,
   syncFolderPath,
   state,
@@ -319,6 +354,9 @@ export async function sync({
 
   const server = serverStateOf(state, serverUrl, syncFolderPath)
   const entries = server.entries
+  // L'identité complète, pour ce qui dépend du rôle : `planPush` autorise un
+  // prof à répercuter le chemin d'une carte d'élève.
+  const viewer: SyncUser = { username: currentUser, role: currentRole }
 
   const localTree = await scanFolder(syncFolderPath)
   const localPaths = flattenMindMapPaths(localTree)
@@ -361,7 +399,12 @@ export async function sync({
     seenFileIds.add(meta.id)
 
     const known = entries[meta.id]
-    if (!isPushPending(meta, currentUser, known)) return
+    // Le compteur de l'interface et cette boucle lisent la MÊME décision : sinon
+    // un fichier simplement renommé serait annoncé « à envoyer » sans jamais
+    // partir. Le payload reste global ici — la séparation contenu/chemin est le
+    // fait de la tâche suivante.
+    const plan = planPush({ meta, relPath: relativeTo(syncFolderPath, path), currentUser: viewer, entry: known })
+    if (!plan.content && !plan.path) return
 
     const remote = remoteByFileId.get(meta.id)
     if (isConflict(meta, known, remote)) {

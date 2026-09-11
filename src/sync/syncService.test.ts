@@ -24,7 +24,7 @@ import { scanFolder } from '../persistence/fileTree'
 import { readAssetBytes, writeAsset } from '../persistence/assets'
 import {
   flattenMindMapPaths,
-  isPushPending,
+  planPush,
   surveySyncFolder,
   sync,
   type SyncClient,
@@ -32,7 +32,7 @@ import {
   type RemoteAssetRecord,
 } from './syncService'
 import { emptySyncState, type SyncState, type SyncStateEntry } from '../persistence/syncState'
-import type { MindMapMeta } from '../types/card'
+import type { MindMapMeta, SyncUser } from '../types/card'
 
 function fakeClient(overrides: Partial<SyncClient> = {}): SyncClient {
   return {
@@ -63,6 +63,9 @@ function runSync(params: Omit<Parameters<typeof sync>[0], 'serverUrl' | 'current
 
 const AIFE: MindMapMeta = { id: 'file-1', author: 'aife', role: 'prof', lastModified: '2026-01-01T00:00:00.000Z' }
 
+const AIFE_USER: SyncUser = { username: 'aife', role: 'prof' }
+const ELEVE_USER: SyncUser = { username: 'eleve1', role: 'eleve' }
+
 beforeEach(() => {
   vi.mocked(exists).mockReset().mockResolvedValue(false)
   vi.mocked(writeTextFile).mockReset()
@@ -74,24 +77,75 @@ beforeEach(() => {
   vi.mocked(writeAsset).mockReset()
 })
 
-describe('isPushPending', () => {
-  const known = { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' }
+describe('planPush', () => {
+  const known = { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x', lastSyncedPath: 'a.zmap' }
 
-  it('is pending when we have never pushed it', () => {
-    expect(isPushPending(AIFE, 'aife', undefined)).toBe(true)
+  it('sends the content of a map we authored and changed', () => {
+    expect(
+      planPush({
+        meta: { ...AIFE, lastModified: '2026-01-02T00:00:00.000Z' },
+        relPath: 'a.zmap',
+        currentUser: AIFE_USER,
+        entry: known,
+      })
+    ).toEqual({ content: true, path: false })
   })
 
-  it('is pending when the local file moved since the last push', () => {
-    expect(isPushPending({ ...AIFE, lastModified: '2026-01-02T00:00:00.000Z' }, 'aife', known)).toBe(true)
+  it('sends the content of a map we never pushed, and lets the creation carry the path', () => {
+    // Sans entrée, on ne sait pas quel chemin le serveur connaît : annoncer un
+    // déplacement serait une invention, et le `create` envoie le chemin de
+    // toute façon.
+    expect(planPush({ meta: AIFE, relPath: 'a.zmap', currentUser: AIFE_USER, entry: undefined })).toEqual({
+      content: true,
+      path: false,
+    })
   })
 
-  it('is not pending when the cache already knows this exact version', () => {
-    expect(isPushPending(AIFE, 'aife', known)).toBe(false)
+  it('treats a v1-migrated entry as "no path change", not as a move of every file', () => {
+    // `lastSyncedPath` absent veut dire INCONNU. Le lire comme « différent »
+    // ferait annoncer « N à envoyer » au premier lancement après mise à jour,
+    // pour des fichiers qu'un sync n'enverrait pas.
+    const migrated = { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' }
+    expect(planPush({ meta: AIFE, relPath: 'a.zmap', currentUser: AIFE_USER, entry: migrated })).toEqual({
+      content: false,
+      path: false,
+    })
   })
 
-  it('never considers a map we do not author, or one that has no meta', () => {
-    expect(isPushPending({ ...AIFE, author: 'someone-else' }, 'aife', undefined)).toBe(false)
-    expect(isPushPending(null, 'aife', undefined)).toBe(false)
+  it('sends a renamed map for its path alone, with no content change', () => {
+    expect(planPush({ meta: AIFE, relPath: 'Chimie/a.zmap', currentUser: AIFE_USER, entry: known })).toEqual({
+      content: false,
+      path: true,
+    })
+  })
+
+  it('sends nothing when neither content nor path moved', () => {
+    expect(planPush({ meta: AIFE, relPath: 'a.zmap', currentUser: AIFE_USER, entry: known })).toEqual({
+      content: false,
+      path: false,
+    })
+  })
+
+  it('never sends the CONTENT of a map we do not author, however new it looks', () => {
+    const scan = planPush({
+      meta: { ...AIFE, author: 'eleve1', lastModified: '2027-01-01T00:00:00.000Z' },
+      relPath: 'a.zmap',
+      currentUser: AIFE_USER,
+      entry: known,
+    })
+    expect(scan.content).toBe(false)
+  })
+
+  it('lets a prof push the PATH of an eleve s map — that is how a class folder follows', () => {
+    expect(
+      planPush({ meta: { ...AIFE, author: 'eleve1' }, relPath: 'Chimie/a.zmap', currentUser: AIFE_USER, entry: known })
+    ).toEqual({ content: false, path: true })
+  })
+
+  it('refuses an eleve the path of a map they do not own', () => {
+    expect(
+      planPush({ meta: { ...AIFE, author: 'aife' }, relPath: 'Chimie/a.zmap', currentUser: ELEVE_USER, entry: known })
+    ).toEqual({ content: false, path: false })
   })
 })
 
@@ -141,7 +195,7 @@ describe('surveySyncFolder', () => {
 
     const survey = await surveySyncFolder({
       syncFolderPath: '/cours',
-      currentUser: 'aife',
+      currentUser: AIFE_USER,
       entries: { b: { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' } },
     })
 
@@ -154,16 +208,52 @@ describe('surveySyncFolder', () => {
     vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'donnees.json', path: '/cours/donnees.json' }])
     vi.mocked(loadMindMapMeta).mockRejectedValue(new Error('pas une carte'))
 
-    const survey = await surveySyncFolder({ syncFolderPath: '/cours', currentUser: 'aife', entries: {} })
+    const survey = await surveySyncFolder({ syncFolderPath: '/cours', currentUser: AIFE_USER, entries: {} })
 
     expect(survey).toEqual({ pending: [], localOnly: [] })
+  })
+
+  it('counts a renamed file as pending, which it never did before', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a 2.zmap', path: '/cours/a 2.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
+
+    const survey = await surveySyncFolder({
+      syncFolderPath: '/cours',
+      currentUser: AIFE_USER,
+      entries: { 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x', lastSyncedPath: 'a.zmap' } },
+    })
+
+    expect(survey.pending).toEqual(['/cours/a 2.zmap'])
+  })
+
+  it('counts a file an eleve owns inside the prof s folder, and not the prof s own files', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'moi.zmap', path: '/cours/moi.zmap' },
+      { type: 'mindmap', name: 'eleve.zmap', path: '/cours/eleve.zmap' },
+    ])
+    vi.mocked(loadMindMapMeta).mockImplementation(async path =>
+      path === '/cours/eleve.zmap' ? { ...AIFE, id: 'eleve-file', author: 'eleve1' } : { ...AIFE, id: 'mine' }
+    )
+
+    const survey = await surveySyncFolder({
+      syncFolderPath: '/cours',
+      currentUser: AIFE_USER,
+      entries: {
+        mine: { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x', lastSyncedPath: 'moi.zmap' },
+        'eleve-file': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x', lastSyncedPath: 'vieux.zmap' },
+      },
+    })
+
+    // Le prof peut répercuter le chemin du fichier de l'élève (il a bougé dans
+    // son arbre) ; le sien n'a ni contenu ni chemin en attente.
+    expect(survey.pending).toEqual(['/cours/eleve.zmap'])
   })
 
   it('lets an unreadable folder throw, so the caller can answer "unknown"', async () => {
     vi.mocked(scanFolder).mockRejectedValue(new Error('dossier disparu'))
 
     await expect(
-      surveySyncFolder({ syncFolderPath: '/cours', currentUser: 'aife', entries: {} })
+      surveySyncFolder({ syncFolderPath: '/cours', currentUser: AIFE_USER, entries: {} })
     ).rejects.toThrow('dossier disparu')
   })
 })

@@ -168,7 +168,13 @@ describe('useSyncStore', () => {
     expect(store.getState().localOnlyCount).toBe(1)
     expect(store.getState().localOnlyPaths).toEqual(['neuve'])
     expect(surveySyncFolder).toHaveBeenCalledWith(
-      expect.objectContaining({ syncFolderPath: '/cours', currentUser: 'aife' })
+      // L'utilisateur COMPLET, rôle compris : le compteur doit pouvoir dire
+      // qu'un prof a un chemin à répercuter sur la carte d'un élève.
+      expect.objectContaining({
+        syncFolderPath: '/cours',
+        currentUser: { username: 'aife', role: 'prof' },
+        entries: expect.any(Object),
+      })
     )
   })
 
