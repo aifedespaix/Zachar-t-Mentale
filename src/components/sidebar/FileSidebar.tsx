@@ -96,6 +96,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const refreshAll = useWorkspaceStore(s => s.refreshAll)
   const workspaceError = useWorkspaceStore(s => s.workspaceError)
   const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
+  const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
   const expandPaths = useWorkspaceStore(s => s.expandPaths)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const syncStatus = useSyncStore(s => s.status)
@@ -234,13 +235,20 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
    */
   async function handleSync() {
     await syncNow()
-    // A pull writes files into the sync folder behind the app's back; without
-    // this, the chapter the student just received would not appear in the tree
-    // until the next manual refresh.
+    // Un tirage écrit des fichiers, une réconciliation en DÉPLACE : dans les
+    // deux cas l'arbre est en retard sur le disque, et sans ce rafraîchissement
+    // le chapitre reçu (ou replacé) n'apparaîtrait qu'au prochain refresh manuel.
     const { lastResult: result, syncFolderPath } = useSyncStore.getState()
-    if (syncFolderPath !== null && result !== null && result.pulled > 0) {
-      await refreshFolder(syncFolderPath)
-    }
+    if (syncFolderPath === null || result === null) return
+    if (result.pulled === 0 && (result.relocated ?? 0) === 0) return
+
+    // AVANT le rafraîchissement : un `currentFilePath` périmé ferait recréer
+    // l'ancien fichier par l'enregistrement automatique différé.
+    const current = useWorkspaceStore.getState().currentFilePath
+    const moved = current === null ? undefined : (result.moved ?? []).find(entry => entry.from === current)
+    if (moved !== undefined) setCurrentFile(moved.to)
+
+    await refreshFolder(syncFolderPath)
   }
 
   function handleToggleShowUnreadable() {

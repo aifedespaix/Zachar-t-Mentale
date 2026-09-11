@@ -385,6 +385,32 @@ describe('FileSidebar', () => {
     expect(scanFolder).toHaveBeenCalledWith('/cours-svt')
   })
 
+  it('re-points the open file and refreshes the folder after a relocation', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useSyncStore.getState().syncNow).mockImplementation(async () => {
+      useSyncStore.setState({
+        lastResult: {
+          pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [], transferred: [],
+          relocated: 1,
+          moved: [{ fileId: 'file-1', from: '/cours/a.zmap', to: '/cours/Chimie/a.zmap' }],
+          notices: [],
+        },
+      })
+    })
+    useWorkspaceStore.setState({ currentFilePath: '/cours/a.zmap' })
+    useSyncStore.setState({ syncFolderPath: '/cours' })
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+    vi.mocked(scanFolder).mockClear()
+
+    await user.click(screen.getByRole('button', { name: 'Synchroniser' }))
+
+    // Le fichier ouvert a été replacé : le chemin courant doit suivre, sinon
+    // l'enregistrement automatique recréerait l'ancien fichier.
+    await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/Chimie/a.zmap'))
+    expect(scanFolder).toHaveBeenCalledWith('/cours')
+  })
+
   it('opens a tooltip on a command-backed icon of the action bar', async () => {
     const user = userEvent.setup()
     render(<FileSidebar onOpenFile={() => {}} />)
