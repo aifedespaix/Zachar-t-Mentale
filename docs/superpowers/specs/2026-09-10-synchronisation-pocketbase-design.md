@@ -317,3 +317,11 @@ avec bouton **Personnaliser / Faire ma copie**.
 - Nettoyage des assets orphelins côté serveur.
 - Chiffrement transport au-delà de ce qu'apporte déjà le tunnel Cloudflare
   (HTTPS) — pas de chiffrement applicatif supplémentaire.
+
+## Mise à jour du 2026-09-11
+
+Les règles `Update`/`Delete` de `cartes_mentales` deviennent
+`@request.auth.username = author || @request.auth.role = "prof"`, et `role`
+cesse donc d'être une simple étiquette d'affichage : il autorise un prof à
+réécrire le `path` (jamais le contenu) des cartes de ses élèves. Voir
+`2026-09-11-deplacement-et-synchronisation-design.md`.

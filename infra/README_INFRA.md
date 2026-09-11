@@ -63,9 +63,26 @@ Ce qu'elle installe :
 
 | Collection       | Champs                                                              | Règles API                                                                   |
 | ---------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `cartes_mentales` | `file_id` (unique), `author`, `path`, `content`                      | lecture publique ; création pour tout compte connecté ; modification et suppression par l'auteur seul |
+| `cartes_mentales` | `file_id` (unique), `author`, `path`, `content`                      | lecture publique ; création pour tout compte connecté ; modification et suppression par l'auteur, ou par un compte `prof` |
 | `assets`         | `hash` (unique), `extension`, `file` (≤ 10 Mio)                    | lecture publique ; création pour tout compte connecté ; jamais modifié        |
 | `users`          | ajoute `username` (unique, obligatoire) et `role` (`eleve`/`prof`)  | inscription publique fermée ; connexion par pseudo                            |
+
+Les règles exactes de `cartes_mentales`, telles que le script les applique :
+
+```
+List/View : (vide)
+Create    : @request.auth.id != ""
+Update    : @request.auth.username = author || @request.auth.role = "prof"
+Delete    : @request.auth.username = author || @request.auth.role = "prof"
+```
+
+> Une règle PocketBase est *par enregistrement*, pas par champ : `author || prof`
+> autorise donc un client prof à écrire n'importe quel champ, `content` compris.
+> La séparation « l'auteur pousse `content`, le prof pousse `path` » est une
+> discipline du CLIENT, pas une garantie du serveur. C'est acceptable ici : un
+> serveur appartient à un prof, qui en est l'administrateur, et la propriété qui
+> protège réellement les gens — un élève ne peut pas toucher l'enregistrement
+> d'un autre élève — reste intacte.
 
 Deux points valent d'être connus, parce que PocketBase ne les fait pas deviner :
 
@@ -123,7 +140,8 @@ Si un dossier contient des cartes **jamais publiées** (créées dans l'applicat
 donc sans identité de synchronisation), elles ne partent pas — c'est ce que dit
 le message « N cartes n'ont pas encore d'identité de synchronisation » dans les
 réglages, avec le bouton qui les publie toutes d'un coup. Une carte publiée garde
-son auteur : seul lui pourra la modifier par la suite.
+son auteur : lui seul, ou un prof (qui déplace les cartes de ses élèves),
+pourra la modifier par la suite.
 
 ## 6. Sauvegardes
 

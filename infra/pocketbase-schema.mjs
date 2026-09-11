@@ -75,10 +75,17 @@ export const MIND_MAP_RULES = {
   viewRule: '',
   // Any signed-in account may publish a file…
   createRule: '@request.auth.id != ""',
-  // …but only the author may touch it afterwards. This pair IS the fork model:
-  // it is what makes a non-authored file read-only in every client.
-  updateRule: '@request.auth.username = author',
-  deleteRule: '@request.auth.username = author',
+  // …but only its author may touch it afterwards — plus a `prof`, who is the one
+  // who moves a pupil's card around. This pair IS the fork model: it is what
+  // makes a non-authored file read-only in every client but the prof's.
+  //
+  // A PocketBase rule is per RECORD, not per field: `author || prof` lets a prof
+  // write ANY field, `content` included, so "the author pushes content, the prof
+  // pushes path" is a CLIENT discipline, not a server guarantee. Acceptable
+  // here — one server belongs to one prof, who administers it — and the property
+  // that protects people survives: a pupil cannot touch another pupil's record.
+  updateRule: '@request.auth.username = author || @request.auth.role = "prof"',
+  deleteRule: '@request.auth.username = author || @request.auth.role = "prof"',
 }
 
 export const ASSET_RULES = {
@@ -171,7 +178,7 @@ export const EMAIL_FIELD_OVERRIDE = {
   help: 'Facultatif : l’application se connecte avec le pseudo, pas l’email.',
 }
 
-/** The `role` added to PocketBase's built-in auth collection — a display label, never a permission. */
+/** The `role` added to PocketBase's built-in auth collection — a display label, except in the `cartes_mentales` rules, where `prof` may update/delete any record. */
 export const ROLE_FIELD = {
   name: 'role',
   type: 'select',

@@ -361,7 +361,8 @@ describe('planCollection', () => {
     const plan = planCollection(undefined, desired)
     expect(plan.create).toMatchObject({ name: MIND_MAPS_COLLECTION, type: 'base' })
     expect(plan.create.fields.map(field => field.name)).toEqual(['file_id', 'author', 'path', 'content'])
-    expect(plan.create.updateRule).toBe('@request.auth.username = author')
+    expect(plan.create.updateRule).toBe('@request.auth.username = author || @request.auth.role = "prof"')
+    expect(plan.create.deleteRule).toBe('@request.auth.username = author || @request.auth.role = "prof"')
     expect(plan.changes).toEqual(['collection « cartes_mentales » créée'])
   })
 
