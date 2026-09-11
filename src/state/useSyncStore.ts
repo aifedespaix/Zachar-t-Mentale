@@ -10,11 +10,10 @@ import { logSyncEvent } from '../persistence/syncLog'
 import { createSyncClient } from '../sync/pocketBaseAdapter'
 import { surveySyncFolder, sync, type SyncResult } from '../sync/syncService'
 import { syncResultLabel } from '../sync/syncResultLabel'
-
-export interface SyncUser {
-  username: string
-  role: UserRole
-}
+import type { SyncUser } from '../types/card'
+// Réexporté : c'est ici que le reste de l'app l'importait, et le type vit
+// désormais avec `MindMapMeta` pour que la permission ne dépende d'aucun store.
+export type { SyncUser }
 
 /** Who asked for a run: only a background one is allowed to stay quiet about a failure. */
 export type SyncTrigger = 'manual' | 'auto'

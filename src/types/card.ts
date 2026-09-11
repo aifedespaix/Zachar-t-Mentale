@@ -19,6 +19,17 @@ export interface MindMapMeta {
   lastModified: string
 }
 
+/**
+ * Who is signed in. `username` is what owns files (`meta.author`), `role` is
+ * what decides who may rearrange them — a prof may move, rename and delete
+ * anyone's map; an eleve only their own. The role never grants the right to
+ * write someone else's CONTENT.
+ */
+export interface SyncUser {
+  username: string
+  role: UserRole
+}
+
 export interface Card {
   id: string
   level: CardLevel
