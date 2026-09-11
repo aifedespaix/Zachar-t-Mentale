@@ -1,0 +1,26 @@
+{
+  "name": "dsh-pwsh-rtk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PowerShell executor subclass for DeepSeek Harness that routes eligible commands through rtk (Rust Token Killer). pwsh twin of @deeptrial/dsh-bash-rtk.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-pwsh-local": "*",
+    "@deepseek-ai/dsh-pwsh-sandbox": "*",
+    "@deepseek-ai/dsh-shell": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-pwsh-local": { "optional": true },
+    "@deepseek-ai/dsh-pwsh-sandbox": { "optional": true },
+    "@deepseek-ai/dsh-shell": { "optional": true }
+  }
+}

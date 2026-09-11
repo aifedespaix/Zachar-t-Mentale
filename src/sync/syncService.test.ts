@@ -6,6 +6,9 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
   readTextFile: vi.fn(),
   mkdir: vi.fn(),
   readDir: vi.fn(),
+  rename: vi.fn(),
+  remove: vi.fn(),
+  copyFile: vi.fn(),
 }))
 vi.mock('@tauri-apps/api/path', () => ({
   join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
@@ -18,7 +21,7 @@ vi.mock('../persistence/assets', () => ({
   sidecarDirOf: (path: string) => path.replace(/\.zmap$/, '.assets'),
 }))
 
-import { exists, writeTextFile, readDir } from '@tauri-apps/plugin-fs'
+import { exists, writeTextFile, readDir, rename } from '@tauri-apps/plugin-fs'
 import { loadMindMap, loadMindMapMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { readAssetBytes, writeAsset } from '../persistence/assets'
@@ -29,9 +32,11 @@ import {
   surveySyncFolder,
   sync,
   type SyncClient,
+  type SyncParams,
   type RemoteMindMapRecord,
   type RemoteAssetRecord,
 } from './syncService'
+import { hashContent } from './contentHash'
 import { emptySyncState, type SyncState, type SyncStateEntry } from '../persistence/syncState'
 import type { MindMapMeta, SyncUser } from '../types/card'
 
@@ -57,9 +62,15 @@ function memory(entries: Record<string, SyncStateEntry> = {}, syncFolderPath: st
   return { version: 2, servers: { 'https://pb.test': { syncFolderPath, entries, tombstones: [] } } }
 }
 
-/** `sync` avec tout ce qui ne varie pas d'un test à l'autre. */
-function runSync(params: Omit<Parameters<typeof sync>[0], 'serverUrl' | 'currentRole' | 'syncFolderPath' | 'currentUser'>) {
-  return sync({ currentUser: 'aife', currentRole: 'prof', serverUrl: 'https://pb.test', syncFolderPath: '/cours', ...params })
+/**
+ * `sync` avec tout ce qui ne varie pas d'un test à l'autre.
+ *
+ * Une SURCHARGE partielle plutôt qu'un `Omit` : les tests qui se connectent en
+ * élève ont besoin de changer `currentUser`/`currentRole`, et geler ces deux-là
+ * dans le type du helper les en empêchait.
+ */
+function runSync(params: Partial<SyncParams> & { client: SyncClient }) {
+  return sync({ currentUser: 'aife', currentRole: 'prof', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState(), ...params })
 }
 
 const AIFE: MindMapMeta = { id: 'file-1', author: 'aife', role: 'prof', lastModified: '2026-01-01T00:00:00.000Z' }
@@ -74,6 +85,7 @@ beforeEach(() => {
   vi.mocked(loadMindMap).mockReset()
   vi.mocked(loadMindMapMeta).mockReset()
   vi.mocked(scanFolder).mockReset()
+  vi.mocked(rename).mockReset().mockResolvedValue(undefined)
   vi.mocked(readAssetBytes).mockReset()
   vi.mocked(writeAsset).mockReset()
 })
@@ -305,7 +317,12 @@ describe('sync — push', () => {
       expect.anything()
     )
     expect(result.pushed).toBe(1)
-    expect(state.servers['https://pb.test'].entries['file-1']).toEqual({ lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: '2026-01-02 00:00:00.000Z' })
+    expect(state.servers['https://pb.test'].entries['file-1']).toEqual({
+      lastSyncedModified: AIFE.lastModified,
+      lastSyncedUpdated: '2026-01-02 00:00:00.000Z',
+      lastSyncedPath: 'a.zmap',
+      lastSyncedContentHash: expect.any(String),
+    })
   })
 
   it('updates the existing remote record when one already exists for that file_id', async () => {
@@ -317,7 +334,9 @@ describe('sync — push', () => {
 
     await runSync({ client, state: emptySyncState() })
 
-    expect(client.mindMaps.update).toHaveBeenCalledWith('rec-1', expect.objectContaining({ path: 'a.zmap' }), expect.anything())
+    // Le contenu à son auteur, le chemin à qui peut réarranger : ici le fichier
+    // est déjà au bon endroit côté serveur, donc seul le contenu part.
+    expect(client.mindMaps.update).toHaveBeenCalledWith('rec-1', { content: expect.any(String) }, expect.anything())
     expect(client.mindMaps.create).not.toHaveBeenCalled()
   })
 

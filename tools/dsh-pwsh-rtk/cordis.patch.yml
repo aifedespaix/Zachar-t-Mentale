@@ -1,0 +1,15 @@
+# Profile patch layer for dsh-pwsh-rtk.
+#
+# Paste these two entries into ~/.dsh/profiles/web/cordis.patch.yml (a top-level
+# YAML array) after installing the package, then restart `dsh web`.
+#
+# 1. Stand the stock Windows executor down — exactly one provider may own
+#    ctx.shell per composition.
+# 2. Mount the rtk-routing subclass in its place, with the same defaults.
+
+- id: pwsh-sandbox
+  disabled: true
+
+- insert:
+    - id: pwsh-rtk
+      name: 'dsh-pwsh-rtk'
