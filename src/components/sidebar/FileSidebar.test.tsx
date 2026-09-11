@@ -368,7 +368,7 @@ describe('FileSidebar', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  it('summarises the last sync, and re-reads the tree when chapters were received', async () => {
+  it('summarises the last sync in the footer', async () => {
     const user = userEvent.setup()
     useSyncStore.setState({ syncFolderPath: '/cours-svt' })
     vi.mocked(useSyncStore.getState().syncNow).mockImplementation(async () => {
@@ -380,12 +380,9 @@ describe('FileSidebar', () => {
     await user.click(screen.getByRole('button', { name: 'Synchroniser' }))
 
     expect(await screen.findByText(/2 envoyé\(s\), 1 reçu\(s\)/)).toBeInTheDocument()
-    // A pull writes files on disk behind the app's back: without this re-scan
-    // the chapter the student just received would be invisible in the tree.
-    expect(scanFolder).toHaveBeenCalledWith('/cours-svt')
   })
 
-  it('re-points the open file and refreshes the folder after a relocation', async () => {
+  it('leaves the follow-up of a relocation to App — one implementation, not two', async () => {
     const user = userEvent.setup()
     vi.mocked(useSyncStore.getState().syncNow).mockImplementation(async () => {
       useSyncStore.setState({
@@ -399,16 +396,19 @@ describe('FileSidebar', () => {
     })
     useWorkspaceStore.setState({ currentFilePath: '/cours/a.zmap' })
     useSyncStore.setState({ syncFolderPath: '/cours' })
+    const refreshFolder = vi.spyOn(useWorkspaceStore.getState(), 'refreshFolder')
     render(<FileSidebar onOpenFile={() => {}} />)
     await screen.findByText('Cartes mentales')
-    vi.mocked(scanFolder).mockClear()
 
     await user.click(screen.getByRole('button', { name: 'Synchroniser' }))
+    await waitFor(() => expect(useSyncStore.getState().lastResult).not.toBeNull())
 
-    // Le fichier ouvert a été replacé : le chemin courant doit suivre, sinon
-    // l'enregistrement automatique recréerait l'ancien fichier.
-    await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/Chimie/a.zmap'))
-    expect(scanFolder).toHaveBeenCalledWith('/cours')
+    // Following a relocation belongs to `App`, which owns the open path and the
+    // pending autosave and is the one place all THREE sync triggers reach: a
+    // copy here would leave an automatic run with no follow-up at all.
+    expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/a.zmap')
+    expect(refreshFolder).not.toHaveBeenCalled()
+    refreshFolder.mockRestore()
   })
 
   it('opens a tooltip on a command-backed icon of the action bar', async () => {

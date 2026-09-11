@@ -96,7 +96,6 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const refreshAll = useWorkspaceStore(s => s.refreshAll)
   const workspaceError = useWorkspaceStore(s => s.workspaceError)
   const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
-  const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
   const expandPaths = useWorkspaceStore(s => s.expandPaths)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const syncStatus = useSyncStore(s => s.status)
@@ -226,29 +225,18 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   }
 
   /**
-   * The manual sync: push then pull, then re-read the tree if anything arrived.
+   * The sync button, and nothing more.
    *
-   * Neither call can reject — `syncNow` reports its own failures through the
-   * store's `error` (shown in the banner above the buttons), and
-   * `refreshFolder` swallows its own through `workspaceError`. That is what
-   * makes a dead network a banner rather than a crash.
+   * Following what a run relocated — re-pointing `currentFilePath`, refreshing
+   * the tree — belongs to `App`, which already owns the open path and the
+   * pending autosave, and which is the one place all THREE sync triggers reach
+   * (this button, the background timer, the settings panel). Doing it here left
+   * an automatic run recreating the old file through the debounced autosave.
+   * `syncNow` reports its own failures through the store's `error`, shown in the
+   * banner above the buttons, so a dead network is a banner rather than a crash.
    */
-  async function handleSync() {
-    await syncNow()
-    // Un tirage écrit des fichiers, une réconciliation en DÉPLACE : dans les
-    // deux cas l'arbre est en retard sur le disque, et sans ce rafraîchissement
-    // le chapitre reçu (ou replacé) n'apparaîtrait qu'au prochain refresh manuel.
-    const { lastResult: result, syncFolderPath } = useSyncStore.getState()
-    if (syncFolderPath === null || result === null) return
-    if (result.pulled === 0 && (result.relocated ?? 0) === 0) return
-
-    // AVANT le rafraîchissement : un `currentFilePath` périmé ferait recréer
-    // l'ancien fichier par l'enregistrement automatique différé.
-    const current = useWorkspaceStore.getState().currentFilePath
-    const moved = current === null ? undefined : (result.moved ?? []).find(entry => entry.from === current)
-    if (moved !== undefined) setCurrentFile(moved.to)
-
-    await refreshFolder(syncFolderPath)
+  function handleSync() {
+    void syncNow()
   }
 
   function handleToggleShowUnreadable() {

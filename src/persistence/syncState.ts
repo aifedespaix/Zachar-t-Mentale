@@ -99,7 +99,10 @@ export async function loadSyncState(): Promise<LoadedSyncState> {
     if (!(await exists(path))) return { kind: 'none' }
     const parsed: unknown = JSON.parse(await readTextFile(path))
     if (isSyncState(parsed)) return { kind: 'v2', state: parsed }
-    if (isRecord(parsed)) return { kind: 'legacy', entries: parsed as LegacySyncState }
+    // La v1 se reconnaît à l'ABSENCE de `version`, pas à « ce n'est pas la v2 » :
+    // un document d'une version future doit être ignoré, jamais pris pour un
+    // index plat dont on réécrirait les entrées.
+    if (isRecord(parsed) && !('version' in parsed)) return { kind: 'legacy', entries: parsed as LegacySyncState }
     return { kind: 'none' }
   } catch {
     return { kind: 'none' }

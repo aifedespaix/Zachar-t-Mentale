@@ -59,6 +59,7 @@ import { loadWorkspaceConfig } from './persistence/workspaceConfig'
 import { scanFolder } from './persistence/fileTree'
 import { loadSessionState } from './persistence/sessionState'
 import { check } from '@tauri-apps/plugin-updater'
+import type { SyncResult } from './sync/syncService'
 
 const PATH_A = '/cours/chapitre-a.json'
 const PATH_B = '/cours/chapitre-b.json'
@@ -729,5 +730,106 @@ describe('App — verrouillage lecture seule', () => {
     await waitFor(() => expect(loadMindMap).toHaveBeenCalled())
     expect(screen.getByRole('button', { name: 'Verrouiller la carte' })).toBeInTheDocument()
     expect(useCardsStore.getState().readOnly).toBe(false)
+  })
+})
+
+describe('App — suite d’un déplacement fait par la synchronisation', () => {
+  const SYNCED_PATH = '/cours/a.zmap'
+  const MOVED_PATH = '/cours/Chimie/a.zmap'
+  /** The report of a run whose ONLY effect was relocating the open file. */
+  const relocation: SyncResult = {
+    pushed: 0,
+    pulled: 0,
+    errors: [],
+    cancelled: false,
+    conflicts: [],
+    transferred: [],
+    relocated: 1,
+    moved: [{ fileId: 'file-1', from: SYNCED_PATH, to: MOVED_PATH }],
+    notices: [],
+  }
+
+  /**
+   * The store ready for an AUTOMATIC run: nobody clicks the sidebar's button,
+   * and `syncNow` is stubbed at the tail of a real run — all the network work
+   * done, the report published into `lastResult`.
+   */
+  function armAutoSync(nextResult: () => SyncResult | null) {
+    useSyncStore.setState({
+      currentUser: { username: 'aife', role: 'prof' },
+      syncFolderPath: '/cours',
+      autoSyncOnLaunch: false,
+      autoSyncIntervalMinutes: 5,
+      lastResult: null,
+      syncNow: async () => {
+        const result = nextResult()
+        if (result !== null) useSyncStore.setState({ lastResult: result })
+      },
+    })
+  }
+
+  beforeEach(() => {
+    resetStores()
+    vi.useFakeTimers()
+    vi.mocked(loadMindMap).mockReset().mockResolvedValue(cardsA)
+    vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
+    vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(scanFolder).mockReset().mockResolvedValue([])
+    // The real `init` would re-read the settings and set `syncFolderPath` back
+    // to null: beside the point here, and it would replay what each test just
+    // put in place.
+    vi.spyOn(useSyncStore.getState(), 'init').mockResolvedValue(undefined)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('re-points the open file after an automatic run that only relocated it', async () => {
+    let published: SyncResult | null = null
+    armAutoSync(() => published)
+    // Refreshing the tree is the other half of the reaction: a relocated file
+    // leaves a ghost row behind that no longer opens anything.
+    const refreshFolder = vi.spyOn(useWorkspaceStore.getState(), 'refreshFolder')
+    render(<App />)
+    await openFile(SYNCED_PATH)
+
+    published = relocation
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60_000)
+    })
+    await settle()
+
+    // With no reaction to the report, `currentFilePath` stayed on the old path:
+    // the debounced autosave recreated the old file holding the newest edits,
+    // and the map was split in two.
+    expect(useWorkspaceStore.getState().currentFilePath).toBe(MOVED_PATH)
+    expect(refreshFolder).toHaveBeenCalledWith('/cours')
+    // The relocated file is the one being edited: the header follows it.
+    expect(screen.getByText('a.zmap')).toBeInTheDocument()
+  })
+
+  it('flushes the pending save before moving the pointer', async () => {
+    armAutoSync(() => null)
+    render(<App />)
+    await openFile(SYNCED_PATH)
+    const rootId = useCardsStore.getState().history.present[0].id
+    await act(async () => {
+      useCardsStore.getState().addChild(rootId)
+    })
+    vi.mocked(saveMindMap).mockClear()
+
+    // The report lands BEFORE the autosave debounce (500 ms) has fired: that is
+    // the window the review flagged.
+    await act(async () => {
+      useSyncStore.setState({ lastResult: relocation })
+    })
+    await act(async () => {})
+
+    // The pending edit reaches the disk instead of going down with the timer
+    // the `loadedPath` change cancels.
+    expect(vi.mocked(saveMindMap).mock.calls[0]?.[0]).toBe(SYNCED_PATH)
+    expect(useWorkspaceStore.getState().currentFilePath).toBe(MOVED_PATH)
   })
 })

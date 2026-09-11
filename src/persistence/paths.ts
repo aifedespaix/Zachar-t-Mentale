@@ -106,6 +106,31 @@ export function isInsideFolder(path: string, folderPath: string): boolean {
   return left === right || left.startsWith(`${right}/`)
 }
 
+/**
+ * Whether two paths name the SAME file — the question a relocation asks before
+ * it may write over what already occupies its destination.
+ *
+ * Separators are normalised, as everywhere in this module, and the comparison
+ * IGNORES CASE: on the case-insensitive filesystem this app is built for, a
+ * destination that already exists under another case IS this file, and refusing
+ * there would condemn a rename that changes only the case to the same error at
+ * every sync, forever. (A case-sensitive filesystem could hold both names at
+ * once — `isInsideFolder` leans on the same assumption in the other direction.)
+ *
+ * The mind map's own `file_id` cannot answer this question: two local files that
+ * share one are the duplication the sync reports elsewhere, and renaming onto
+ * the destination would replace one of them with the other.
+ */
+export function isSameFilePath(left: string, right: string): boolean {
+  if (left === '' || right === '') return false
+  const normalize = (value: string) =>
+    value
+      .replace(/[\\/]+/g, '/')
+      .replace(/\/+$/, '')
+      .toLowerCase()
+  return normalize(left) === normalize(right)
+}
+
 /** A sheet/topic title turned into a safe file name component: illegal characters stripped, never empty. */
 export function sanitizeFileName(name: string): string {
   const cleaned = name.replace(ILLEGAL_FILENAME_CHARS, ' ').replace(/\s+/g, ' ').trim()

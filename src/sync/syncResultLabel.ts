@@ -1,8 +1,9 @@
 import type { SyncResult } from './syncService'
 
 /**
- * The one wording for a finished sync — « 3 envoyé(s), 2 reçu(s) », plus the
- * failure count when the batch had any.
+ * The one wording for a finished sync — « 3 envoyé(s), 2 reçu(s) », plus what
+ * happened beside the transfers: relocations, conflict count, remarks and
+ * failures, and the « (interrompue) » suffix of a run that did not finish.
  *
  * Shared by the settings panel and the sidebar's footer so the same run never
  * reads two different ways, and so the counters cannot drift apart from the

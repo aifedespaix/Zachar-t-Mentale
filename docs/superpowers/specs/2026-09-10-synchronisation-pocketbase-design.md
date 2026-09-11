@@ -323,5 +323,8 @@ avec bouton **Personnaliser / Faire ma copie**.
 Les règles `Update`/`Delete` de `cartes_mentales` deviennent
 `@request.auth.username = author || @request.auth.role = "prof"`, et `role`
 cesse donc d'être une simple étiquette d'affichage : il autorise un prof à
-réécrire le `path` (jamais le contenu) des cartes de ses élèves. Voir
+réécrire le `path` des cartes de ses élèves — et, côté CLIENT uniquement, jamais
+leur contenu. La règle PocketBase est *par enregistrement*, pas par champ : elle
+n'interdit rien du tout au niveau du contenu, et la séparation est une discipline
+du client (voir `infra/README_INFRA.md`). Voir
 `2026-09-11-deplacement-et-synchronisation-design.md`.

@@ -5,7 +5,7 @@ import { scanFolder } from '../persistence/fileTree'
 import { renamePath } from '../persistence/fileOps'
 import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
 import { serializeMindMap, deserializeMindMap } from '../persistence/serialization'
-import { fileNameOf, parentDirOf, separatorOf } from '../persistence/paths'
+import { fileNameOf, isSameFilePath, parentDirOf, separatorOf } from '../persistence/paths'
 import type { FileTreeNode } from '../types/workspace'
 import type { MindMapMeta, SyncUser, UserRole } from '../types/card'
 import { serverStateOf, type SyncState, type SyncStateEntry } from '../persistence/syncState'
@@ -142,11 +142,27 @@ export interface PushPlan {
 /**
  * Ce qu'un sync enverrait pour ce fichier — contenu et chemin séparément.
  *
- * LE point de vérité unique, partagé par la boucle d'envoi et par le compteur
- * « à envoyer » de l'interface : le nombre affiché ne peut donc pas contredire
- * ce qu'un sync ferait réellement. Il intègre désormais le CHEMIN, sans quoi un
- * fichier simplement renommé resterait invisible dans le compteur tout en
- * n'étant jamais envoyé — le trou exact que ce chantier répare.
+ * LE point de décision unique, partagé par la boucle d'envoi et par le compteur
+ * « à envoyer » de l'interface : les deux appliquent la MÊME règle, donc le
+ * nombre affiché ne peut pas contredire durablement ce qu'un sync ferait
+ * réellement. Il intègre désormais le CHEMIN, sans quoi un fichier simplement
+ * renommé resterait invisible dans le compteur tout en n'étant jamais envoyé —
+ * le trou exact que ce chantier répare.
+ *
+ * Ce qui est vrai, et rien de plus : les deux tombent d'accord une fois la
+ * réconciliation passée ET son résultat enregistré. Le compteur lit l'état du
+ * disque, la boucle lit l'état réconcilié — deux écarts D'UN SEUL run sont donc
+ * connus, et se réparent d'eux-mêmes au suivant :
+ *
+ * - une **entrée migrée** (compteur 0, le sync en envoie 1) : le chemin est
+ *   inconnu, donc rien n'est « déplacé » pour le compteur ; la réconciliation
+ *   l'amarre sur le `path` distant, ce qui rend l'envoi du chemin vrai ;
+ * - **les deux côtés ont bougé vers le même chemin** (compteur 1, le sync en
+ *   envoie 0) : la réconciliation n'a rien à faire, mais elle réamarre la base
+ *   sur `remote.path`, et il n'y a alors plus rien à envoyer.
+ *
+ * Les corriger demanderait une requête réseau de plus au compteur, que la spec
+ * refuse — ces deux écarts d'un run ne la justifient pas.
  *
  * Le contenu n'appartient qu'à son auteur. Le chemin suit `canReorder` : son
  * auteur, ou un prof.
@@ -166,8 +182,10 @@ export function planPush(params: {
   const { meta, relPath, currentUser, entry } = params
   const content =
     meta.author === currentUser.username && (entry === undefined || entry.lastSyncedModified < meta.lastModified)
-  // Entrée absente : l'enregistrement n'existe pas encore, donc le `create`
-  // enverra le chemin de toute façon — inutile de le compter deux fois.
+  // Entrée absente : l'enregistrement n'existe pas encore, et le `create` qui
+  // s'ensuit porte le chemin de toute façon. Demander `path: true` ici n'y
+  // changerait rien — ce drapeau ne décide que d'un `update({ path })`, et il
+  // n'y a encore aucun enregistrement à mettre à jour.
   const path =
     entry !== undefined &&
     entry.lastSyncedPath !== undefined &&
@@ -188,6 +206,9 @@ export function planPush(params: {
  *
  * Une entrée migrée n'a pas d'empreinte : on retombe sur la comparaison de
  * révisions d'avant, qui reste juste, simplement plus bruyante.
+ *
+ * Une entrée ABSENTE (`stateEntry === undefined`) n'est pas un conflit : sans
+ * mémoire de ce qu'on a déjà vu de ce fichier, il n'y a rien à contredire.
  */
 export function isConflict(
   meta: MindMapMeta,
@@ -491,19 +512,22 @@ export async function sync({
       // Dans le `try` : un chemin que `join` ne sait pas résoudre est l'échec de
       // CE fichier, jamais l'abandon de tout le lot.
       const destination = await join(syncFolderPath, action.to)
-      if (await exists(destination)) {
-        // Sous Windows `exists()` ignore la casse : relire l'identité de ce qui
-        // occupe la destination évite de refuser à CHAQUE sync un renommage qui
-        // ne change que la casse du même `file_id`, tout en protégeant le
-        // fichier d'un autre.
-        const occupant = await loadMindMapMeta(destination)
-        if (occupant === null || occupant.id !== scan.meta.id) {
-          result.errors.push({
-            fileId: scan.meta.id,
-            message: `impossible de replacer « ${relPath} » : « ${action.to} » existe déjà`,
-          })
-          return
-        }
+      // « Le même fichier » se prouve par le CHEMIN, jamais par le `meta.id` :
+      // deux fichiers locaux qui partagent un `file_id` sont exactement la
+      // duplication que la boucle d'envoi signale, et `fs.rename` remplacerait
+      // l'un par l'autre sans un mot. La comparaison normalise les séparateurs
+      // et ignore la casse, donc un renommage qui ne change que la casse reste
+      // le même fichier et n'est pas refusé à chaque sync.
+      //
+      // Lire le `meta` de l'occupant pour en décider était pire : un occupant
+      // qui n'est pas une carte, ou qui est illisible, faisait remonter son
+      // erreur d'analyse brute au lieu de la seule chose utile à dire ici.
+      if ((await exists(destination)) && !isSameFilePath(destination, scan.path)) {
+        result.errors.push({
+          fileId: scan.meta.id,
+          message: `impossible de replacer « ${relPath} » : « ${action.to} » existe déjà`,
+        })
+        return
       }
       await ensureLocalFolder(destination)
       await renamePath(scan.path, destination)

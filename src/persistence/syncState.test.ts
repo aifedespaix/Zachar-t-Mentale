@@ -58,6 +58,16 @@ describe('loadSyncState', () => {
     expect(await loadSyncState()).toEqual({ kind: 'legacy', entries: legacy })
   })
 
+  it('refuses to read a FUTURE version as the flat v1 index', async () => {
+    // `{ version: 3 }` n'est pas la v1 : le relire comme un index plat prendrait
+    // ses métadonnées pour des entrées, et le premier enregistrement les
+    // réécrirait — un document d'une version qu'on ne sait pas lire doit être
+    // ignoré, pas réinterprété.
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ version: 3, servers: {} }))
+    expect(await loadSyncState()).toEqual({ kind: 'none' })
+  })
+
   it('discards a corrupted cache rather than throwing — it is cheap to rebuild', async () => {
     vi.mocked(exists).mockResolvedValue(true)
     vi.mocked(readTextFile).mockResolvedValue('{ not json')

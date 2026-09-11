@@ -851,6 +851,65 @@ describe('sync — reconciliation des chemins', () => {
     expect(result.errors[0]?.message).toContain('existe déjà')
   })
 
+  it('refuses a destination occupied by a DIFFERENT local file that shares the same file_id', async () => {
+    // Deux fichiers locaux qui partagent un `file_id` : c'est exactement la
+    // duplication que la boucle d'envoi signale, et `rename` remplacerait l'un
+    // par l'autre. Comparer les `meta.id` ne prouve donc PAS que la destination
+    // est ce fichier-ci — le chemin, lui, le prouve.
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
+    vi.mocked(exists).mockResolvedValue(true)
+    const remote: RemoteMindMapRecord = {
+      id: 'rec-1',
+      file_id: 'file-1',
+      author: 'aife',
+      path: 'Chimie/a.zmap',
+      content: JSON.stringify({ cards: [] }),
+      updated: 'u1',
+    }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
+
+    const result = await runSync({
+      client,
+      state: memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0', lastSyncedPath: 'a.zmap' } }),
+    })
+
+    expect(rename).not.toHaveBeenCalled()
+    expect(result.relocated).toBe(0)
+    expect(result.errors[0]?.message).toContain('existe déjà')
+  })
+
+  it('keeps the friendly collision message when the destination is not a readable mind map', async () => {
+    // Lire l'occupant pour décider s'il « est » ce fichier faisait remonter son
+    // erreur d'analyse brute : l'utilisateur lisait « Unexpected token » là où la
+    // seule chose utile à dire est que la cible est déjà prise.
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockImplementation(async path => {
+      if (path === '/cours/Chimie/a.zmap') throw new Error('Unexpected token < in JSON at position 0')
+      return AIFE
+    })
+    vi.mocked(exists).mockResolvedValue(true)
+    const remote: RemoteMindMapRecord = {
+      id: 'rec-1',
+      file_id: 'file-1',
+      author: 'aife',
+      path: 'Chimie/a.zmap',
+      content: JSON.stringify({ cards: [] }),
+      updated: 'u1',
+    }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
+
+    const result = await runSync({
+      client,
+      state: memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0', lastSyncedPath: 'a.zmap' } }),
+    })
+
+    expect(rename).not.toHaveBeenCalled()
+    expect(result.errors).toEqual([
+      { fileId: 'file-1', message: 'impossible de replacer « a.zmap » : « Chimie/a.zmap » existe déjà' },
+    ])
+  })
+
   it.each(['../evil.zmap', '/evil.zmap', 'C:/evil.zmap'])(
     'refuses to relocate to the unsafe remote path « %s » rather than escaping the sync folder',
     async unsafePath => {
@@ -964,18 +1023,36 @@ describe('sync — reconciliation des chemins', () => {
     expect(state.servers['https://pb.test'].entries['file-1'].lastSyncedPath).toBe('a.zmap')
   })
 
-  it('leaves everything alone when the sync folder itself changed', async () => {
+  it('applies the server’s relative layout after the sync folder itself changed', async () => {
+    // Un changement de racine n'est PAS « on ne touche à rien » : il n'amarre
+    // `lastSyncedPath` sur le chemin LOCAL que pour une entrée dont le chemin est
+    // INCONNU (une entrée migrée). La comparaison ordinaire s'ensuit, et quand le
+    // serveur est ailleurs, c'est son rangement relatif qui gagne — l'inverse
+    // réécrirait tous les chemins distants depuis un simple réglage local.
+    //
+    // Le décor a un VRAI enregistrement distant dont le chemin diffère du chemin
+    // relatif local : sans lui, `reconcilePath` répond « rien à faire » quoi que
+    // calcule `rootChanged`, et ce test passerait contre un code qui l'ignore.
     vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/autre/a.zmap' }])
     vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
-    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([]) } as any })
-
-    await runSync({
-      client,
-      syncFolderPath: '/autre',
-      state: { version: 2, servers: { 'https://pb.test': { syncFolderPath: '/cours', entries: { 'file-1': { lastSyncedModified: 'm0', lastSyncedUpdated: 'u0', lastSyncedPath: 'a.zmap' } }, tombstones: [] } } },
+    const client = fakeClient({
+      mindMaps: {
+        getFullList: vi.fn().mockResolvedValue([
+          { id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'Chimie/a.zmap', content: JSON.stringify({ cards: [] }), updated: 'u1' },
+        ]),
+      } as any,
     })
 
-    expect(rename).not.toHaveBeenCalled()
+    const result = await runSync({
+      client,
+      syncFolderPath: '/autre',
+      // Entrée SANS `lastSyncedPath` : c'est là, et seulement là, que la racine
+      // mémorisée décide de l'amarrage.
+      state: { version: 2, servers: { 'https://pb.test': { syncFolderPath: '/cours', entries: { 'file-1': { lastSyncedModified: 'm0', lastSyncedUpdated: 'u0' } }, tombstones: [] } } },
+    })
+
+    expect(rename).toHaveBeenCalledWith('/autre/a.zmap', '/autre/Chimie/a.zmap')
+    expect(result.relocated).toBe(1)
   })
 
   it('repairs a path the pre-v2 versions left stale, on the first sync after the migration', async () => {
@@ -1087,7 +1164,7 @@ describe('sync — push par champ', () => {
     expect(state.servers['https://pb.test'].entries['file-2'].lastSyncedModified).toBe('m-eleve')
   })
 
-  it('refuses to push the path of an eleve s map when the account is an eleve', async () => {
+  it('refuses an eleve the path of the prof s map when they moved it locally', async () => {
     vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'Chimie/b.zmap', path: '/cours/Chimie/b.zmap' }])
     vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, id: 'file-2', author: 'aife' })
     const update = vi.fn()

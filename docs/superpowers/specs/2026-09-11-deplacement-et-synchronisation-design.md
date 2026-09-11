@@ -156,10 +156,23 @@ serveur n'est pas un ornement : c'est ce qui rend l'inférence sûre.
 sync. Changer de dossier de synchronisation rendrait tous les chemins faux d'un
 coup, et la lecture naïve en conclurait « tous les chemins ont bougé » → le sync
 réécrirait **tous** les chemins distants pour suivre le nouveau rangement local.
-Sur un changement de racine, on **réamorce `lastSyncedPath` depuis le chemin
-local, sans rien pousser ni relocaliser**, et on le journalise. La comparaison
-de contenu (`lastSyncedModified` / `lastSyncedUpdated`) reste valable : elle ne
-dépend pas des chemins.
+C'est pourquoi une entrée dont le chemin est **inconnu** (entrée migrée) est
+réamorcée sur le chemin **local** quand la racine mémorisée a changé, là où une
+racine présumée inchangée prend le `path` distant : on ne déduit pas un
+déplacement du seul changement de réglage. La comparaison de contenu
+(`lastSyncedModified` / `lastSyncedUpdated`) reste valable : elle ne dépend pas
+des chemins.
+
+Ce réamorçage n'est pas « il ne se passe rien ». La réconciliation ordinaire
+s'ensuit, et quand un enregistrement distant existe à un autre chemin, **le
+rangement relatif du serveur l'emporte** : le fichier local est relocalisé sous
+la nouvelle racine. C'est délibéré — l'inverse (« le rangement local gagne »)
+réécrirait tous les chemins distants depuis un simple changement de réglage
+local, et « ne rien faire » est instable, puisque la base écrite par ce
+réamorçage rendrait la relocalisation vraie au sync suivant. Conséquence
+assumée : une réorganisation locale faite en même temps qu'un changement de
+racine est défaite localement ; elle se répare en redéplaçant le fichier, geste
+qui, lui, est poussé.
 
 **Migration v1 → v2.** L'ancien format est plat
 (`Record<file_id, { lastSyncedModified, lastSyncedUpdated }>`), détecté par
@@ -183,10 +196,11 @@ diffère — c'est la seule ambiguïté que cette section pourrait laisser :
 | `syncFolderPath` mémorisé | Amarrage de `lastSyncedPath` | Pourquoi |
 |---|---|---|
 | absent (`null`, entrée migrée) | le `path` distant s'il existe un enregistrement, sinon le chemin local | racine présumée inchangée : un chemin distant périmé doit être réparé, donc « j'ai bougé » doit être vrai |
-| présent mais **différent** de la racine courante | le chemin local | le rangement local a changé de sens : on ne réécrit pas l'agencement du serveur pour le suivre |
+| présent mais **différent** de la racine courante | le chemin local — pour une entrée dont le chemin est **inconnu** ; une entrée qui en connaît un le garde | le rangement local a changé de sens : on ne réécrit pas l'agencement du serveur pour le suivre |
 
 Dans les deux cas la racine mémorisée est ensuite réécrite avec la racine
-courante.
+courante — et la comparaison qui suit peut relocaliser le fichier (voir
+« Pourquoi mémoriser la racine ») : réamorcer n'est pas « ne rien faire ».
 
 **Les tombstones.** Une tombstone est créée **uniquement par une suppression
 explicite dans l'app**. Jamais déduite d'un fichier local disparu : un disque
@@ -326,6 +340,23 @@ nombre affiché ne puisse pas contredire ce qu'un sync ferait réellement — y
 compris pour un fichier simplement renommé. `surveySyncFolder` reste purement
 local (aucune requête réseau en plus) mais reçoit le rôle en plus du nom
 d'utilisateur.
+
+**Ils lisent la même décision, mais pas sur le même état.** Le compteur lit
+l'état **enregistré** ; la boucle lit l'état après la passe de réconciliation,
+qui amarre `lastSyncedPath` et réécrit la base avant d'en décider. Deux états
+atteignables font donc diverger le nombre affiché et le run qui suit — tous deux
+**connus**, et tous deux réparés par le sync suivant, puisque c'est la
+réconciliation qui les fait disparaître et que son résultat est enregistré :
+
+- **entrée migrée** : le compteur annonce 0 (le chemin est inconnu, donc rien
+  n'est « déplacé ») et le sync en envoie 1 — l'amarrage sur le `path` distant
+  rend le déplacement vrai dans le même passage ;
+- **les deux côtés ont bougé vers le même chemin** : le compteur annonce 1 et le
+  sync en envoie 0 — la réconciliation n'a rien à faire, mais elle réamarre la
+  base sur `remote.path`, après quoi il n'y a plus rien à envoyer.
+
+Aucune requête réseau n'est ajoutée au compteur pour autant : il reste purement
+local, et ces deux écarts d'un run ne justifient pas d'en payer une.
 
 ### Interfaces touchées
 

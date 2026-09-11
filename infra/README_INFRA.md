@@ -59,6 +59,21 @@ devrait avoir, et n'écrit que ce qui diffère. Relancée, elle répond
 « déjà à jour » — c'est aussi le moyen de vérifier un serveur existant.
 `--dry-run` affiche le plan sans rien écrire.
 
+> **Un serveur configuré AVANT l'arrivée du partage d'agencement doit être
+> réappliqué.** La règle `Update`/`Delete` de `cartes_mentales` a changé
+> (`author || prof`) : tant que le script n'a pas été relancé dessus, un prof
+> reçoit un **403** quand il pousse le `path` d'une carte d'élève — son
+> renommage n'atteint jamais le serveur, alors que tout le reste (contenu,
+> tirage, tests, journal) reste vert. Aucune autre étape n'est nécessaire :
+>
+> ```bash
+> bun run infra/setup-pocketbase.mjs --dry-run   # ce qui serait changé
+> bun run infra/setup-pocketbase.mjs             # applique
+> bun run infra/setup-pocketbase.mjs --check     # 0 = conforme
+> ```
+>
+> Idempotent des deux côtés : un serveur déjà à jour ne bouge pas.
+
 Ce qu'elle installe :
 
 | Collection       | Champs                                                              | Règles API                                                                   |

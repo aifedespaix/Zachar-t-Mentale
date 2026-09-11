@@ -3,6 +3,7 @@ import {
   fileNameOf,
   isInsideFolder,
   isMindMapPath,
+  isSameFilePath,
   mindMapBaseName,
   parentDirOf,
   repairedCopyPath,
@@ -32,6 +33,24 @@ describe('isInsideFolder', () => {
     expect(isInsideFolder('C:\\Autre\\a.zmap', 'C:\\Cours')).toBe(false)
     expect(isInsideFolder('', 'C:\\Cours')).toBe(false)
     expect(isInsideFolder('C:\\Cours\\a.zmap', '')).toBe(false)
+  })
+})
+
+describe('isSameFilePath', () => {
+  it('sees one file through a separator change or a case change', () => {
+    expect(isSameFilePath('C:\\Cours\\a.zmap', 'C:/Cours/a.zmap')).toBe(true)
+    expect(isSameFilePath('/cours/chapitre.zmap', '/cours/Chapitre.zmap')).toBe(true)
+    expect(isSameFilePath('C:\\Cours\\a.zmap', 'C:\\Cours\\a.zmap')).toBe(true)
+  })
+
+  it('keeps two different files apart', () => {
+    expect(isSameFilePath('/cours/a.zmap', '/cours/Chimie/a.zmap')).toBe(false)
+    expect(isSameFilePath('/cours/a.zmap', '/cours/b.zmap')).toBe(false)
+  })
+
+  it('never matches on an empty path', () => {
+    expect(isSameFilePath('', '')).toBe(false)
+    expect(isSameFilePath('/cours/a.zmap', '')).toBe(false)
   })
 })
 

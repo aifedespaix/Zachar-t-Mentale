@@ -37,6 +37,7 @@ import { useThemeDomSync } from './hooks/useResolvedTheme'
 import { useAppliedFontFamily } from './hooks/useAppliedFontFamily'
 import { useAppUpdater } from './hooks/useAppUpdater'
 import { useAutoSync } from './hooks/useAutoSync'
+import type { SyncResult } from './sync/syncService'
 import { UpdateReadyBanner } from './components/update/UpdateReadyBanner'
 import { CardDetailPanel } from './components/detail/CardDetailPanel'
 import type { Card, MindMapMeta } from './types/card'
@@ -105,6 +106,55 @@ function App() {
     loadedPath !== null && loadedPath === currentFilePath,
     () => setSaveFailed(true)
   )
+  const syncResult = useSyncStore(s => s.lastResult)
+  /**
+   * The ONE follow-up a sync's relocations get.
+   *
+   * It lives here rather than in the sidebar because a sync has three triggers
+   * — the button, the background timer, the settings panel — and a run that
+   * relocated the open file automatically otherwise left `currentFilePath` on
+   * the old path: `useAutosave`, still armed for that path, recreated the old
+   * file holding the user's newest edits while the synced copy at the new path
+   * went stale. The map was silently split in two, and the tree row left behind
+   * opened as « ce fichier n'existe plus ».
+   *
+   * The order is not cosmetic: `flush` first, because the `loadedPath` change
+   * that follows cancels the debounce — a pending save has to be on disk before
+   * that. Then the pointer. Then the tree, which a pull and a relocation both
+   * leave behind the disk.
+   */
+  const handledSyncResult = useRef<SyncResult | null>(null)
+  useEffect(() => {
+    if (syncResult === null || syncResult === handledSyncResult.current) return
+    handledSyncResult.current = syncResult
+    // Neither a pull nor a relocation: nothing moved on disk, so the tree is
+    // current and there is nobody to follow. `?? 0`: the counter is optional in
+    // `SyncResult`, and its readers take it that way.
+    if (syncResult.pulled === 0 && (syncResult.relocated ?? 0) === 0) return
+
+    // The path open when the result came in: THAT file's move is the one that
+    // matters here, not another file's in the same folder.
+    const openPath = useWorkspaceStore.getState().currentFilePath
+    const moved =
+      openPath === null ? undefined : (syncResult.moved ?? []).find(entry => entry.from === openPath)
+
+    void (async () => {
+      try {
+        await flush()
+      } catch {
+        // Already surfaced through `useAutosave`'s own error callback — the
+        // « Erreur de sauvegarde » banner. The open file stays the one edited.
+      }
+      // Re-read as we act: `flush` may have waited, and the user may have
+      // opened something else in the meantime. Dragging them back to the moved
+      // file would be a second surprise.
+      if (moved !== undefined && useWorkspaceStore.getState().currentFilePath === moved.from) {
+        setCurrentFile(moved.to)
+      }
+      const folder = useSyncStore.getState().syncFolderPath
+      if (folder !== null) await refreshFolder(folder)
+    })()
+  }, [syncResult, flush, setCurrentFile, refreshFolder])
   const { requestOpenFile, prompt, dismissPrompt } = useUnsavedChangesGuard(flush, setCurrentFile)
   /**
    * An image dropped on a card is appended to that card's definition.
