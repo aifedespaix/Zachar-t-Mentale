@@ -24,6 +24,7 @@ import { scanFolder } from '../persistence/fileTree'
 import { readAssetBytes, writeAsset } from '../persistence/assets'
 import {
   flattenMindMapPaths,
+  isConflict,
   planPush,
   surveySyncFolder,
   sync,
@@ -146,6 +147,35 @@ describe('planPush', () => {
     expect(
       planPush({ meta: { ...AIFE, author: 'aife' }, relPath: 'Chimie/a.zmap', currentUser: ELEVE_USER, entry: known })
     ).toEqual({ content: false, path: false })
+  })
+})
+
+describe('isConflict', () => {
+  const entry = { lastSyncedModified: 'm1', lastSyncedUpdated: 'u1', lastSyncedContentHash: 'aaaa' }
+  const remote = { id: 'r', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: '{}', updated: 'u2' }
+
+  it('is a conflict when the remote CONTENT changed and so did mine', () => {
+    expect(isConflict({ ...AIFE, lastModified: 'm2' }, entry, remote, 'bbbb')).toBe(true)
+  })
+
+  it('is NOT a conflict when the remote content is the one I already have — a path-only change', () => {
+    // Le prof a déplacé le fichier : `updated` a bougé, le contenu non.
+    expect(isConflict({ ...AIFE, lastModified: 'm2' }, entry, remote, 'aaaa')).toBe(false)
+  })
+
+  it('is not a conflict when I did not touch my copy', () => {
+    expect(isConflict(AIFE, entry, remote, 'bbbb')).toBe(false)
+  })
+
+  it('is not a conflict when there is nothing to disagree with', () => {
+    expect(isConflict({ ...AIFE, lastModified: 'm2' }, undefined, remote, 'bbbb')).toBe(false)
+    expect(isConflict({ ...AIFE, lastModified: 'm2' }, entry, undefined, 'bbbb')).toBe(false)
+  })
+
+  it('falls back to the revision when the hash is unknown, as in a migrated entry', () => {
+    const migrated = { lastSyncedModified: 'm1', lastSyncedUpdated: 'u1' }
+    expect(isConflict({ ...AIFE, lastModified: 'm2' }, migrated, remote, 'bbbb')).toBe(true)
+    expect(isConflict({ ...AIFE, lastModified: 'm2' }, { ...migrated, lastSyncedUpdated: 'u9' }, remote, 'bbbb')).toBe(false)
   })
 })
 

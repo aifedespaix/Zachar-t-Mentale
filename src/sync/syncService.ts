@@ -9,6 +9,7 @@ import type { FileTreeNode } from '../types/workspace'
 import type { MindMapMeta, SyncUser, UserRole } from '../types/card'
 import { serverStateOf, type SyncState, type SyncStateEntry } from '../persistence/syncState'
 import { canReorder } from './permissions'
+import { hashContent } from './contentHash'
 
 export interface RemoteMindMapRecord {
   id: string
@@ -149,25 +150,28 @@ export function planPush(params: {
 }
 
 /**
- * Whether the two sides disagree about a file: the server record moved since
- * the last time we saw it AND our local file moved too.
+ * Si les deux côtés se contredisent sur le CONTENU.
  *
- * That is the one case the fork model cannot rule out — the same account on two
- * machines — and the only safe reaction is to touch nothing: pushing would
- * erase what the other machine sent, pulling would erase the local edit.
+ * La comparaison porte sur l'empreinte du contenu distant, pas sur la seule
+ * révision : une écriture distante qui n'a touché que le `path` (un déplacement
+ * de prof) bumpe `updated` sans rien changer au contenu, et une comparaison de
+ * révisions bloquerait alors l'auteur en « conflit » à chaque sync, pour
+ * toujours. L'égalité des empreintes dit exactement ce qu'on veut savoir :
+ * personne n'a écrit de contenu que je n'aie pas vu.
  *
- * A file we have never pushed (`stateEntry === undefined`) is not a conflict:
- * there is nothing to disagree with.
+ * Une entrée migrée n'a pas d'empreinte : on retombe sur la comparaison de
+ * révisions d'avant, qui reste juste, simplement plus bruyante.
  */
 export function isConflict(
   meta: MindMapMeta,
   stateEntry: SyncStateEntry | undefined,
-  remote: RemoteMindMapRecord | undefined
+  remote: RemoteMindMapRecord | undefined,
+  remoteContentHash: string
 ): remote is RemoteMindMapRecord {
   if (stateEntry === undefined || remote === undefined) return false
-  return (
-    remote.updated > stateEntry.lastSyncedUpdated && meta.lastModified > stateEntry.lastSyncedModified
-  )
+  if (meta.lastModified <= stateEntry.lastSyncedModified) return false
+  if (stateEntry.lastSyncedContentHash === undefined) return remote.updated > stateEntry.lastSyncedUpdated
+  return stateEntry.lastSyncedContentHash !== remoteContentHash
 }
 
 export interface SyncSurvey {
@@ -407,7 +411,7 @@ export async function sync({
     if (!plan.content && !plan.path) return
 
     const remote = remoteByFileId.get(meta.id)
-    if (isConflict(meta, known, remote)) {
+    if (isConflict(meta, known, remote, remote === undefined ? '' : await hashContent(remote.content))) {
       // Reported, never resolved here: both versions hold work someone did.
       result.conflicts.push({
         fileId: meta.id,
