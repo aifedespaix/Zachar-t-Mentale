@@ -62,7 +62,9 @@ import { Button } from './ui/button'
 // as the real DOM node is observed, unlike the fixed `width`/`height` this used
 // to declare). Without it, `fitView` resolves as soon as the first node is
 // measured and ends up framing that node alone, zoomed to maxZoom.
-const NOMINAL_NODE_HEIGHT = 92
+// The card real height: 4 title lines + the centred action row + the
+// minimal paddings (see CardNode TITLE_ZONE_STYLE / ACTION_SLOT_STYLE).
+const NOMINAL_NODE_HEIGHT = 144
 
 // Two chrome-only nodes, laid out in flow coordinates so they pan and zoom with
 // the cards. They are NOT cards: every card lookup filters them out by id.

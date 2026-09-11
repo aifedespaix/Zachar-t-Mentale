@@ -414,6 +414,20 @@ verticale** par rangée, et `computeLayout` est purement géométrique — il ne
 mesure rien. Une carte avec une image dépasse et **recouvre sa voisine**.
 De même horizontalement : `COLUMN_WIDTH = 320` contre
 `EXPORT_CARD_WIDTH = 260`, soit 60 px.
+
+> **Amendement — géométrie des cards.** Les chiffres ci-dessus sont ceux du
+> problème tel qu'il se posait alors. Depuis, la largeur d'une card est
+> passée de 200 à **300 px** et les deux pas de la grille sont **dérivés** de
+> sa boîte dans `layout/cardGeometry.ts` : `COLUMN_WIDTH = CARD_WIDTH × 1,6`
+> (**480 px**, soit une gouttière de 180 px qui reste proportionnelle à la
+> card) et `ROW_HEIGHT = 200` (hauteur de card + les deux boutons « + » qui
+> chevauchent ses bords + la respiration habituelle). L'export, lui, n'a pas
+> bougé : `EXPORT_CARD_WIDTH = 260` et `EXPORT_CARD_HEIGHT = 120`.
+>
+> Corollaire pour le point 2 ci-dessous : la marge verticale par rangée passe
+> de 48 à **56 px** et la marge horizontale entre la colonne et sa boîte
+> d'export de 60 à **220 px**. Le plafond d'export suit tout seul, puisqu'il
+> est calculé à partir de `ROW_HEIGHT`.
 *Traitement v1* : plafonner la hauteur des blocs riches en export (image en
 vignette ~48 px, `overflow: hidden`) — `computeLayout` reste pure et
 intouchée. *Traitement long terme* : un troisième format d'export (voir

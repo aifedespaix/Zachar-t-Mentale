@@ -1,18 +1,27 @@
 import type { Card } from '../types/card'
+import { COLUMN_WIDTH, ROW_HEIGHT } from './cardGeometry'
 
-export const COLUMN_WIDTH = 320
-// A card's actual height (~100px unfolded) plus the sibling "+" buttons
-// CardNode pins straddling its top/bottom edges (each pokes ~14px past the
-// border) leaves almost no clearance at 120: two stacked siblings' buttons
-// visibly overlapped. 168 keeps a clear gap between them even so.
-export const ROW_HEIGHT = 168
+/**
+ * The grid two pitches are DERIVED from the card size in layout/cardGeometry:
+ * the column pitch is the card width times a ratio (so the gutter between two
+ * columns can never shrink relative to the card it separates), and the row
+ * pitch is the card height plus the two floating "+" buttons that straddle its
+ * edges plus a constant breath of air.
+ *
+ * Re-exported here because the layout, the canvas and the export all read them
+ * from this module.
+ */
+export { COLUMN_WIDTH, ROW_HEIGHT }
 
 // The floating-cards ("cartes volantes") zone sits below the tree, as its own
 // grid: detached cards are outside the hierarchy, so they get neither a level
 // column nor a tree row. A full blank row of clearance separates the two so the
 // zone reads as a distinct area rather than as more branches.
 export const DETACHED_ZONE_GAP = ROW_HEIGHT * 1.5
-export const DETACHED_ZONE_COLUMNS = 4
+// 3 rather than 4: the column pitch is now 480 (a 300px card plus its
+// proportional gutter), and four of them would make the floating-cards grid
+// wider than the tree it sits under.
+export const DETACHED_ZONE_COLUMNS = 3
 export const DETACHED_ROW_HEIGHT = ROW_HEIGHT * 0.85
 
 export interface Position {

@@ -48,6 +48,7 @@ import { BlockView } from '../content/BlockView'
 import { stripHighlightMarkers } from '../content/highlight'
 import { assetSrc } from '../persistence/assets'
 import { useWorkspaceStore } from '../state/useWorkspaceStore'
+import { CARD_WIDTH } from '../layout/cardGeometry'
 
 interface QuizData {
   type: QuizQuestionType
@@ -72,37 +73,74 @@ const DISABLED_GREY = '#c0c0c0'
 const EDGE_BUTTON_SIZE = '1.6rem'
 
 /**
- * The card's fixed width, in px.
+ * The card fixed width, in px.
  *
- * Fixed, not content-driven, and that is the whole point (règle anti-décalage
- * 1: a card's footprint never depends on its content). A card used to be sized
+ * Fixed, not content-driven, and that is the whole point (regle anti-decalage
+ * 1: a card footprint never depends on its content). A card used to be sized
  * by its widest child, and its two title states are not the same kind of box:
- * the editor's title is a 2-row `<textarea>` whose intrinsic width comes from
- * `cols` and ignores its value, while the quiz's masked title is a plain
- * `<div>` sized by its text — masked titles are rendered in a wide monospace
- * with extra letter spacing, so a card being quizzed grew to two or three times
- * the width of the same card a moment earlier, pushing everything around it.
+ * the editor title is a textarea whose intrinsic width comes from its cols,
+ * while the quiz masked title is a plain div sized by its own text — rendered
+ * in a wide monospace with extra letter spacing, so a card being quizzed grew
+ * to two or three times the width of the same card a moment earlier, pushing
+ * everything around it.
  *
- * Shared with `MindMapCanvas`, which hands it to React Flow as the
- * pre-measurement fallback.
- */
-export const CARD_WIDTH = 200
+ * The value itself lives in layout/cardGeometry, next to the column pitch it
+ * drives; re-exported here because MindMapCanvas and the tests read it from
+ * this module.
+ */export { CARD_WIDTH }
 
 /**
- * The box the card's title occupies — shared by BOTH of its states, so an
+ * The box the card title occupies — shared by BOTH of its states, so an
  * editing card and a quiz card keep exactly the same size.
  *
- * The quiz variant clamps to two lines for the same reason: the `<textarea>`
- * it stands in for is two rows tall whatever the title's length, so an
+ * What matters is that its HEIGHT is fixed: TITLE_LINES lines of text, whatever
+ * the title length, so the card footprint never depends on its content. The
+ * quiz variant clamps to the same number of lines for the same reason — an
  * unclamped div would let a long masked title make the card taller than the
  * same card while it is being edited. The mask stays fully readable where it
- * matters — the answer dialog's letter boxes.
+ * matters — the answer dialog letter boxes.
+ *//** How many lines of title every card reserves, whatever the title length. */
+export const TITLE_LINES = 4
+const TITLE_LINE_HEIGHT = 1.2
+
+/**
+ * The zone the title is centred in: a fixed TITLE_LINES-line box, the FIRST
+ * thing in the card, right under a deliberately minimal top padding.
+ *
+ * Centring the text inside a box of fixed height is what keeps a one-line
+ * title balanced in a box sized for four, and a four-line title filling it.
+ * overflow: hidden clips a longer title instead of growing the card or showing
+ * a scrollbar: the box owns the height, never the content.
+ *
+ * The height is written in em so it follows the card font size rather than
+ * being a pixel count that would silently drift from TITLE_LINE_HEIGHT.
  */
+const TITLE_ZONE_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  width: "100%",
+  height: `calc(${TITLE_LINES} * ${TITLE_LINE_HEIGHT}em + 0.2rem + 4px)`,
+  overflow: "hidden",
+}
+
+/**
+ * The action row height, and the reason it is a constant: EVERY card renders
+ * the slot, even a quiz card that has nothing to show in it, so all cards keep
+ * exactly the same height whatever state they are in.
+ */
+const ACTION_SLOT_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "0.25rem",
+  height: 28,
+}
+
 const TITLE_BOX_STYLE: CSSProperties = {
   display: 'block',
   width: '100%',
   font: 'inherit',
-  lineHeight: 1.2,
+  lineHeight: TITLE_LINE_HEIGHT,
   padding: '0.1rem 0.3rem',
   margin: '-0.1rem -0.3rem',
   border: '2px solid transparent',
@@ -181,10 +219,9 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
  * The card's one door into its fiche — a fixed-size badge, not a text
  * preview: `règle anti-décalage 1` (a card's footprint never depends on its
  * content) is easier to keep with NO content-dependent sizing at all than
- * with an ellipsed line. Position and colour read as an ACTION (bottom-right,
- * the card's own level colour), distinct from the emoji identity badge
- * (top-right, inset) and from the ghost footer row (Détacher/Retourner/
- * Supprimer) it sits just outside of.
+ * with an ellipsed line.  * Position and colour read as an ACTION (bottom-right, the card own level
+ * colour), the counterpart of the identity icon now sitting in the card
+ * bottom-left corner and distinct from the action row centred above it.
  *
  * On an editable map it always opens the EDITOR, filled or empty. Reading no
  * longer needs it — clicking the card itself shows the definition in the right
@@ -248,8 +285,8 @@ function FicheBadge({
           }}
           style={{
             position: 'absolute',
-            bottom: -9,
-            right: -9,
+            bottom: 6,
+            right: 6,
             width: 24,
             height: 24,
             borderRadius: '9999px',
@@ -257,12 +294,12 @@ function FicheBadge({
             alignItems: 'center',
             justifyContent: 'center',
             border: `1.5px solid ${borderColor}`,
-            // Always fully opaque: this badge straddles the card's own
-            // border (bottom/right: -9), so a translucent background (the
-            // old `opacity: hasContent ? 1 : 0.55` applied to the whole
-            // button) let that border show through underneath it. The
-            // "not filled in yet" cue now lives in the icon choice and the
-            // dimmer icon below, not in the badge's own transparency.
+                        // Always fully opaque: the badge used to be translucent so an
+            // unfilled card looked unfilled, but it also straddled the
+            // card border (bottom/right: -9), which a translucent
+            // background let show through. It now sits inside the corner,
+            // and the "not filled in yet" cue lives in the icon choice and
+            // the dimmer icon below.
             background: 'var(--background)',
             color: borderColor,
             boxShadow: hasContent ? '0 1px 3px rgba(0, 0, 0, 0.15)' : 'none',
@@ -504,6 +541,23 @@ export function CardNode({ data }: CardNodeProps) {
     if (titleFocused) titleInputRef.current?.select()
   }, [titleFocused])
 
+  /**
+   * The title field is autosized to its own content, which is what lets the
+   * fixed-height zone above centre it: a one-line title is drawn as one line
+   * and vertically centred, a four-line title fills the box, and nothing in
+   * between can change the card height.
+   *
+   * jsdom reports every box as zero-sized, so the guard keeps the measurement
+   * from writing a 0px height in tests.
+   */
+  useEffect(() => {
+    const el = titleInputRef.current
+    if (!el) return
+    el.style.height = "auto"
+    const next = el.scrollHeight + (el.offsetHeight - el.clientHeight)
+    if (next > 0) el.style.height = `${next}px`
+  }, [card.title, draftTitle, titleFocused])
+
   // Escape triggers a real DOM blur() synchronously, which fires `onBlur`
   // (commitTitle) before React has flushed the `setDraftTitle` queued just
   // above it — so commitTitle would still see the pre-Escape draft, not the
@@ -628,19 +682,22 @@ export function CardNode({ data }: CardNodeProps) {
         border: isDetached ? '2px dashed' : '2px solid',
         borderColor: resultBorderColor ?? (isPending ? 'var(--quiz-pending-border)' : toCss(colors.border)),
         borderRadius: 8,
-        // Room for the pinned edge buttons: the drag handle and the delete `x`
-        // sit in the top corners, the `->` on the right edge.
-        padding: '22px 26px 14px 22px',
-        // A fixed width, never content-driven — see `CARD_WIDTH`: the editor's
-        // title is a 2-row textarea and the quiz's is a masked div, and only a
+        // The floating "+" buttons straddle this card top and bottom edges by
+        // 0.85rem, and the drag handle sits inside the top-left corner (4px of
+        // offset + its 14px glyph). The paddings below are exactly the room
+        // those need and nothing more: every extra pixel here is a pixel taken
+        // from the title, and keeping them independent of the locked state is
+        // what makes a card footprint independent of its state.
+        padding: "14px 18px",
+        // A fixed width, never content-driven — see CARD_WIDTH: the editor
+        // title is a textarea and the quiz one is a masked div, and only a
         // width the card owns keeps the two the same size.
         width: CARD_WIDTH,
-        minHeight: 92,
         boxSizing: 'border-box',
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem',
+        gap: 4,
         // React Flow's own stylesheet puts a grab cursor on the whole
         // `.draggable` node (it only RESTRICTS the drag gesture to
         // `.card-drag-handle`, it does not restyle the rest of the node) —
@@ -691,8 +748,8 @@ export function CardNode({ data }: CardNodeProps) {
         <GripVertical size={14} />
       </span>
 
-      {/*
-        The mnemonic icon, pinned to the card's top-right corner.
+            {/*
+        The mnemonic icon, pinned to the card BOTTOM-LEFT corner.
 
         Three states in one slot: a card that HAS an icon always shows it —
         including while locked and during a quiz, where the picture is exactly
@@ -700,6 +757,10 @@ export function CardNode({ data }: CardNodeProps) {
         clickable (to change or remove it) when the map is editable. A card
         with no icon shows a faint placeholder instead, and only while editing:
         an empty affordance is clutter on a locked map and noise during a quiz.
+
+        It is the counterpart of the description badge in the opposite corner:
+        the two badges share the card bottom edge, clear of both the title zone
+        and the action row centred under it.
       */}
       {iconSlotInteractive ? (
         <TooltipProvider>
@@ -715,8 +776,8 @@ export function CardNode({ data }: CardNodeProps) {
                 }}
                 style={{
                   position: 'absolute',
-                  top: 4,
-                  right: 4,
+                  bottom: 6,
+                  left: 6,
                   display: 'flex',
                   padding: 0,
                   border: 'none',
@@ -736,7 +797,7 @@ export function CardNode({ data }: CardNodeProps) {
         </TooltipProvider>
       ) : (
         card.icon !== undefined && (
-          <span style={{ position: 'absolute', top: 4, right: 4, lineHeight: 0 }}>
+          <span style={{ position: 'absolute', bottom: 6, left: 6, lineHeight: 0 }}>
             <CardIconBadge name={card.icon} border={colors.border} theme={theme} />
           </span>
         )
@@ -808,100 +869,85 @@ export function CardNode({ data }: CardNodeProps) {
         answer dialog, and an editable-looking field there only invited people
         to type into a card that would never grade what they wrote.
       */}
-      {quiz ? (
-        <div
-          data-testid="quiz-title"
-          style={{
-            ...TITLE_BOX_STYLE,
-            // Two lines, like the textarea this stands in for — see
-            // `TITLE_BOX_STYLE`. `-webkit-line-clamp` is what Chromium (and
-            // therefore the Tauri WebView) uses for a multi-line ellipsis.
-            display: '-webkit-box',
-            WebkitBoxOrient: 'vertical',
-            WebkitLineClamp: 2,
-            overflow: 'hidden',
-            fontFamily: displayMasked ? 'ui-monospace, monospace' : 'inherit',
-            letterSpacing: displayMasked ? '0.12em' : undefined,
-            fontWeight: displayMasked ? 700 : 'inherit',
-            // Not muted: the blank is the thing to look at on this card, and a
-            // greyed-out placeholder read as "disabled" rather than "your turn".
-            color: 'inherit',
-            wordBreak: 'break-word',
-          }}
-        >
-          {displayMasked ? (blankPreview ?? '? ? ?') : card.title}
-        </div>
-      ) : (
-        <FlipCard
-          flipped={flipped}
-          front={
-            <textarea
-              ref={titleInputRef}
-              aria-label="Titre"
-              rows={2}
-              readOnly={locked}
-              value={titleFocused ? draftTitle : card.title}
-              onFocus={handleTitleFocus}
-              onChange={e => setDraftTitle(e.target.value)}
-              onBlur={commitTitle}
-              // Stops the right-click from reaching the canvas's context menu
-              // (MindMapCanvas.tsx wraps the whole ReactFlow surface in one),
-              // so a right-click here still opens the WebView's native
-              // Cut/Copy/Paste menu instead of "Créer une carte volante".
-              onContextMenu={e => e.stopPropagation()}
-              onKeyDown={e => {
-                // The title has no manual line breaks — it wraps by width alone,
-                // same as the export's plain block text — so Enter still commits
-                // instead of inserting a newline.
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  titleInputRef.current?.blur()
-                }
-                if (e.key === 'Escape') cancelTitle()
-              }}
-              style={{
-                ...TITLE_BOX_STYLE,
-                resize: 'none',
-                color: 'inherit',
-                background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
-                border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
-                outline: 'none',
-                cursor: 'text',
-                transition: 'background 0.15s ease, border-color 0.15s ease',
-              }}
-            />
-          }
-          back={
-            <div
-              style={{
-                width: '100%',
-                height: '100%',
-                minHeight: '1.4rem',
-                borderRadius: 4,
-                background: toCss(colors.border),
-              }}
-            />
-          }
-        />
-      )}
+      <div data-testid="title-zone" style={TITLE_ZONE_STYLE}>
+        {quiz ? (
+          <div
+            data-testid="quiz-title"
+            style={{
+              ...TITLE_BOX_STYLE,
+              // The same TITLE_LINES lines the textarea stands in for — see
+              // TITLE_ZONE_STYLE. -webkit-line-clamp is what Chromium (and
+              // therefore the Tauri WebView) uses for a multi-line ellipsis.
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: TITLE_LINES,
+              overflow: 'hidden',
+              fontFamily: displayMasked ? 'ui-monospace, monospace' : 'inherit',
+              letterSpacing: displayMasked ? '0.12em' : undefined,
+              fontWeight: displayMasked ? 700 : 'inherit',
+              // Not muted: the blank is the thing to look at on this card, and a
+              // greyed-out placeholder read as "disabled" rather than "your turn".
+              color: 'inherit',
+              wordBreak: 'break-word',
+            }}
+          >
+            {displayMasked ? (blankPreview ?? '? ? ?') : card.title}
+          </div>
+        ) : (
+          <FlipCard
+            flipped={flipped}
+            front={
+              <textarea
+                ref={titleInputRef}
+                aria-label="Titre"
+                rows={1}
+                readOnly={locked}
+                value={titleFocused ? draftTitle : card.title}
+                onFocus={handleTitleFocus}
+                onChange={e => setDraftTitle(e.target.value)}
+                onBlur={commitTitle}
+                // Stops the right-click from reaching the canvas's context menu
+                // (MindMapCanvas.tsx wraps the whole ReactFlow surface in one),
+                // so a right-click here still opens the WebView's native
+                // Cut/Copy/Paste menu instead of "Créer une carte volante".
+                onContextMenu={e => e.stopPropagation()}
+                onKeyDown={e => {
+                  // The title has no manual line breaks — it wraps by width alone,
+                  // same as the export's plain block text — so Enter still commits
+                  // instead of inserting a newline.
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    titleInputRef.current?.blur()
+                  }
+                  if (e.key === 'Escape') cancelTitle()
+                }}
+                style={{
+                  ...TITLE_BOX_STYLE,
+                  resize: 'none',
+                  color: 'inherit',
+                  background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+                  border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
+                  outline: 'none',
+                  cursor: 'text',
+                  transition: 'background 0.15s ease, border-color 0.15s ease',
+                }}
+              />
+            }
+            back={
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  minHeight: '1.4rem',
+                  borderRadius: 4,
+                  background: toCss(colors.border),
+                }}
+              />
+            }
+          />
+        )}
+      </div>
 
-      {/* The card's own answer button, rather than one more icon in the footer
-          row: on a card that is waiting for you, "répondre" is the only thing
-          there is to do, and it should look like it. */}
-      {isPending && (
-        <Button
-          size="sm"
-          data-testid="answer-button"
-          onClick={event => {
-            event.stopPropagation()
-            setAnswerOpen(true)
-          }}
-          style={{ width: '100%', marginTop: 2 }}
-        >
-          {quiz?.type === 'recall' ? <PenLine /> : <ListChecks />}
-          Répondre
-        </Button>
-      )}
 
       {/* A quiz card that has been answered keeps its verdict visible: the
           border alone is easy to miss at a glance across a whole map. */}
@@ -1016,13 +1062,33 @@ export function CardNode({ data }: CardNodeProps) {
         question is exactly the clutter that made it unclear what the card
         wanted. What remains is the question and the way to answer it.
       */}
-      {!quizActive && (
+            {(quizActive || isPending) ? (
+        /* The action slot, rendered on every card as soon as a quiz is on, so
+           a card that has already been answered keeps the same height as one
+           that is still asking. */
+        <div className="card-footer" style={ACTION_SLOT_STYLE}>
+          {isPending && (
+            <Button
+              size="sm"
+              data-testid="answer-button"
+              onClick={event => {
+                event.stopPropagation()
+                setAnswerOpen(true)
+              }}
+            >
+              {quiz?.type === 'recall' ? <PenLine /> : <ListChecks />}
+              Répondre
+            </Button>
+          )}
+        </div>
+      ) : (
       <TooltipProvider>
         <FicheBadge card={card} locked={locked} active={ficheOpen} borderColor={toCss(colors.border)} onActivate={openDescription} />
 
-        {/* `margin-top: auto` in the card's flex column keeps this pinned to
-            the bottom of the card regardless of title length. */}
-        <div className="card-footer" style={{ display: 'flex', gap: '0.25rem', marginTop: 'auto' }}>
+        {/* Centred under the title zone, not pinned to the bottom of the card:
+          the badges own the bottom corners, and a fixed-height slot is
+          what keeps every card the same height whatever it holds. */}
+        <div className="card-footer" style={ACTION_SLOT_STYLE}>
           {canDetach && (
             <Tooltip>
               <TooltipTrigger asChild>

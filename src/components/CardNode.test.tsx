@@ -1142,17 +1142,68 @@ describe('CardNode size', () => {
     expect(screen.getByTestId(`card-${longTitled.id}`).style.width).toBe(edited)
   })
 
-  it('clamps the masked title to the two lines the title field occupies', () => {
+  it('clamps the masked title to the four lines the title zone reserves', () => {
     renderCardNode(longTitled, false, false, { type: 'recall', result: 'unanswered' })
 
     const title = screen.getByTestId('quiz-title')
-    // Two lines, like the textarea this stands in for — see `TITLE_BOX_STYLE`.
-    expect(title).toHaveStyle({ WebkitLineClamp: '2', overflow: 'hidden' })
+    // The same TITLE_LINES lines the textarea stands in for — see
+    // `TITLE_ZONE_STYLE`.
+    expect(title).toHaveStyle({ WebkitLineClamp: '4', overflow: 'hidden' })
     // Same box metrics as the textarea it stands in for. Read off the element's
     // own style rather than through `toHaveStyle`: jsdom's computed style does
     // not resolve a percentage width.
     expect(title.style.width).toBe('100%')
     expect(title.style.lineHeight).toBe('1.2')
+  })
+
+  it('centres the title in a fixed four-line zone, so no title length can resize the card', () => {
+    renderCardNode(testCard)
+
+    const zone = screen.getByTestId('title-zone')
+    expect(zone.style.display).toBe('flex')
+    expect(zone.style.alignItems).toBe('center')
+    // 4 lines x 1.2 line-height, plus the title box's own padding and border.
+    // jsdom re-serialises the calc, so assert the line box it contains.
+    expect(zone.style.height).toContain('4.8em')
+    expect(zone.style.overflow).toBe('hidden')
+  })
+
+  it('renders the title field one row tall, so the zone can centre it', () => {
+    renderCardNode(testCard)
+
+    expect(screen.getByRole('textbox', { name: /titre/i }).getAttribute('rows')).toBe('1')
+  })
+
+  it('centres the action row under the title instead of pinning it to the bottom', () => {
+    renderCardNode(testCard)
+
+    const row = screen.getByTestId('card-' + testCard.id).querySelector('.card-footer') as HTMLElement
+    expect(row.style.justifyContent).toBe('center')
+    expect(row.style.height).toBe('28px')
+    expect(row.style.marginTop).toBe('')
+  })
+
+  it('keeps the mnemonic icon in the bottom-left corner and the description badge in the bottom-right', () => {
+    renderCardNode(testCard)
+
+    const icon = screen.getByTestId('card-icon-button')
+    expect(icon.style.bottom).toBe('6px')
+    expect(icon.style.left).toBe('6px')
+    expect(icon.style.top).toBe('')
+
+    const fiche = screen.getByRole('button', { name: /description/i })
+    expect(fiche.style.bottom).toBe('6px')
+    expect(fiche.style.right).toBe('6px')
+  })
+
+  it('gives the card the paddings the floating buttons and the drag handle need, and nothing more', () => {
+    renderCardNode(testCard)
+
+    const card = screen.getByTestId('card-' + testCard.id)
+    expect(card.style.width).toBe(CARD_WIDTH + 'px')
+    // 14px top/bottom: the two "+" buttons straddle a border by 13.6px.
+    // 18px left/right: the drag handle sits at 4px and is 14px wide.
+    expect(card.style.padding).toBe('14px 18px')
   })
 })
 
