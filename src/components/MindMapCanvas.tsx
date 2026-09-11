@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
+  MiniMap,
+  Panel,
   useNodesState,
   useOnSelectionChange,
   useReactFlow,
@@ -21,14 +22,16 @@ import {
   Download,
   X,
   ClipboardPaste,
-  Maximize,
+  Expand,
   ZoomIn,
   ZoomOut,
   Scan,
   Home,
 } from 'lucide-react'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent } from './ui/context-menu'
+import { CommandButton } from './commands/CommandButton'
 import { CommandMenuItem } from './commands/CommandMenuItem'
+import { TooltipProvider } from './ui/tooltip'
 import { useCanvasCommands } from '../hooks/useCanvasCommands'
 import { useCardSelectionStore } from '../state/useCardSelectionStore'
 import { useWorkspaceStore } from '../state/useWorkspaceStore'
@@ -44,7 +47,7 @@ import { computeLayout, type Position } from '../layout/columns'
 import { isFullyVisible } from '../layout/visibility'
 import { canMoveCardTo, overflowingCardCount, subtreeDepths } from '../state/cardsReducer'
 import { CardNode, CARD_WIDTH } from './CardNode'
-import { clampCardLevel } from '../colors/levelColors'
+import { clampCardLevel, detachedColors, levelColor } from '../colors/levelColors'
 import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../hooks/useResolvedTheme'
 import { toCss } from '../colors/contrast'
@@ -364,6 +367,22 @@ function MindMapCanvasInner() {
       })
     },
     [layout, setCenter, getZoom]
+  )
+
+  /**
+   * Clicking a card in the minimap brings it to the middle of the viewport,
+   * through the same focusCard the keyboard navigation uses.
+   *
+   * A minimap is a map, not just a scrollbar: it shows WHERE things are, so the
+   * gesture it affords is "take me there". The zone caption is not a card and
+   * is ignored — it is furniture, not a destination.
+   */
+  const handleMinimapNodeClick = useCallback(
+    (_event: ReactMouseEvent, node: Node) => {
+      const card = node.data?.card as Card | undefined
+      if (card !== undefined) focusCard(card.id)
+    },
+    [focusCard]
   )
 
   /**
@@ -705,7 +724,51 @@ function MindMapCanvasInner() {
               colorMode={theme}
             >
               <Background />
-              <Controls showInteractive={false} />
+              {/*
+                The viewport dock: the four view commands most people reach
+                for, stacked directly over the minimap in the bottom-right
+                corner. They live in ONE anchored widget rather than two
+                floating ones, so the buttons can never drift away from the
+                minimap they belong to.
+
+                Each button runs the same command as its keyboard shortcut and
+                its context-menu entry (see useCanvasCommands), so the tooltip
+                teaches the key and stays truthful after a rebind.
+              */}
+              <TooltipProvider>
+                <Panel position="bottom-right" className="viewport-dock">
+                  <div className="viewport-dock__buttons" role="group" aria-label="Contrôles de vue">
+                    <CommandButton command="view.zoomIn" icon={ZoomIn} variant="ghost" />
+                    <CommandButton command="view.zoomOut" icon={ZoomOut} variant="ghost" />
+                    <CommandButton command="view.zoomReset" icon={Scan} variant="ghost" />
+                    <CommandButton command="view.fitView" icon={Expand} variant="ghost" />
+                  </div>
+                  {/*
+                    Placed inside our own Panel, so the minimap drops React
+                    Flow's own absolute positioning and flows under the buttons
+                    as a single block. Its width/height are also what the
+                    library measures its SVG against.
+
+                    - pannable: dragging inside the map moves the viewport,
+                      which is the gesture that makes it a map.
+                    - zoomable: the wheel zooms around the pointer.
+                    - nodeColor: the map's own level palette, so the overview
+                      is a recognisable miniature of the canvas.
+                    - onNodeClick: take me to that card.
+                  */}
+                  <MiniMap
+                    className="viewport-dock__minimap"
+                    style={{ position: 'static', margin: 0, width: 200, height: 130 }}
+                    pannable
+                    zoomable
+                    nodeColor={node => minimapNodeColor(node, theme)}
+                    nodeStrokeColor="transparent"
+                    nodeBorderRadius={3}
+                    ariaLabel="Aperçu de la carte — glissez pour déplacer la vue, molette pour zoomer"
+                    onNodeClick={handleMinimapNodeClick}
+                  />
+                </Panel>
+              </TooltipProvider>
             </ReactFlow>
           </div>
         </ContextMenuTrigger>
@@ -726,7 +789,7 @@ function MindMapCanvasInner() {
           <CommandMenuItem command="edit.undo" icon={Undo2} />
           <CommandMenuItem command="edit.redo" icon={Redo2} />
           <ContextMenuSeparator />
-          <CommandMenuItem command="view.fitView" icon={Maximize} />
+          <CommandMenuItem command="view.fitView" icon={Expand} />
           <CommandMenuItem command="nav.root" icon={Home} />
           <ContextMenuSub>
             <ContextMenuSubTrigger>
@@ -811,6 +874,22 @@ function sameDropTarget(a: DropTarget | null, b: DropTarget | null): boolean {
     return a.parentId === b.parentId && a.index === b.index && a.anchorId === b.anchorId && a.side === b.side
   }
   return false
+}
+
+/**
+ * The colour a node gets in the minimap.
+ *
+ * A card keeps the colour it has on the canvas — its level palette, or the
+ * achromatic one once it goes floating — so the overview preserves the map's
+ * own geography instead of collapsing it into a field of identical grey
+ * rectangles. Anything that is not a card (today, only the floating-zone
+ * caption) is muted, so it reads as furniture rather than a destination.
+ */
+export function minimapNodeColor(node: Node, theme: 'light' | 'dark'): string {
+  const card = node.data?.card as Card | undefined
+  if (card === undefined) return 'var(--muted-foreground)'
+  const colors = card.detached === true ? detachedColors[theme] : levelColor(card.level, theme)
+  return toCss(colors.border)
 }
 
 export function MindMapCanvas() {

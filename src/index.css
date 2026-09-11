@@ -256,6 +256,81 @@
 }
 
 /*
+ * The view dock in the bottom-right corner: the zoom / 100 % / fit commands
+ * stacked directly over the minimap. They are one flex column, so the buttons
+ * always sit exactly above the map whatever its height, rather than two
+ * independently placed panels that can drift apart or overlap.
+ */
+.viewport-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* The button group is a single object — one border, one shadow, one radius —
+   so it reads as a control cluster and not as four loose icons floating over
+   the canvas. */
+.viewport-dock__buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 6px 16px -8px oklch(0 0 0 / 45%);
+}
+
+/* The minimap wears the app palette instead of React Flow's defaults: same
+   surface, hairline border, radius and shadow as the button group above it,
+   so the two halves of the dock read as one widget. The mask is the part of
+   the map outside the viewport — a translucent wash that turns the framed
+   area into the visible window onto the map. */
+.viewport-dock__minimap {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 6px 16px -8px oklch(0 0 0 / 45%);
+  --xy-minimap-background-color: var(--card);
+  --xy-minimap-mask-background-color: color-mix(in oklch, var(--background), transparent 35%);
+  --xy-minimap-node-stroke-color: transparent;
+}
+
+/*
+ * Buttons and map both sit back until you reach for them: at 70 % they let the
+ * cards underneath show through while staying legible at a glance, and each
+ * half comes to full strength on its own hover — so only what you are pointing
+ * at comes forward, and the control you are using is always the crisp one.
+ *
+ * The buttons also light up on keyboard focus: a tabbed-to control must never
+ * be the faint one.
+ */
+.viewport-dock__buttons,
+.viewport-dock__minimap {
+  opacity: 0.7;
+  transition: opacity 160ms ease;
+}
+.viewport-dock__buttons:hover,
+.viewport-dock__buttons:focus-within,
+.viewport-dock__minimap:hover {
+  opacity: 1;
+}
+
+/*
+ * Touch has no hover to bring them back, so a faded dock would stay washed
+ * out for the whole session: keep it solid where hovering does not exist.
+ */
+@media (hover: none) {
+  .viewport-dock__buttons,
+  .viewport-dock__minimap {
+    opacity: 1;
+    transition: none;
+  }
+}
+
+/*
  * The card currently under the dragged one (a valid reparent target — see
  * MindMapCanvas' `resolveReparentTarget`) gets a pulsing accent ring, deliberately
  * NOT one of the four level colors so it reads as "drop here" regardless of

@@ -5,6 +5,7 @@ import {
   MindMapCanvas,
   carryMeasured,
   findNewlyCreatedCardId,
+  minimapNodeColor,
   overflowWarningMessage,
   resolveDropTarget,
 } from './MindMapCanvas'
@@ -12,6 +13,9 @@ import { useCardsStore } from '../state/useCardsStore'
 import { useWorkspaceStore } from '../state/useWorkspaceStore'
 import { useQuizStore, createQuizStore } from '../state/useQuizStore'
 import { useCardSelectionStore } from '../state/useCardSelectionStore'
+import { levelColor, detachedColors } from '../colors/levelColors'
+import { toCss } from '../colors/contrast'
+import type { Node } from '@xyflow/react'
 import type { Card } from '../types/card'
 
 // Spy on setCenter without disturbing any other @xyflow/react behavior —
@@ -19,11 +23,12 @@ import type { Card } from '../types/card'
 // only the `setCenter` returned by useReactFlow is swapped for a mock so
 // auto-focus calls can be asserted directly.
 const mockSetCenter = vi.fn()
+const mockFitView = vi.fn()
 vi.mock('@xyflow/react', async importOriginal => {
   const actual = await importOriginal<typeof import('@xyflow/react')>()
   return {
     ...actual,
-    useReactFlow: () => ({ ...actual.useReactFlow(), setCenter: mockSetCenter }),
+    useReactFlow: () => ({ ...actual.useReactFlow(), setCenter: mockSetCenter, fitView: mockFitView }),
   }
 })
 
@@ -80,6 +85,72 @@ describe('MindMapCanvas', () => {
     expect(container.querySelectorAll('.react-flow__edge')).toHaveLength(1)
     act(() => useCardsStore.getState().toggleLock())
     expect(container.querySelectorAll('.react-flow__edge')).toHaveLength(1)
+  })
+})
+
+describe('MindMapCanvas — dock de vue et minimap', () => {
+  beforeEach(() => {
+    useCardsStore.getState().loadCards([root, child])
+    mockSetCenter.mockClear()
+    mockFitView.mockClear()
+  })
+
+  it('regroupe les quatre commandes de vue et la minimap dans un même dock', () => {
+    render(<MindMapCanvas />)
+
+    const minimap = screen.getByTestId('rf__minimap')
+    const dock = minimap.closest('.viewport-dock')
+    expect(dock).not.toBeNull()
+
+    for (const name of ['Zoom avant', 'Zoom arrière', 'Zoom 100 %', 'Ajuster à l’écran']) {
+      expect(within(dock as HTMLElement).getByRole('button', { name })).toBeInTheDocument()
+    }
+  })
+
+  it('lance la commande « ajuster à l’écran » depuis le dock', async () => {
+    const user = userEvent.setup()
+    render(<MindMapCanvas />)
+
+    await user.click(screen.getByRole('button', { name: 'Ajuster à l’écran' }))
+
+    expect(mockFitView).toHaveBeenCalledTimes(1)
+  })
+
+  it('donne à la minimap un nom accessible en français', () => {
+    render(<MindMapCanvas />)
+
+    expect(screen.getByRole('img', { name: /aperçu de la carte/i })).toBeInTheDocument()
+  })
+
+  it('recentre la vue sur la carte cliquée dans la minimap', () => {
+    const { container } = render(<MindMapCanvas />)
+
+    const minimapNodes = container.querySelectorAll('.react-flow__minimap-node')
+    expect(minimapNodes.length).toBeGreaterThan(0)
+
+    fireEvent.click(minimapNodes[0])
+
+    expect(mockSetCenter).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('minimapNodeColor', () => {
+  const nodeFor = (card: Card): Node =>
+    ({ id: card.id, position: { x: 0, y: 0 }, data: { card } }) as Node
+
+  it('peint une carte de sa couleur de niveau', () => {
+    const level3: Card = { id: 'l3', level: 3, title: 'B', parentId: 'root', order: 0 }
+    expect(minimapNodeColor(nodeFor(level3), 'light')).toBe(toCss(levelColor(3, 'light').border))
+  })
+
+  it('peint une carte volante avec la couleur détachée, pas son ancien niveau', () => {
+    const floating: Card = { id: 'f', level: 3, title: 'F', parentId: null, order: 0, detached: true }
+    expect(minimapNodeColor(nodeFor(floating), 'dark')).toBe(toCss(detachedColors.dark.border))
+  })
+
+  it('donne une teinte muette à un nœud qui n’est pas une carte', () => {
+    const zoneLabel = { id: 'zone', position: { x: 0, y: 0 }, data: { label: 'Cartes volantes' } } as Node
+    expect(minimapNodeColor(zoneLabel, 'light')).toBe('var(--muted-foreground)')
   })
 })
 
