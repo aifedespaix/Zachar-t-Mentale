@@ -1,19 +1,15 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type PocketBase from 'pocketbase'
-import type { UserRole } from '../types/card'
+import type { UserRole, SyncUser } from '../types/card'
 import { DEFAULT_SYNC_SETTINGS, type SyncSettings } from '../types/syncSettings'
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
-import { loadSyncState, saveSyncState } from '../persistence/syncState'
+import { loadServerSyncState, saveSyncState, serverStateOf } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { logSyncEvent } from '../persistence/syncLog'
 import { createSyncClient } from '../sync/pocketBaseAdapter'
 import { surveySyncFolder, sync, type SyncResult } from '../sync/syncService'
 import { syncResultLabel } from '../sync/syncResultLabel'
-import type { SyncUser } from '../types/card'
-// Réexporté : c'est ici que le reste de l'app l'importait, et le type vit
-// désormais avec `MindMapMeta` pour que la permission ne dépende d'aucun store.
-export type { SyncUser }
 
 /** Who asked for a run: only a background one is allowed to stay quiet about a failure. */
 export type SyncTrigger = 'manual' | 'auto'
@@ -253,11 +249,11 @@ export function createSyncStore(): SyncStore {
           return
         }
         try {
-          const state = await loadSyncState()
+          const state = await loadServerSyncState(get().serverUrl, syncFolderPath)
           const survey = await surveySyncFolder({
             syncFolderPath,
             currentUser: currentUser.username,
-            state,
+            entries: serverStateOf(state, get().serverUrl, syncFolderPath).entries,
           })
           set({
             pendingCount: survey.pending.length,
@@ -349,12 +345,14 @@ export function createSyncStore(): SyncStore {
         )
         try {
           const pb = clientFor(serverUrl)
-          const state = await loadSyncState()
+          const state = await loadServerSyncState(serverUrl, syncFolderPath)
           let result: SyncResult
           try {
             result = await sync({
               client: createSyncClient(pb),
               currentUser: currentUser.username,
+              currentRole: currentUser.role,
+              serverUrl,
               syncFolderPath,
               state,
               signal: controller.signal,

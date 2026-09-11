@@ -6,8 +6,8 @@ import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
 import { serializeMindMap, deserializeMindMap } from '../persistence/serialization'
 import { fileNameOf, parentDirOf, separatorOf } from '../persistence/paths'
 import type { FileTreeNode } from '../types/workspace'
-import type { MindMapMeta } from '../types/card'
-import type { SyncState, SyncStateEntry } from '../persistence/syncState'
+import type { MindMapMeta, UserRole } from '../types/card'
+import { serverStateOf, type SyncState, type SyncStateEntry } from '../persistence/syncState'
 
 export interface RemoteMindMapRecord {
   id: string
@@ -87,6 +87,8 @@ export interface SyncResult {
 interface SyncParams {
   client: SyncClient
   currentUser: string
+  currentRole: UserRole
+  serverUrl: string
   syncFolderPath: string
   state: SyncState
   /**
@@ -170,7 +172,7 @@ export interface SyncSurvey {
 export async function surveySyncFolder(params: {
   syncFolderPath: string
   currentUser: string
-  state: SyncState
+  entries: Record<string, SyncStateEntry>
 }): Promise<SyncSurvey> {
   const tree = await scanFolder(params.syncFolderPath)
   const survey: SyncSurvey = { pending: [], localOnly: [] }
@@ -181,7 +183,7 @@ export async function surveySyncFolder(params: {
     const meta = await loadMindMapMeta(path).catch(() => undefined)
     if (meta === undefined) continue
     if (meta === null) survey.localOnly.push(path)
-    else if (isPushPending(meta, params.currentUser, params.state[meta.id])) survey.pending.push(path)
+    else if (isPushPending(meta, params.currentUser, params.entries[meta.id])) survey.pending.push(path)
   }
   return survey
 }
@@ -295,6 +297,7 @@ async function ensureLocalFolder(path: string): Promise<void> {
 export async function sync({
   client,
   currentUser,
+  serverUrl,
   syncFolderPath,
   state,
   signal,
@@ -313,6 +316,9 @@ export async function sync({
   const remoteAssets = await client.assets.getFullList({ signal })
   const knownHashes = new Set(remoteAssets.map(asset => asset.hash))
   const remoteByFileId = new Map(remoteRecords.map(record => [record.file_id, record]))
+
+  const server = serverStateOf(state, serverUrl, syncFolderPath)
+  const entries = server.entries
 
   const localTree = await scanFolder(syncFolderPath)
   const localPaths = flattenMindMapPaths(localTree)
@@ -354,7 +360,7 @@ export async function sync({
     }
     seenFileIds.add(meta.id)
 
-    const known = state[meta.id]
+    const known = entries[meta.id]
     if (!isPushPending(meta, currentUser, known)) return
 
     const remote = remoteByFileId.get(meta.id)
@@ -384,7 +390,7 @@ export async function sync({
       const savedRecord = existing
         ? await client.mindMaps.update(existing.id, { content, path: relPath }, { signal })
         : await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content }, { signal })
-      state[meta.id] = { lastSyncedModified: meta.lastModified, lastSyncedUpdated: savedRecord.updated }
+      entries[meta.id] = { lastSyncedModified: meta.lastModified, lastSyncedUpdated: savedRecord.updated }
       result.pushed += 1
       result.transferred.push({ fileId: meta.id, path: relPath, direction: 'push' })
     } catch (error) {
@@ -411,7 +417,7 @@ export async function sync({
   /** Everything the pull pass does for ONE remote record. */
   async function pullOne(record: RemoteMindMapRecord): Promise<void> {
     if (record.author === currentUser) return
-    const known = state[record.file_id]
+    const known = entries[record.file_id]
     if (known && known.lastSyncedUpdated >= record.updated) return
 
     if (!isSafeRelativePath(record.path)) {
@@ -443,7 +449,7 @@ export async function sync({
       await ensureLocalFolder(localPath)
       await writeTextFile(localPath, record.content)
       await pullAssetsFor(client, localPath, referencedAssets(record.content, remoteAssets), { signal })
-      state[record.file_id] = { lastSyncedModified: meta?.lastModified ?? record.updated, lastSyncedUpdated: record.updated }
+      entries[record.file_id] = { lastSyncedModified: meta?.lastModified ?? record.updated, lastSyncedUpdated: record.updated }
       result.pulled += 1
       result.transferred.push({ fileId: record.file_id, path: record.path, direction: 'pull' })
       void cards // validated by deserializeMindMap succeeding; the written file is the record's own content verbatim

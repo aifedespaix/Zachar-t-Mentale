@@ -31,7 +31,7 @@ import {
   type RemoteMindMapRecord,
   type RemoteAssetRecord,
 } from './syncService'
-import type { SyncState } from '../persistence/syncState'
+import { emptySyncState, type SyncState, type SyncStateEntry } from '../persistence/syncState'
 import type { MindMapMeta } from '../types/card'
 
 function fakeClient(overrides: Partial<SyncClient> = {}): SyncClient {
@@ -49,6 +49,16 @@ function fakeClient(overrides: Partial<SyncClient> = {}): SyncClient {
       ...overrides.assets,
     },
   }
+}
+
+/** Un document v2 avec les entrées voulues pour le serveur de test. */
+function memory(entries: Record<string, SyncStateEntry> = {}, syncFolderPath: string | null = '/cours'): SyncState {
+  return { version: 2, servers: { 'https://pb.test': { syncFolderPath, entries, tombstones: [] } } }
+}
+
+/** `sync` avec tout ce qui ne varie pas d'un test à l'autre. */
+function runSync(params: Omit<Parameters<typeof sync>[0], 'serverUrl' | 'currentRole' | 'syncFolderPath' | 'currentUser'>) {
+  return sync({ currentUser: 'aife', currentRole: 'prof', serverUrl: 'https://pb.test', syncFolderPath: '/cours', ...params })
 }
 
 const AIFE: MindMapMeta = { id: 'file-1', author: 'aife', role: 'prof', lastModified: '2026-01-01T00:00:00.000Z' }
@@ -132,7 +142,7 @@ describe('surveySyncFolder', () => {
     const survey = await surveySyncFolder({
       syncFolderPath: '/cours',
       currentUser: 'aife',
-      state: { b: { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' } },
+      entries: { b: { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' } },
     })
 
     // 'a' never pushed; 'b' unchanged; 'c' is not ours; 'neuve' has no identity.
@@ -144,7 +154,7 @@ describe('surveySyncFolder', () => {
     vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'donnees.json', path: '/cours/donnees.json' }])
     vi.mocked(loadMindMapMeta).mockRejectedValue(new Error('pas une carte'))
 
-    const survey = await surveySyncFolder({ syncFolderPath: '/cours', currentUser: 'aife', state: {} })
+    const survey = await surveySyncFolder({ syncFolderPath: '/cours', currentUser: 'aife', entries: {} })
 
     expect(survey).toEqual({ pending: [], localOnly: [] })
   })
@@ -153,7 +163,7 @@ describe('surveySyncFolder', () => {
     vi.mocked(scanFolder).mockRejectedValue(new Error('dossier disparu'))
 
     await expect(
-      surveySyncFolder({ syncFolderPath: '/cours', currentUser: 'aife', state: {} })
+      surveySyncFolder({ syncFolderPath: '/cours', currentUser: 'aife', entries: {} })
     ).rejects.toThrow('dossier disparu')
   })
 })
@@ -164,9 +174,9 @@ describe('sync — push', () => {
     vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
     vi.mocked(loadMindMap).mockResolvedValue([])
     const client = fakeClient()
-    const state: SyncState = {}
+    const state = emptySyncState()
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state })
+    const result = await runSync({ client, state })
 
     // The second argument is the request options the sync threads through
     // (cancellation); the payload is what this test is about.
@@ -175,7 +185,7 @@ describe('sync — push', () => {
       expect.anything()
     )
     expect(result.pushed).toBe(1)
-    expect(state['file-1']).toEqual({ lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: '2026-01-02 00:00:00.000Z' })
+    expect(state.servers['https://pb.test'].entries['file-1']).toEqual({ lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: '2026-01-02 00:00:00.000Z' })
   })
 
   it('updates the existing remote record when one already exists for that file_id', async () => {
@@ -185,7 +195,7 @@ describe('sync — push', () => {
     const existing: RemoteMindMapRecord = { id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: '[]', updated: '2025-01-01 00:00:00.000Z' }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([existing]) } as any })
 
-    await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    await runSync({ client, state: emptySyncState() })
 
     expect(client.mindMaps.update).toHaveBeenCalledWith('rec-1', expect.objectContaining({ path: 'a.zmap' }), expect.anything())
     expect(client.mindMaps.create).not.toHaveBeenCalled()
@@ -195,9 +205,9 @@ describe('sync — push', () => {
     vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
     vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
     const client = fakeClient()
-    const state: SyncState = { 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' } }
+    const state = memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' } })
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state })
+    const result = await runSync({ client, state })
 
     expect(client.mindMaps.create).not.toHaveBeenCalled()
     expect(client.mindMaps.update).not.toHaveBeenCalled()
@@ -214,7 +224,7 @@ describe('sync — push', () => {
     )
     const client = fakeClient()
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    const result = await runSync({ client, state: emptySyncState() })
 
     expect(client.mindMaps.create).not.toHaveBeenCalled()
     expect(result.pushed).toBe(0)
@@ -237,7 +247,7 @@ describe('sync — push', () => {
       } as any,
     })
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    const result = await runSync({ client, state: emptySyncState() })
 
     expect(result.errors).toEqual([{ fileId: 'file-1', message: 'réseau coupé' }])
     expect(result.pushed).toBe(1)
@@ -264,7 +274,7 @@ describe('sync — push', () => {
     })
     const client = fakeClient({ mindMaps: { create } as any, assets: { getFullList: vi.fn().mockResolvedValue([]), upload, download: vi.fn() } as any })
 
-    await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    await runSync({ client, state: emptySyncState() })
 
     expect(upload).toHaveBeenCalledWith('hash1', 'png', new Uint8Array([9, 9, 9]), expect.anything())
     // The asset must be uploaded before the record referencing it is saved,
@@ -288,7 +298,7 @@ describe('sync — push', () => {
       assets: { getFullList: vi.fn().mockResolvedValue([{ id: 'a1', hash: 'hash1', extension: 'png' }]), upload, download: vi.fn() } as any,
     })
 
-    await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    await runSync({ client, state: emptySyncState() })
 
     expect(upload).not.toHaveBeenCalled()
   })
@@ -302,7 +312,7 @@ describe('sync — push', () => {
     vi.mocked(loadMindMap).mockResolvedValue([])
     const client = fakeClient()
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    const result = await runSync({ client, state: emptySyncState() })
 
     expect(client.mindMaps.create).toHaveBeenCalledTimes(1)
     expect(result.pushed).toBe(1)
@@ -333,7 +343,7 @@ describe('sync — journal des transferts', () => {
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([foreign]) } as any })
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    const result = await runSync({ client, state: emptySyncState() })
 
     expect(result.transferred).toEqual([
       { fileId: 'file-1', path: 'a.zmap', direction: 'push' },
@@ -347,7 +357,7 @@ describe('sync — journal des transferts', () => {
     vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, author: 'quelqu-un-dautre' })
     const client = fakeClient()
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    const result = await runSync({ client, state: emptySyncState() })
 
     expect(result.transferred).toEqual([])
   })
@@ -372,11 +382,9 @@ describe('sync — progression et annulation', () => {
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([foreign]) } as any })
     const progress: Array<[number, number]> = []
 
-    await sync({
+    await runSync({
       client,
-      currentUser: 'aife',
-      syncFolderPath: '/cours',
-      state: {},
+      state: emptySyncState(),
       onProgress: (done, total) => progress.push([done, total]),
     })
 
@@ -393,11 +401,9 @@ describe('sync — progression et annulation', () => {
     const controller = new AbortController()
     controller.abort()
 
-    const result = await sync({
+    const result = await runSync({
       client,
-      currentUser: 'aife',
-      syncFolderPath: '/cours',
-      state: {},
+      state: emptySyncState(),
       signal: controller.signal,
     })
 
@@ -422,12 +428,10 @@ describe('sync — progression et annulation', () => {
       controller.abort()
       return { id: 'rec-1', updated: '2026-01-02 00:00:00.000Z', ...data }
     })
-    const state: SyncState = {}
+    const state = emptySyncState()
 
-    const result = await sync({
+    const result = await runSync({
       client,
-      currentUser: 'aife',
-      syncFolderPath: '/cours',
       state,
       signal: controller.signal,
     })
@@ -437,7 +441,7 @@ describe('sync — progression et annulation', () => {
     expect(client.mindMaps.create).toHaveBeenCalledTimes(1)
     // The cache remembers the file that DID go through, so the next run does
     // not send it a second time.
-    expect(Object.keys(state)).toEqual(['a'])
+    expect(Object.keys(state.servers['https://pb.test'].entries)).toEqual(['a'])
   })
 
   it('does not blame a file for a request the user cancelled', async () => {
@@ -453,7 +457,7 @@ describe('sync — progression et annulation', () => {
       } as any,
     })
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    const result = await runSync({ client, state: emptySyncState() })
 
     expect(result.errors).toEqual([])
     expect(result.cancelled).toBe(true)
@@ -461,7 +465,7 @@ describe('sync — progression et annulation', () => {
 })
 
 describe('sync — conflits', () => {
-  const CACHED: SyncState = {
+  const CACHED: Record<string, SyncStateEntry> = {
     'file-1': { lastSyncedModified: '2026-01-01T00:00:00.000Z', lastSyncedUpdated: '2026-01-01 00:00:00.000Z' },
   }
 
@@ -488,7 +492,7 @@ describe('sync — conflits', () => {
       mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
     })
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: { ...CACHED } })
+    const result = await runSync({ client, state: memory({ ...CACHED }) })
 
     expect(client.mindMaps.update).not.toHaveBeenCalled()
     expect(client.mindMaps.create).not.toHaveBeenCalled()
@@ -509,7 +513,7 @@ describe('sync — conflits', () => {
       mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-01-01 00:00:00.000Z')]) } as any,
     })
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: { ...CACHED } })
+    const result = await runSync({ client, state: memory({ ...CACHED }) })
 
     expect(result.conflicts).toEqual([])
     expect(result.pushed).toBe(1)
@@ -521,7 +525,7 @@ describe('sync — conflits', () => {
       mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
     })
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: { ...CACHED } })
+    const result = await runSync({ client, state: memory({ ...CACHED }) })
 
     expect(result.conflicts).toEqual([])
   })
@@ -532,7 +536,7 @@ describe('sync — conflits', () => {
       mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
     })
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: {} })
+    const result = await runSync({ client, state: emptySyncState() })
 
     expect(result.conflicts).toEqual([])
     expect(result.pushed).toBe(1)
@@ -553,7 +557,7 @@ describe('sync — conflits', () => {
       mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
     })
 
-    const result = await sync({ client, currentUser: 'aife', syncFolderPath: '/cours', state: { ...CACHED } })
+    const result = await runSync({ client, state: memory({ ...CACHED }) })
 
     expect(result.conflicts).toHaveLength(1)
     expect(result.pushed).toBe(1) // b.zmap went through
@@ -574,7 +578,7 @@ describe('sync — pull', () => {
     vi.mocked(scanFolder).mockResolvedValue([])
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([record]) } as any })
 
-    const result = await sync({ client, currentUser: 'eleve1', syncFolderPath: '/cours', state: {} })
+    const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
 
     expect(writeTextFile).toHaveBeenCalledWith('/cours/b.zmap', record.content)
     expect(result.pulled).toBe(1)
@@ -585,7 +589,7 @@ describe('sync — pull', () => {
     const own = { ...record, author: 'eleve1' }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([own]) } as any })
 
-    const result = await sync({ client, currentUser: 'eleve1', syncFolderPath: '/cours', state: {} })
+    const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
 
     expect(writeTextFile).not.toHaveBeenCalled()
     expect(result.pulled).toBe(0)
@@ -594,9 +598,9 @@ describe('sync — pull', () => {
   it('skips a record already up to date in the cache', async () => {
     vi.mocked(scanFolder).mockResolvedValue([])
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([record]) } as any })
-    const state: SyncState = { 'file-2': { lastSyncedModified: 'x', lastSyncedUpdated: record.updated } }
+    const state = memory({ 'file-2': { lastSyncedModified: 'x', lastSyncedUpdated: record.updated } })
 
-    const result = await sync({ client, currentUser: 'eleve1', syncFolderPath: '/cours', state })
+    const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state })
 
     expect(writeTextFile).not.toHaveBeenCalled()
     expect(result.pulled).toBe(0)
@@ -618,7 +622,7 @@ describe('sync — pull', () => {
     })
     vi.mocked(scanFolder).mockResolvedValue([])
 
-    await sync({ client, currentUser: 'eleve1', syncFolderPath: '/cours', state: {} })
+    await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
 
     expect(download).toHaveBeenCalledWith(asset, expect.anything())
     expect(writeAsset).toHaveBeenCalledWith('/cours/b.zmap', new Uint8Array([1, 2, 3]), 'png')
@@ -629,7 +633,7 @@ describe('sync — pull', () => {
     const traversal = { ...record, path: '../../evil.zmap' }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([traversal]) } as any })
 
-    const result = await sync({ client, currentUser: 'eleve1', syncFolderPath: '/cours', state: {} })
+    const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
 
     expect(writeTextFile).not.toHaveBeenCalled()
     expect(result.pulled).toBe(0)
@@ -644,7 +648,7 @@ describe('sync — pull', () => {
     vi.mocked(loadMindMapMeta).mockResolvedValue(null)
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([record]) } as any })
 
-    const result = await sync({ client, currentUser: 'eleve1', syncFolderPath: '/cours', state: {} })
+    const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
 
     expect(writeTextFile).not.toHaveBeenCalled()
     expect(result.pulled).toBe(0)

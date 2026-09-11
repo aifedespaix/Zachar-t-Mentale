@@ -21,7 +21,10 @@ vi.mock('../../persistence/sessionState', () => ({
   saveSessionState: vi.fn(),
 }))
 vi.mock('../../hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
-vi.mock('../../persistence/syncState', () => ({ loadSyncState: vi.fn() }))
+vi.mock('../../persistence/syncState', () => ({
+  loadServerSyncState: vi.fn().mockResolvedValue({ version: 2, servers: {} }),
+  serverStateOf: vi.fn(() => ({ syncFolderPath: null, entries: {}, tombstones: [] })),
+}))
 // The empty-area context menu creates files in the first root folder; the real
 // fs helpers would try to reach the Tauri backend from jsdom.
 vi.mock('../../persistence/fileOps', async importOriginal => {
@@ -42,7 +45,7 @@ import { loadWorkspaceConfig, saveWorkspaceConfig } from '../../persistence/work
 import { scanFolder } from '../../persistence/fileTree'
 import { open } from '@tauri-apps/plugin-dialog'
 import { loadSessionState } from '../../persistence/sessionState'
-import { loadSyncState } from '../../persistence/syncState'
+import { loadServerSyncState } from '../../persistence/syncState'
 import { createMindMapFile, freeSiblingPath } from '../../persistence/fileOps'
 
 /**
@@ -97,7 +100,7 @@ describe('FileSidebar', () => {
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
     vi.mocked(open).mockReset()
     vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
-    vi.mocked(loadSyncState).mockReset().mockResolvedValue({})
+    vi.mocked(loadServerSyncState).mockReset().mockResolvedValue({ version: 2, servers: {} })
     vi.mocked(createMindMapFile).mockReset()
     vi.mocked(freeSiblingPath).mockReset().mockResolvedValue('/cours-svt/Nouvelle carte mentale.json')
   })

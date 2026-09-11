@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../persistence/syncSettings', () => ({ loadSyncSettings: vi.fn(), saveSyncSettings: vi.fn().mockResolvedValue(undefined) }))
-vi.mock('../persistence/syncState', () => ({ loadSyncState: vi.fn(), saveSyncState: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('../persistence/syncState', () => ({
+  loadServerSyncState: vi.fn(),
+  serverStateOf: vi.fn(),
+  saveSyncState: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock('../persistence/pocketbaseClient', () => ({ createPocketBaseClient: vi.fn() }))
 vi.mock('../sync/pocketBaseAdapter', () => ({ createSyncClient: vi.fn().mockReturnValue({}) }))
 vi.mock('../sync/syncService', () => ({ sync: vi.fn(), surveySyncFolder: vi.fn() }))
@@ -10,7 +14,7 @@ vi.mock('../persistence/syncStatus', () => ({ loadSyncStatus: vi.fn(), saveSyncS
 
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { DEFAULT_SYNC_SETTINGS } from '../types/syncSettings'
-import { loadSyncState, saveSyncState } from '../persistence/syncState'
+import { loadServerSyncState, saveSyncState, serverStateOf } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { surveySyncFolder, sync } from '../sync/syncService'
 import { logSyncEvent } from '../persistence/syncLog'
@@ -50,7 +54,8 @@ describe('useSyncStore', () => {
       .mockReset()
       .mockResolvedValue({ settings: { ...DEFAULT_SYNC_SETTINGS }, problem: null })
     vi.mocked(saveSyncSettings).mockReset().mockResolvedValue(undefined)
-    vi.mocked(loadSyncState).mockReset().mockResolvedValue({})
+    vi.mocked(loadServerSyncState).mockReset().mockResolvedValue({ version: 2, servers: {} })
+    vi.mocked(serverStateOf).mockReset().mockReturnValue({ syncFolderPath: '/cours', entries: {}, tombstones: [] })
     vi.mocked(saveSyncState).mockReset().mockResolvedValue(undefined)
     vi.mocked(createPocketBaseClient).mockReset()
     vi.mocked(sync).mockReset()
