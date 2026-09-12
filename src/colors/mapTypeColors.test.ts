@@ -78,4 +78,16 @@ describe('mapTypeColors', () => {
       expect(mapTypeColor(type, 'dark')).not.toBe(neutralMapTypeColors.dark)
     }
   })
+
+  // `mapTypeColors[type]` for 'constructor', 'toString', … is an INHERITED
+  // Object.prototype member, not undefined: a plain `=== undefined` guard let it
+  // through and returned undefined, breaking the MapTypeColor | null contract.
+  // Membership must be an own-property check.
+  it('treats inherited Object.prototype names as unknown, in both themes, without throwing', () => {
+    for (const type of ['constructor', 'toString', '__proto__', 'valueOf', 'hasOwnProperty'] as const) {
+      expect(mapTypeColor(type, 'light')).toBe(neutralMapTypeColors.light)
+      expect(mapTypeColor(type, 'dark')).toBe(neutralMapTypeColors.dark)
+      expect(() => mapTypeColor(type, 'light')).not.toThrow()
+    }
+  })
 })

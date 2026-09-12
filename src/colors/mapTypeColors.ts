@@ -93,13 +93,15 @@ export const neutralMapTypeColors: MapTypeColorPair = {
 /**
  * `null` quand il n'y a rien à rendre : `default`, une chaîne vide, `undefined`.
  * Toute autre valeur est traitée comme « classé, mais inconnu de l'app » et
- * reçoit la pilule neutre. La fonction est TOTALE : elle n'indexe jamais
- * `mapTypeColors` sans vérifier, car ce chemin est emprunté pendant le rendu et
- * un `undefined` y jette, ce qui démonte toute l'application — la même garde
- * que `levelColors.ts`.
+ * reçoit la pilule neutre. La fonction est TOTALE : l'appartenance se teste sur
+ * les propriétés PROPRES, car `mapTypeColors['constructor']` ou
+ * `mapTypeColors['toString']` renvoie un membre hérité de `Object.prototype` —
+ * non `undefined` — et rendrait `undefined` au lieu de la pilule neutre. Ce
+ * chemin est emprunté pendant le rendu et un `undefined` y jette, ce qui
+ * démonte toute l'application — la même garde que `levelColors.ts`.
  */
 export function mapTypeColor(type: string | undefined, theme: 'light' | 'dark'): MapTypeColor | null {
   if (type === undefined || type === '' || type === 'default') return null
-  const known: MapTypeColorPair | undefined = mapTypeColors[type as Exclude<MapType, 'default'>]
-  return known === undefined ? neutralMapTypeColors[theme] : known[theme]
+  if (!Object.prototype.hasOwnProperty.call(mapTypeColors, type)) return neutralMapTypeColors[theme]
+  return mapTypeColors[type as Exclude<MapType, 'default'>][theme]
 }
