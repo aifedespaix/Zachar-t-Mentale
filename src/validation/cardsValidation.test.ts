@@ -279,7 +279,9 @@ describe('the mind maps present in the working copy', () => {
   // conditional on their presence. What it still guards is real: a map the app
   // itself produced must never come back needing repair.
   it.runIf(paths.length > 0).each(paths)('%s passes validation untouched', path => {
-    expect(validateCards(files[path])).toEqual({ valid: true, issues: [] })
+    const raw = files[path] as unknown
+    const cards = Array.isArray(raw) ? raw : (raw as { cards: unknown }).cards
+    expect(validateCards(cards)).toEqual({ valid: true, issues: [] })
   })
 
   it('validates a map shaped like the ones the app writes, with or without local files', () => {
