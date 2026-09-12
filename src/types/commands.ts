@@ -416,6 +416,13 @@ export const COMMANDS = [
     defaultBinding: 'Mod+F',
   },
   {
+    id: 'view.toggleDetailPanel',
+    label: 'Afficher ou masquer les fiches',
+    description: 'Replie le panneau des fiches pour donner toute la place à la carte.',
+    category: 'view',
+    defaultBinding: 'Mod+Shift+B',
+  },
+  {
     id: 'view.toggleLock',
     label: 'Verrouiller ou déverrouiller',
     description: 'Empêche (ou réautorise) toute modification de la carte mentale.',

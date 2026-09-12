@@ -373,4 +373,127 @@ describe('CardDetailPanel', () => {
 
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Fermer')
   })
+
+  describe('search', () => {
+    it('filters the open fiches by title', async () => {
+      const user = userEvent.setup()
+      useCardDetailStore.getState().show(leaf.id)
+      useCardDetailStore.getState().show(bare.id)
+      render(<CardDetailPanel />)
+
+      await user.type(screen.getByRole('textbox', { name: /rechercher dans les fiches/i }), 'signes')
+
+      expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Fiche de Sans description')).not.toBeInTheDocument()
+    })
+
+    it('filters the open fiches by their description content', async () => {
+      const user = userEvent.setup()
+      useCardDetailStore.getState().show(leaf.id)
+      useCardDetailStore.getState().show(bare.id)
+      render(<CardDetailPanel />)
+
+      await user.type(screen.getByRole('textbox', { name: /rechercher dans les fiches/i }), 'éloigné de zéro')
+
+      expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Fiche de Sans description')).not.toBeInTheDocument()
+    })
+
+    it('is accent- and case-insensitive', async () => {
+      const user = userEvent.setup()
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+
+      await user.type(screen.getByRole('textbox', { name: /rechercher dans les fiches/i }), 'SIGNES')
+
+      expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
+    })
+
+    it('says so, rather than showing an empty panel, when nothing matches', async () => {
+      const user = userEvent.setup()
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+
+      await user.type(screen.getByRole('textbox', { name: /rechercher dans les fiches/i }), 'zzz')
+
+      expect(screen.getByText('Aucun résultat pour « zzz ».')).toBeInTheDocument()
+    })
+
+    it('clears on Escape', async () => {
+      const user = userEvent.setup()
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+
+      const field = screen.getByRole('textbox', { name: /rechercher dans les fiches/i })
+      await user.type(field, 'zzz')
+      await user.keyboard('{Escape}')
+
+      expect(field).toHaveValue('')
+      expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
+    })
+
+    it('never touches a fiche’s own collapsed or pinned state', async () => {
+      const user = userEvent.setup()
+      useCardDetailStore.getState().show(leaf.id)
+      useCardDetailStore.getState().pin(leaf.id)
+      useCardDetailStore.getState().toggleCollapsed(leaf.id)
+      render(<CardDetailPanel />)
+
+      await user.type(screen.getByRole('textbox', { name: /rechercher dans les fiches/i }), 'zzz')
+      await user.clear(screen.getByRole('textbox', { name: /rechercher dans les fiches/i }))
+
+      const entry = useCardDetailStore.getState().open.find(e => e.cardId === leaf.id)
+      expect(entry?.pinned).toBe(true)
+      expect(entry?.collapsed).toBe(true)
+    })
+  })
+
+  describe('folding the panel', () => {
+    it('folds the panel down to a thin strip, and expands it back', async () => {
+      const user = userEvent.setup()
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+
+      await user.click(screen.getByRole('button', { name: 'Replier le panneau des fiches' }))
+      expect(screen.queryByText('Fiches de cartes')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Fiche de Signes contraires')).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Déplier le panneau des fiches' }))
+      expect(screen.getByText('Fiches de cartes')).toBeInTheDocument()
+      expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
+    })
+
+    it('auto-expands when a new fiche opens while folded', async () => {
+      const user = userEvent.setup()
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+
+      await user.click(screen.getByRole('button', { name: 'Replier le panneau des fiches' }))
+      act(() => useCardDetailStore.getState().show(bare.id))
+
+      expect(screen.getByText('Fiches de cartes')).toBeInTheDocument()
+      expect(screen.getByLabelText('Fiche de Sans description')).toBeInTheDocument()
+    })
+
+    it('explains the fold button in a tooltip', async () => {
+      const user = userEvent.setup()
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+
+      await user.hover(screen.getByRole('button', { name: 'Replier le panneau des fiches' }))
+
+      expect(await screen.findByRole('tooltip')).toHaveTextContent('Replier le panneau des fiches')
+    })
+
+    it('disables the fold command once there is nothing left open', () => {
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+      vi.useFakeTimers()
+
+      act(() => useCardDetailStore.getState().closeAll())
+
+      expect(screen.getByRole('button', { name: 'Replier le panneau des fiches' })).toBeDisabled()
+      vi.useRealTimers()
+    })
+  })
 })
