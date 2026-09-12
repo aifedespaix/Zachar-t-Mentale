@@ -1974,3 +1974,36 @@ Plan complet, enregistré dans `docs/superpowers/plans/2026-09-12-types-et-tags-
 
 **1. Subagent-Driven (recommandé)** — un sous-agent frais par tâche, revue entre les tâches, itération rapide.
 **2. Inline Execution** — exécution dans cette session avec des points de contrôle.
+
+---
+
+### Task 14: `src/validation/cardsValidation.test.ts` — déballer l'enveloppe
+
+**Files:**
+- Modify: `src/validation/cardsValidation.test.ts`
+
+**Contexte (ruling du contrôleur) :** le test « the mind maps present in the working copy » passe le module JSON entier à `validateCards`. Depuis que l'app écrit des enveloppes `{ meta, cards }` pour les cartes synchronisées, les `.json` de `.cartes-mentales/` sont des enveloppes, et `validateCards` les voit comme « malformed ». Vérifié : une fois `.cards` extrait, les cinq fichiers valident. C'est un test périmé, pas une donnée cassée.
+
+- [ ] **Step 1: Modifier le test pour déballer l'enveloppe**
+
+Dans le `it.each`, remplacer l'assertion :
+
+```ts
+  it.runIf(paths.length > 0).each(paths)('%s passes validation untouched', path => {
+    const raw = files[path] as unknown
+    const cards = Array.isArray(raw) ? raw : (raw as { cards: unknown }).cards
+    expect(validateCards(cards)).toEqual({ valid: true, issues: [] })
+  })
+```
+
+- [ ] **Step 2: Vérifier**
+
+Run: `bunx vitest run src/validation/cardsValidation.test.ts`
+Expected: PASS — 40/40, dont les cinq `.cartes-mentales/**/*.json`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/validation/cardsValidation.test.ts
+git commit -m "fix(tests): valider les cartes, pas l'enveloppe, des .json locaux"
+```
