@@ -9,7 +9,8 @@ import { fileNameOf, isSameFilePath, parentDirOf, separatorOf } from '../persist
 import type { FileTreeNode } from '../types/workspace'
 import type { MindMapMeta, SyncUser, UserRole } from '../types/card'
 import { serverStateOf, type SyncState, type SyncStateEntry } from '../persistence/syncState'
-import { canReorder } from './permissions'
+import { canClassify, canReorder } from './permissions'
+import { mapTypeOf } from '../types/mapType'
 import { hashContent } from './contentHash'
 import { reconcilePath, seedLastSyncedPath } from './pathReconciliation'
 
@@ -20,6 +21,13 @@ export interface RemoteMindMapRecord {
   path: string
   content: string
   updated: string
+  /**
+   * Le type décidé par l'app. Champ REQUIS : une valeur absente ne doit jamais
+   * être confondue avec `default` — c'est le rôle de `SyncStateEntry.
+   * lastSyncedType` de dire « inconnu ». `mapTypeOf` ramène toute valeur
+   * inconnue, vide ou écrite par une version future à `default`.
+   */
+  type: string
 }
 
 export interface RemoteAssetRecord {
@@ -39,7 +47,7 @@ export interface RequestOptions {
 export interface MindMapsApi {
   getFullList(options?: RequestOptions): Promise<RemoteMindMapRecord[]>
   create(
-    data: { file_id: string; author: string; path: string; content: string },
+    data: { file_id: string; author: string; path: string; content: string; type: string },
     options?: RequestOptions
   ): Promise<RemoteMindMapRecord>
   /**
@@ -50,7 +58,7 @@ export interface MindMapsApi {
    */
   update(
     id: string,
-    data: { path?: string; content?: string },
+    data: { path?: string; content?: string; type?: string },
     options?: RequestOptions
   ): Promise<RemoteMindMapRecord>
 }
@@ -137,6 +145,7 @@ function isAbortError(error: unknown): boolean {
 export interface PushPlan {
   content: boolean
   path: boolean
+  type: boolean
 }
 
 /**
@@ -165,7 +174,8 @@ export interface PushPlan {
  * refuse — ces deux écarts d'un run ne la justifient pas.
  *
  * Le contenu n'appartient qu'à son auteur. Le chemin suit `canReorder` : son
- * auteur, ou un prof.
+ * auteur, ou un prof. Le type suit `canClassify` — la même règle, mais bornée
+ * par ce que `lastSyncedType` permet de comparer.
  *
  * `lastSyncedPath` ABSENT veut dire « inconnu », pas « différent » : une entrée
  * migrée depuis la v1 n'en a pas, et la lire comme un déplacement ferait
@@ -191,7 +201,16 @@ export function planPush(params: {
     entry.lastSyncedPath !== undefined &&
     entry.lastSyncedPath !== relPath &&
     canReorder(meta, currentUser)
-  return { content, path }
+  // Le type est un petit frère du chemin : il ne part que si l'entrée existe,
+  // qu'il diffère de l'accord, et qu'on a le droit de classer. mapTypeOf
+  // normalise les deux côtés, donc une entrée migrée (lastSyncedType absent)
+  // s'accorde implicitement sur default — jamais sur le type local, qui ferait
+  // passer un classement de prof pour un changement à moi.
+  const type =
+    entry !== undefined &&
+    mapTypeOf(entry.lastSyncedType) !== mapTypeOf(meta.type) &&
+    canClassify(meta, currentUser)
+  return { content, path, type }
 }
 
 /**
@@ -269,7 +288,7 @@ export async function surveySyncFolder(params: {
       currentUser: params.currentUser,
       entry: params.entries[meta.id],
     })
-    if (plan.content || plan.path) survey.pending.push(path)
+    if (plan.content || plan.path || plan.type) survey.pending.push(path)
   }
   return survey
 }
@@ -638,7 +657,10 @@ export async function sync({
         // Inatteignable : `plan.content` est vrai ici, donc `content` est un
         // string — l'affirmation n'existe que pour le type.
         if (content === undefined) return
-        savedRecord = await client.mindMaps.create({ file_id: meta.id, author: meta.author, path: relPath, content }, { signal })
+        savedRecord = await client.mindMaps.create(
+          { file_id: meta.id, author: meta.author, path: relPath, content, type: mapTypeOf(meta.type) },
+          { signal }
+        )
       } else {
         // Le champ qu'on a le droit d'écrire, et lui seul : le contenu à son
         // auteur, le chemin à qui peut réarranger. Envoyer les deux à chaque
@@ -660,6 +682,11 @@ export async function sync({
         // le fichier de l'utilisateur à l'ancien emplacement — le renommage de
         // l'utilisateur silencieusement défait.
         lastSyncedPath: sentPath ? relPath : known?.lastSyncedPath,
+        // Même règle que le chemin : le `create` porte TOUJOURS le type, l'`update`
+        // ne l'enverra que quand le plan le demandera (tâche suivante). Tant
+        // qu'il n'est pas envoyé, l'accord reste celui qu'on connaissait —
+        // l'enregistrer ferait croire au serveur qu'il détient déjà ce type.
+        lastSyncedType: remote === undefined ? mapTypeOf(meta.type) : known?.lastSyncedType,
         lastSyncedContentHash: plan.content ? contentHash : known?.lastSyncedContentHash,
       }
       result.pushed += 1

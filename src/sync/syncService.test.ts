@@ -102,27 +102,23 @@ describe('planPush', () => {
         currentUser: AIFE_USER,
         entry: known,
       })
-    ).toEqual({ content: true, path: false })
+    ).toEqual({ content: true, path: false, type: false })
   })
 
   it('sends the content of a map we never pushed, and lets the creation carry the path', () => {
-    // Sans entrée, on ne sait pas quel chemin le serveur connaît : annoncer un
-    // déplacement serait une invention, et le `create` envoie le chemin de
-    // toute façon.
     expect(planPush({ meta: AIFE, relPath: 'a.zmap', currentUser: AIFE_USER, entry: undefined })).toEqual({
       content: true,
       path: false,
+      type: false,
     })
   })
 
   it('treats a v1-migrated entry as "no path change", not as a move of every file', () => {
-    // `lastSyncedPath` absent veut dire INCONNU. Le lire comme « différent »
-    // ferait annoncer « N à envoyer » au premier lancement après mise à jour,
-    // pour des fichiers qu'un sync n'enverrait pas.
     const migrated = { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' }
     expect(planPush({ meta: AIFE, relPath: 'a.zmap', currentUser: AIFE_USER, entry: migrated })).toEqual({
       content: false,
       path: false,
+      type: false,
     })
   })
 
@@ -130,6 +126,7 @@ describe('planPush', () => {
     expect(planPush({ meta: AIFE, relPath: 'Chimie/a.zmap', currentUser: AIFE_USER, entry: known })).toEqual({
       content: false,
       path: true,
+      type: false,
     })
   })
 
@@ -137,6 +134,7 @@ describe('planPush', () => {
     expect(planPush({ meta: AIFE, relPath: 'a.zmap', currentUser: AIFE_USER, entry: known })).toEqual({
       content: false,
       path: false,
+      type: false,
     })
   })
 
@@ -153,19 +151,66 @@ describe('planPush', () => {
   it('lets a prof push the PATH of an eleve s map — that is how a class folder follows', () => {
     expect(
       planPush({ meta: { ...AIFE, author: 'eleve1' }, relPath: 'Chimie/a.zmap', currentUser: AIFE_USER, entry: known })
-    ).toEqual({ content: false, path: true })
+    ).toEqual({ content: false, path: true, type: false })
   })
 
   it('refuses an eleve the path of a map they do not own', () => {
     expect(
       planPush({ meta: { ...AIFE, author: 'aife' }, relPath: 'Chimie/a.zmap', currentUser: ELEVE_USER, entry: known })
-    ).toEqual({ content: false, path: false })
+    ).toEqual({ content: false, path: false, type: false })
+  })
+
+  it('treats a migrated entry as in agreement on default, so nothing is reclassified by surprise', () => {
+    // lastSyncedType absent = inconnu, et l'accord implicite d'avant le champ est
+    // default (voir seedLastSyncedType). Une carte restée default ne part donc
+    // pas ; une carte reprise en cours — les 17 fichiers backfillés — part, elle.
+    expect(planPush({ meta: AIFE, relPath: 'a.zmap', currentUser: AIFE_USER, entry: known })).toEqual({
+      content: false,
+      path: false,
+      type: false,
+    })
+    expect(
+      planPush({ meta: { ...AIFE, type: 'cours' }, relPath: 'a.zmap', currentUser: AIFE_USER, entry: known })
+    ).toEqual({ content: false, path: false, type: true })
+  })
+
+  it('lets a prof classify an eleve s map, and only the type moves', () => {
+    expect(
+      planPush({
+        meta: { ...AIFE, author: 'eleve1', type: 'cours' },
+        relPath: 'a.zmap',
+        currentUser: AIFE_USER,
+        entry: { ...known, lastSyncedType: 'default' },
+      })
+    ).toEqual({ content: false, path: false, type: true })
+  })
+
+  it('refuses an eleve the type of a map they do not own', () => {
+    expect(
+      planPush({
+        meta: { ...AIFE, author: 'aife', type: 'cours' },
+        relPath: 'a.zmap',
+        currentUser: ELEVE_USER,
+        entry: { ...known, lastSyncedType: 'default' },
+      })
+    ).toEqual({ content: false, path: false, type: false })
+  })
+
+  it('does not send the type when the agreement already carries it', () => {
+    expect(
+      planPush({
+        meta: { ...AIFE, type: 'exo' },
+        relPath: 'a.zmap',
+        currentUser: AIFE_USER,
+        entry: { ...known, lastSyncedType: 'exo' },
+      })
+    ).toEqual({ content: false, path: false, type: false })
   })
 })
 
 describe('isConflict', () => {
   const entry = { lastSyncedModified: 'm1', lastSyncedUpdated: 'u1', lastSyncedContentHash: 'aaaa' }
-  const remote = { id: 'r', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: '{}', updated: 'u2' }
+  const remote = { id: 'r', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: '{}', updated: 'u2', type: '' }
 
   it('is a conflict when the remote CONTENT changed and so did mine', () => {
     expect(isConflict({ ...AIFE, lastModified: 'm2' }, entry, remote, 'bbbb')).toBe(true)
@@ -269,6 +314,28 @@ describe('surveySyncFolder', () => {
     expect(survey.pending).toEqual(['/cours/a 2.zmap'])
   })
 
+  it('counts a lone classification, which no counter saw before', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, type: 'cours' })
+
+    const survey = await surveySyncFolder({
+      syncFolderPath: '/cours',
+      currentUser: AIFE_USER,
+      entries: {
+        'file-1': {
+          lastSyncedModified: AIFE.lastModified,
+          lastSyncedUpdated: 'x',
+          lastSyncedPath: 'a.zmap',
+          lastSyncedType: 'default',
+        },
+      },
+    })
+
+    // Ni le contenu ni le chemin n'ont bougé : seul le type, et le compteur doit
+    // le voir, sinon une classification seule resterait invisible.
+    expect(survey.pending).toEqual(['/cours/a.zmap'])
+  })
+
   it('counts a file an eleve owns inside the prof s folder, and not the prof s own files', async () => {
     vi.mocked(scanFolder).mockResolvedValue([
       { type: 'mindmap', name: 'moi.zmap', path: '/cours/moi.zmap' },
@@ -314,7 +381,7 @@ describe('sync — push', () => {
     // The second argument is the request options the sync threads through
     // (cancellation); the payload is what this test is about.
     expect(client.mindMaps.create).toHaveBeenCalledWith(
-      expect.objectContaining({ file_id: 'file-1', author: 'aife', path: 'a.zmap' }),
+      expect.objectContaining({ file_id: 'file-1', author: 'aife', path: 'a.zmap', type: 'default' }),
       expect.anything()
     )
     expect(result.pushed).toBe(1)
@@ -323,6 +390,7 @@ describe('sync — push', () => {
       lastSyncedUpdated: '2026-01-02 00:00:00.000Z',
       lastSyncedPath: 'a.zmap',
       lastSyncedContentHash: expect.any(String),
+      lastSyncedType: 'default',
     })
   })
 
@@ -330,7 +398,7 @@ describe('sync — push', () => {
     vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
     vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
     vi.mocked(loadMindMap).mockResolvedValue([])
-    const existing: RemoteMindMapRecord = { id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: '[]', updated: '2025-01-01 00:00:00.000Z' }
+    const existing: RemoteMindMapRecord = { id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: '[]', updated: '2025-01-01 00:00:00.000Z', type: '' }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([existing]) } as any })
 
     await runSync({ client, state: emptySyncState() })
@@ -480,6 +548,7 @@ describe('sync — journal des transferts', () => {
       path: 'sous/c.zmap',
       content: JSON.stringify({ cards: [] }),
       updated: '2026-01-02 00:00:00.000Z',
+      type: '',
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([foreign]) } as any })
 
@@ -518,6 +587,7 @@ describe('sync — progression et annulation', () => {
       path: 'c.zmap',
       content: JSON.stringify({ cards: [] }),
       updated: '2026-01-02 00:00:00.000Z',
+      type: '',
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([foreign]) } as any })
     const progress: Array<[number, number]> = []
@@ -623,6 +693,7 @@ describe('sync — conflits', () => {
       path: 'a.zmap',
       content: '[]',
       updated,
+      type: '',
     }
   }
 
@@ -712,6 +783,7 @@ describe('sync — pull', () => {
     path: 'b.zmap',
     content: JSON.stringify({ meta: { id: 'file-2', author: 'prof', role: 'prof', lastModified: '2026-01-01T00:00:00.000Z' }, cards: [] }),
     updated: '2026-01-02 00:00:00.000Z',
+    type: '',
   }
 
   it('writes a new local file for a record authored by someone else', async () => {
@@ -810,6 +882,7 @@ describe('sync — reconciliation des chemins', () => {
       path: 'Chimie/a du carbone.zmap',
       content: JSON.stringify({ cards: [] }),
       updated: 'u1',
+      type: '',
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
 
@@ -838,6 +911,7 @@ describe('sync — reconciliation des chemins', () => {
       path: 'Chimie/a.zmap',
       content: JSON.stringify({ cards: [] }),
       updated: 'u1',
+      type: '',
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
 
@@ -866,6 +940,7 @@ describe('sync — reconciliation des chemins', () => {
       path: 'Chimie/a.zmap',
       content: JSON.stringify({ cards: [] }),
       updated: 'u1',
+      type: '',
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
 
@@ -896,6 +971,7 @@ describe('sync — reconciliation des chemins', () => {
       path: 'Chimie/a.zmap',
       content: JSON.stringify({ cards: [] }),
       updated: 'u1',
+      type: '',
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
 
@@ -963,6 +1039,7 @@ describe('sync — reconciliation des chemins', () => {
       path: 'Chapitre.zmap',
       content: JSON.stringify({ cards: [] }),
       updated: 'u1',
+      type: '',
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
 
@@ -986,6 +1063,7 @@ describe('sync — reconciliation des chemins', () => {
       path: 'distant.zmap',
       content: JSON.stringify({ cards: [] }),
       updated: 'u1',
+      type: '',
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
 
@@ -1014,6 +1092,7 @@ describe('sync — reconciliation des chemins', () => {
       path: 'a.zmap',
       content: JSON.stringify({ cards: [] }),
       updated: 'u1',
+      type: '',
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
     const state = memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0', lastSyncedPath: 'vieux.zmap' } })

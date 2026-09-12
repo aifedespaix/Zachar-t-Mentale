@@ -28,7 +28,7 @@ describe('createSyncClient — mindMaps', () => {
     vi.mocked(pb.collection('cartes_mentales').create).mockResolvedValue(created)
 
     const client = createSyncClient(pb)
-    const result = await client.mindMaps.create({ file_id: 'f2', author: 'aife', path: 'b.zmap', content: '[]' })
+    const result = await client.mindMaps.create({ file_id: 'f2', author: 'aife', path: 'b.zmap', content: '[]', type: 'default' })
 
     // The options argument (`undefined` here) is the cancellation channel.
     expect(pb.collection('cartes_mentales').create).toHaveBeenCalledWith(
@@ -37,6 +37,7 @@ describe('createSyncClient — mindMaps', () => {
         author: 'aife',
         path: 'b.zmap',
         content: '[]',
+        type: 'default',
       },
       undefined
     )
@@ -57,7 +58,7 @@ describe('createSyncClient — mindMaps', () => {
     const client = createSyncClient(pb)
 
     await client.mindMaps.create(
-      { file_id: 'f3', author: 'aife', path: 'c.zmap', content: '[]' },
+      { file_id: 'f3', author: 'aife', path: 'c.zmap', content: '[]', type: 'default' },
       { signal: controller.signal }
     )
 
