@@ -15,6 +15,9 @@ export function syncResultLabel(result: SyncResult): string {
   // sync qui n'a fait que replacer des fichiers se lirait « 0 envoyé(s) », soit
   // exactement la confusion que le compteur « à envoyer » évite par ailleurs.
   if ((result.relocated ?? 0) > 0) parts.push(`${result.relocated ?? 0} déplacé(s)`)
+  // Une adoption de type n'est ni un envoi ni une réception : comme un
+  // déplacement, elle doit se lire même quand les deux compteurs sont à zéro.
+  if ((result.reclassified ?? 0) > 0) parts.push(`${result.reclassified ?? 0} reclassé(s)`)
   if (result.conflicts.length > 0) parts.push(`${result.conflicts.length} conflit(s)`)
   if ((result.notices ?? []).length > 0) parts.push(`${(result.notices ?? []).length} remarque(s)`)
   if (result.errors.length > 0) parts.push(`${result.errors.length} erreur(s)`)

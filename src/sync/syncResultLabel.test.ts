@@ -42,4 +42,18 @@ describe('syncResultLabel', () => {
     const notices = [{ fileId: 'file-1', message: 'déplacé des deux côtés' }]
     expect(syncResultLabel(result({ relocated: 1, notices }))).toBe('0 envoyé(s), 0 reçu(s), 1 déplacé(s), 1 remarque(s)')
   })
+
+  it('mentionne les reclassements', () => {
+    expect(
+      syncResultLabel({
+        pushed: 0,
+        pulled: 0,
+        errors: [],
+        cancelled: false,
+        transferred: [],
+        conflicts: [],
+        reclassified: 2,
+      })
+    ).toContain('2 reclassé(s)')
+  })
 })
