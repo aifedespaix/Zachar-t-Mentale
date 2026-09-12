@@ -20,3 +20,20 @@ export function canReorder(meta: MindMapMeta | null, user: SyncUser): boolean {
   if (meta === null) return true
   return meta.author === user.username || user.role === 'prof'
 }
+
+/**
+ * Whether `user` may change the TYPE of a map.
+ *
+ * Même règle que `canReorder` (auteur ou prof), PLUS une exigence de
+ * `meta` non nul : le type vit dans `meta`, qu'un brouillon local n'a
+ * pas encore. Nommée séparément parce qu'elle décide d'autre chose, et parce
+ * que l'interface et la synchronisation doivent lire la MÊME définition — sans
+ * quoi l'arborescence offrirait un geste que le sync refuserait.
+ *
+ * Le contenu, lui, n'est jamais concerné : un prof classe la carte d'un élève
+ * sans gagner le droit d'en écrire le contenu.
+ */
+export function canClassify(meta: MindMapMeta | null, user: SyncUser): boolean {
+  if (meta === null) return false
+  return meta.author === user.username || user.role === 'prof'
+}
