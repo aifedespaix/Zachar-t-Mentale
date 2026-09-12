@@ -1,4 +1,5 @@
 import { exists, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
+import { DEFAULT_MAP_TYPE, type MapType } from '../types/mapType'
 import type { Card, MindMapMeta, UserRole } from '../types/card'
 import { serializeMindMap, deserializeMindMap } from './serialization'
 
@@ -83,6 +84,7 @@ export async function stampMindMapSyncMeta(path: string, author: string, role: U
     author,
     role,
     lastModified: new Date().toISOString(),
+    type: DEFAULT_MAP_TYPE,
   }
   await writeTextFile(path, serializeMindMap(stamped, cards))
   return true
@@ -109,4 +111,24 @@ export async function saveMindMap(path: string, cards: Card[]): Promise<void> {
   const meta: MindMapMeta | null =
     previousMeta === null ? null : { ...previousMeta, lastModified: new Date().toISOString() }
   await writeTextFile(path, serializeMindMap(meta, cards))
+}
+
+/**
+ * Classe un fichier DÉJÀ publié. Le type vit dans meta : un brouillon local n'en
+ * a pas, et le refus est explicite plutôt que silencieux, pour que l'appelant
+ * puisse le dire.
+ *
+ * lastModified est PRÉSERVÉ : une classification n'est pas une édition de
+ * contenu. Le bumper déclencherait un push de contenu chez l'auteur, alors que
+ * seul le champ type a bougé.
+ *
+ * default est écrit explicitement plutôt que retiré : tous les producteurs
+ * produisent la même forme, et le fichier reste lisible tel quel.
+ */
+export async function setMindMapType(path: string, type: MapType): Promise<void> {
+  const { meta, cards } = deserializeMindMap(await readTextFile(path))
+  if (meta === null) {
+    throw new Error('setMindMapType : ce fichier n’a pas d’identité de synchronisation, impossible de le classer.')
+  }
+  await writeTextFile(path, serializeMindMap({ ...meta, type }, cards))
 }

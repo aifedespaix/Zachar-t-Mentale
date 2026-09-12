@@ -3,6 +3,7 @@ import {
   loadMindMap,
   saveMindMap,
   loadMindMapMeta,
+  setMindMapType,
   stampMindMapSyncMeta,
   stripMindMapSyncMeta,
 } from './fileStore'
@@ -150,6 +151,7 @@ describe('stampMindMapSyncMeta', () => {
     expect(written.cards).toEqual(sample) // the cards themselves are untouched
     expect(written.meta.author).toBe('aife')
     expect(written.meta.role).toBe('prof')
+    expect(written.meta.type).toBe('default')
     expect(written.meta.id).toBeTruthy()
     expect(new Date(written.meta.lastModified).getTime()).toBeGreaterThanOrEqual(before)
   })
@@ -194,5 +196,51 @@ describe('saveMindMap meta preservation', () => {
     expect(savedMeta.author).toBe(meta.author)
     expect(savedMeta.role).toBe(meta.role)
     expect(new Date(savedMeta.lastModified).getTime()).toBeGreaterThanOrEqual(before)
+  })
+
+  it('keeps the type across an autosave, which is not a reclassification', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta: { ...meta, type: 'cours' }, cards: sample }))
+
+    await saveMindMap('/fake/path.zmap', sample)
+
+    expect(JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string).meta.type).toBe('cours')
+  })
+})
+
+describe('setMindMapType', () => {
+  beforeEach(() => {
+    vi.mocked(readTextFile).mockReset()
+    vi.mocked(writeTextFile).mockReset()
+  })
+
+  it('writes the type and preserves everything else, lastModified included', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta, cards: sample }))
+
+    await setMindMapType('/cours/chapitre.zmap', 'cours')
+
+    const [path, contents] = vi.mocked(writeTextFile).mock.calls[0]
+    expect(path).toBe('/cours/chapitre.zmap')
+    const written = JSON.parse(contents as string)
+    expect(written.meta).toEqual({ ...meta, type: 'cours' })
+    expect(written.cards).toEqual(sample)
+    // Le point qui compte : classer n'est pas éditer. Sans ça, la classification
+    // d'un prof déclencherait un push de contenu chez l'auteur.
+    expect(written.meta.lastModified).toBe(meta.lastModified)
+  })
+
+  it('writes default explicitly rather than dropping the field', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta: { ...meta, type: 'cours' }, cards: sample }))
+
+    await setMindMapType('/cours/chapitre.zmap', 'default')
+
+    expect(JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string).meta.type).toBe('default')
+  })
+
+  it('refuses a draft with no meta: there is nowhere to write a type', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify(sample))
+
+    await expect(setMindMapType('/cours/brouillon.zmap', 'cours')).rejects.toThrow(/identité de synchronisation/)
+    expect(writeTextFile).not.toHaveBeenCalled()
   })
 })
