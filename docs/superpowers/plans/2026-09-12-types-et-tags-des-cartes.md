@@ -1543,8 +1543,8 @@ git commit -m "feat(sync): le compte rendu dit les reclassements"
 - Test: `src/components/sidebar/MapTypeBadge.test.tsx`
 
 **Interfaces:**
-- Consumes: `mapTypeOf`, `MAP_TYPE_LABELS`, `MAP_TYPE_DESCRIPTIONS` (Task 1) ; `mapTypeColor` (Task 2) ; `toCss` (`src/colors/contrast.ts`) ; `useResolvedTheme()` ; `Tooltip`, `TooltipTrigger`, `TooltipContent` (`src/components/ui/tooltip.tsx`).
-- Produces: `MapTypeBadge({ type }: { type: string | undefined })` ; rend `null` pour `default` et pour toute valeur inconnue (ramenée à `default`).
+- Consumes: `MAP_TYPES`, `MAP_TYPE_LABELS`, `MAP_TYPE_DESCRIPTIONS`, `MapType` (Task 1) ; `mapTypeColor`, `neutralMapTypeColors` (Task 2) ; `toCss` (`src/colors/contrast.ts`) ; `useResolvedTheme()` ; `Tooltip`, `TooltipTrigger`, `TooltipContent` (`src/components/ui/tooltip.tsx`).
+- Produces: `MapTypeBadge({ type }: { type: string | undefined })` ; rend `null` pour une valeur absente, `''` ou `default` ; rend une pilule NEUTRE avec le libellé BRUT pour une valeur inconnue (le spec : une valeur inconnue reste lisible).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1563,18 +1563,20 @@ function show(type: string | undefined) {
 }
 
 describe('MapTypeBadge', () => {
-  it('n’affiche rien pour default ni pour une valeur absente', () => {
+  it('n’affiche rien pour default, une valeur absente ou vide', () => {
     expect(show(undefined).container).toBeEmptyDOMElement()
+    expect(show('').container).toBeEmptyDOMElement()
     expect(show('default').container).toBeEmptyDOMElement()
   })
 
-  it('affiche le libellé du type', () => {
+  it('affiche le libellé du type connu', () => {
     show('cours')
     expect(screen.getByTestId('map-type-badge')).toHaveTextContent('Cours')
   })
 
-  it('n’affiche rien pour une valeur inconnue, sans casser', () => {
-    expect(show('futur').container).toBeEmptyDOMElement()
+  it('affiche une pilule neutre avec le libellé BRUT pour une valeur inconnue', () => {
+    show('futur')
+    expect(screen.getByTestId('map-type-badge')).toHaveTextContent('futur')
   })
 
   it('nomme la pilule pour les technologies d’assistance', () => {
@@ -1595,30 +1597,36 @@ Expected: FAIL — `Failed to resolve import "./MapTypeBadge"`.
 import { toCss } from '../../colors/contrast'
 import { mapTypeColor } from '../../colors/mapTypeColors'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
-import { MAP_TYPE_DESCRIPTIONS, MAP_TYPE_LABELS, mapTypeOf } from '../../types/mapType'
+import { MAP_TYPE_DESCRIPTIONS, MAP_TYPE_LABELS, MAP_TYPES, type MapType } from '../../types/mapType'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
 /**
- * Le tag coloré d’une carte, dans l’arborescence. default ne rend rien du
- * tout : l’absence de tag EST l’information « pas encore classée ». Une valeur
- * inconnue dégrade vers default (donc rien), jamais vers une erreur.
+ * Le tag coloré d’une carte, dans l’arborescence. `default` (ou absent) ne rend
+ * rien du tout : l’absence de tag EST l’information « pas encore classée ».
  *
- * Le détail au survol passe par le Tooltip de l’app, pas une popover Radix :
- * un libellé et une phrase tiennent dans un tooltip, et celui-ci est déjà
- * monté par FileSidebar.
+ * Une valeur INCONNUE (fichier écrit par une version future, main éditée) garde
+ * sa pilule neutre et son libellé BRUT plutôt que de disparaître : `mapTypeColor`
+ * rend le neutre pour ce cas, et le spec veut qu’elle reste lisible.
+ *
+ * Le détail au survol passe par le Tooltip de l’app, pas une popover Radix : un
+ * libellé et une phrase tiennent dans un tooltip, et celui-ci est déjà monté par
+ * FileSidebar.
  */
 export function MapTypeBadge({ type }: { type: string | undefined }) {
-  const resolved = mapTypeOf(type)
   const theme = useResolvedTheme()
-  const color = mapTypeColor(resolved, theme)
+  const color = mapTypeColor(type, theme)
   if (color === null) return null
+
+  const categorized = type !== undefined && (MAP_TYPES as readonly string[]).includes(type)
+  const label = categorized ? MAP_TYPE_LABELS[type as MapType] : (type ?? '')
+  const description = categorized ? MAP_TYPE_DESCRIPTIONS[type as MapType] : 'Type inconnu'
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           data-testid="map-type-badge"
-          aria-label={MAP_TYPE_LABELS[resolved]}
+          aria-label={label}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -1634,12 +1642,12 @@ export function MapTypeBadge({ type }: { type: string | undefined }) {
             whiteSpace: 'nowrap',
           }}
         >
-          {MAP_TYPE_LABELS[resolved]}
+          {label}
         </span>
       </TooltipTrigger>
       <TooltipContent>
-        <span style={{ fontWeight: 600 }}>{MAP_TYPE_LABELS[resolved]}</span>
-        <span style={{ opacity: 0.8 }}>{MAP_TYPE_DESCRIPTIONS[resolved]}</span>
+        <span style={{ fontWeight: 600 }}>{label}</span>
+        <span style={{ opacity: 0.8 }}>{description}</span>
       </TooltipContent>
     </Tooltip>
   )
@@ -1649,7 +1657,7 @@ export function MapTypeBadge({ type }: { type: string | undefined }) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `bunx vitest run src/components/sidebar/MapTypeBadge.test.tsx`
-Expected: PASS — 4 tests.
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1657,8 +1665,6 @@ Expected: PASS — 4 tests.
 git add src/components/sidebar/MapTypeBadge.tsx src/components/sidebar/MapTypeBadge.test.tsx
 git commit -m "feat(sidebar): pilule de type avec tooltip"
 ```
-
----
 
 ### Task 10: `FileTreeRow` — la pilule sur la ligne et le sous-menu
 
