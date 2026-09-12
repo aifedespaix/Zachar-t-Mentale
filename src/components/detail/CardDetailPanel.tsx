@@ -24,6 +24,7 @@ import { DescriptionDialog } from '../../content/DescriptionDialog'
 import { imageBlockFrom } from '../../content/imageBlock'
 import { pickImageFile } from '../../content/pickImage'
 import { assetSrc } from '../../persistence/assets'
+import { prefersReducedMotion } from '../../utils/prefersReducedMotion'
 import {
   clampCardDetailWidth,
   loadCardDetailWidth,
@@ -100,6 +101,39 @@ export function CardDetailPanel() {
   const [resizing, setResizing] = useState(false)
   const handleRef = useRef<HTMLDivElement>(null)
 
+  const isOpen = openEntries.length > 0
+  // Stays mounted a beat after the last fiche closes, so the panel can shrink
+  // away instead of vanishing mid-frame; `wasOpenRef` is what tells the effect
+  // below "this is a fresh open" from "this is a fresh close" without also
+  // firing on every unrelated re-render.
+  const [mounted, setMounted] = useState(isOpen)
+  // Also true when the panel mounts already open (e.g. a fiche was open
+  // before this component existed), so that case grows from zero too.
+  const [entering, setEntering] = useState(isOpen)
+  const wasOpenRef = useRef(isOpen)
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      setMounted(true)
+      setEntering(true)
+      wasOpenRef.current = true
+    }
+    if (!isOpen && wasOpenRef.current) {
+      wasOpenRef.current = false
+      const timer = setTimeout(() => setMounted(false), 220)
+      return () => clearTimeout(timer)
+    }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!entering) return
+    // One frame at width 0 before jumping to `width` is what makes the grow
+    // an animation instead of a snap: setting both in the same render would
+    // paint the final width directly, with nothing to transition from.
+    const frame = requestAnimationFrame(() => setEntering(false))
+    return () => cancelAnimationFrame(frame)
+  }, [entering])
+
   const hoveredCardId = useCardHoverStore(s => s.hoveredCardId)
   // Where each open fiche lives in the DOM, keyed by card id: the auto-scroll
   // needs the element, and a callback ref on `CardFiche` is the one place where
@@ -119,10 +153,7 @@ export function CardDetailPanel() {
     if (hoveredCardId === null) return
     const fiche = ficheRefs.current.get(hoveredCardId)
     if (fiche === undefined) return
-    const reduceMotion =
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    fiche.scrollIntoView?.({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' })
+    fiche.scrollIntoView?.({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'nearest' })
   }, [hoveredCardId])
 
   // Same rationale as the file sidebar's: writing on every pointer move would
@@ -171,8 +202,9 @@ export function CardDetailPanel() {
     }
   }
 
-  if (openEntries.length === 0) return null
+  if (!mounted) return null
 
+  const renderedWidth = isOpen && !entering ? width : 0
   const editingCard = editingCardId === null ? undefined : cards.find(card => card.id === editingCardId)
 
   return (
@@ -183,13 +215,16 @@ export function CardDetailPanel() {
             aria-label="Fiches de cartes"
             style={{
               position: 'relative',
-              width,
+              width: renderedWidth,
               flexShrink: 0,
               display: 'flex',
               flexDirection: 'column',
               borderLeft: '1px solid var(--border)',
               background: 'var(--background)',
               overflowY: 'auto',
+              // Off during a drag and for "reduce motion", same rationale as
+              // the file sidebar's own width transition.
+              transition: resizing || prefersReducedMotion() ? 'none' : 'width 220ms ease',
             }}
           >
             {/* Straddles the border, like the file sidebar's handle, so the grab

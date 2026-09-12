@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { CardDetailPanel } from './CardDetailPanel'
 import { useCardsStore, createCardsStore } from '../../state/useCardsStore'
 import { useCardDetailStore } from '../../state/useCardDetailStore'
@@ -149,6 +149,47 @@ describe('CardDetailPanel', () => {
     await user.click(screen.getByRole('button', { name: /fermer la fiche de signes contraires/i }))
 
     expect(useCardDetailStore.getState().open).toEqual([])
+  })
+
+  describe('open/close animation', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('keeps the panel mounted through the closing animation, then removes it', () => {
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+      vi.useFakeTimers()
+
+      act(() => useCardDetailStore.getState().closeAll())
+      expect(screen.getByLabelText('Fiches de cartes')).toBeInTheDocument()
+
+      act(() => vi.advanceTimersByTime(220))
+      expect(screen.queryByLabelText('Fiches de cartes')).not.toBeInTheDocument()
+    })
+
+    it('grows the panel from zero width when it first opens', () => {
+      vi.useFakeTimers()
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+
+      expect(screen.getByLabelText('Fiches de cartes')).toHaveStyle({ width: '0px' })
+
+      act(() => vi.advanceTimersToNextFrame())
+      expect(screen.getByLabelText('Fiches de cartes')).not.toHaveStyle({ width: '0px' })
+    })
+
+    it('turns off the width transition while the resize handle is being dragged', () => {
+      useCardDetailStore.getState().show(leaf.id)
+      render(<CardDetailPanel />)
+      const panel = screen.getByLabelText('Fiches de cartes')
+      const handle = screen.getByRole('separator', { name: /redimensionner le panneau des fiches/i })
+
+      expect(panel).toHaveStyle({ transition: 'width 220ms ease' })
+
+      fireEvent.pointerDown(handle, { pointerId: 1, clientX: 240 })
+      expect(panel).toHaveStyle({ transition: 'none' })
+    })
   })
 
   it('exposes a resize handle bounded to the panel’s limits', () => {

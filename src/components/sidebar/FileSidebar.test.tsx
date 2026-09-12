@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { FileSidebar } from './FileSidebar'
 import {
   DEFAULT_SIDEBAR_WIDTH,
@@ -336,6 +336,49 @@ describe('FileSidebar', () => {
     expect(screen.getByText('Cartes mentales')).toBeInTheDocument()
   })
 
+  it('animates the collapse/expand width change instead of snapping', async () => {
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    expect(sidebarPanel()).toHaveStyle({ transition: 'width 220ms ease' })
+  })
+
+  it('keeps the same panel element across collapse/expand, animating its width', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    const panel = screen.getByTestId('file-sidebar')
+    expect(panel).toHaveStyle({ width: `${DEFAULT_SIDEBAR_WIDTH}px`, transition: 'width 220ms ease' })
+
+    await user.click(screen.getByRole('button', { name: 'Replier la barre latérale' }))
+
+    expect(screen.getByTestId('file-sidebar')).toBe(panel)
+    expect(panel).toHaveStyle({ width: '32px', transition: 'width 220ms ease' })
+  })
+
+  it('turns off the width transition while the border is being dragged', async () => {
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+    const handle = screen.getByRole('separator', { name: 'Redimensionner la barre latérale' })
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 240 })
+    expect(sidebarPanel()).toHaveStyle({ transition: 'none' })
+
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 240 })
+    expect(sidebarPanel()).toHaveStyle({ transition: 'width 220ms ease' })
+  })
+
+  it('turns off the width transition when the system asks for reduced motion', async () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }))
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    expect(sidebarPanel()).toHaveStyle({ transition: 'none' })
+
+    vi.unstubAllGlobals()
+  })
+
   it('runs a full manual sync from the footer button', async () => {
     const user = userEvent.setup()
     render(<FileSidebar onOpenFile={() => {}} />)
@@ -367,6 +410,60 @@ describe('FileSidebar', () => {
     await user.click(screen.getByRole('button', { name: 'Masquer le message de synchronisation' }))
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  describe('auto-hide of sync messages', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('auto-hides a sync error banner after 5 seconds', async () => {
+      render(<FileSidebar onOpenFile={() => {}} />)
+      await screen.findByText('Cartes mentales')
+
+      vi.useFakeTimers()
+      act(() => useSyncStore.setState({ error: 'Serveur injoignable.' }))
+      expect(screen.getByRole('alert')).toHaveTextContent('Serveur injoignable.')
+
+      act(() => vi.advanceTimersByTime(5000))
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('auto-hides a sync result banner after 5 seconds', async () => {
+      render(<FileSidebar onOpenFile={() => {}} />)
+      await screen.findByText('Cartes mentales')
+
+      vi.useFakeTimers()
+      act(() =>
+        useSyncStore.setState({
+          lastResult: { pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [], transferred: [] },
+        })
+      )
+      expect(screen.getByText(/2 envoyé\(s\), 1 reçu\(s\)/)).toBeInTheDocument()
+
+      act(() => vi.advanceTimersByTime(5000))
+
+      expect(screen.queryByText(/2 envoyé\(s\), 1 reçu\(s\)/)).not.toBeInTheDocument()
+    })
+
+    it('pauses the auto-hide timer while the banner is hovered', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      render(<FileSidebar onOpenFile={() => {}} />)
+      await screen.findByText('Cartes mentales')
+
+      vi.useFakeTimers()
+      act(() => useSyncStore.setState({ error: 'Serveur injoignable.' }))
+      const banner = screen.getByRole('alert')
+
+      await user.hover(banner)
+      act(() => vi.advanceTimersByTime(10_000))
+      expect(screen.getByRole('alert')).toBeInTheDocument()
+
+      await user.unhover(banner)
+      act(() => vi.advanceTimersByTime(5000))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
   })
 
   it('summarises the last sync in the footer', async () => {

@@ -20,6 +20,7 @@ import { formatRelativeTime } from '../../utils/relativeTime'
 import { FileTreeRow } from './FileTreeRow'
 import { TreeDragGhost } from './TreeDragGhost'
 import { filterTree } from './treeFilter'
+import { prefersReducedMotion } from '../../utils/prefersReducedMotion'
 import {
   clampSidebarWidth,
   loadSidebarWidth,
@@ -138,8 +139,27 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
    * run, and closing the sidebar's copy must not blank it there.
    */
   const [syncFeedbackDismissed, setSyncFeedbackDismissed] = useState(false)
+  /** Hovering the sync banner holds off the auto-hide timer below. */
+  const [syncFeedbackHovered, setSyncFeedbackHovered] = useState(false)
   const handleRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  const syncRunning = syncStatus === 'syncing'
+  // While a run is in flight, the running banner IS the message: showing last
+  // run's result beside it would describe a state that no longer holds.
+  const showSyncError = syncError !== null && !syncFeedbackDismissed && !syncRunning
+  const showSyncResult =
+    syncError === null && lastResult !== null && !syncFeedbackDismissed && !syncRunning
+
+  // Reads and dismisses only — the settings panel keeps the store's own record
+  // of the run, so this timer never touches anything the settings panel shows.
+  // Not the workspace error banner: that one names a problem the user has to
+  // act on (a missing folder, a permission failure), not a transient result.
+  useEffect(() => {
+    if ((!showSyncError && !showSyncResult) || syncFeedbackHovered) return
+    const timer = setTimeout(() => setSyncFeedbackDismissed(true), 5000)
+    return () => clearTimeout(timer)
+  }, [showSyncError, showSyncResult, syncFeedbackHovered])
 
   // Selecting what is already there is what makes the shortcut a REPLACEMENT:
   // pressing it again retypes the query from scratch rather than appending to
@@ -345,49 +365,6 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
     />
   )
 
-  if (collapsed) {
-    return (
-      <TooltipProvider>
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <div
-              style={{
-                width: 32,
-                borderRight: '1px solid var(--border)',
-                display: 'flex',
-                justifyContent: 'center',
-                // Bottom-aligned on purpose: folding and unfolding happen in the
-                // same corner of the screen, so the control does not appear to jump
-                // across the window between the two states.
-                alignItems: 'flex-end',
-                paddingBottom: 8,
-              }}
-            >
-              <CommandButton
-                command="view.toggleSidebar"
-                icon={PanelLeftOpen}
-                label="Déplier la barre latérale"
-                variant="ghost"
-                size="icon-sm"
-              />
-            </div>
-          </ContextMenuTrigger>
-          {firstRoot !== undefined && (
-            <ContextMenuContent>{folderCreation.menuItems}</ContextMenuContent>
-          )}
-        </ContextMenu>
-        {newFolderDialog}
-        {folderCreation.dialog}
-      </TooltipProvider>
-    )
-  }
-
-  const syncRunning = syncStatus === 'syncing'
-  // While a run is in flight, the running banner IS the message: showing last
-  // run's result beside it would describe a state that no longer holds.
-  const showSyncError = syncError !== null && !syncFeedbackDismissed && !syncRunning
-  const showSyncResult =
-    syncError === null && lastResult !== null && !syncFeedbackDismissed && !syncRunning
   // The per-file failures are far too long to list in a 240 px column; they stay
   // readable in the tooltip, and in full in Réglages → Synchronisation.
   // Both lists are far too long for a 240 px column, and both are detailed in
@@ -460,18 +437,40 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
+            data-testid="file-sidebar"
             style={{
               // `flexShrink: 0` so the canvas beside it, not the sidebar, gives way
               // when the window gets narrow — otherwise a drag to 500px would be
               // silently undone by the flex layout the moment the window shrank.
-              width,
+              width: collapsed ? 32 : width,
               flexShrink: 0,
               borderRight: '1px solid var(--border)',
               display: 'flex',
-              flexDirection: 'column',
-              position: 'relative',
+              flexDirection: collapsed ? undefined : 'column',
+              // Collapsed centers the single toggle button instead of laying out
+              // a column; bottom-aligned so folding/unfolding does not make the
+              // control jump to a different corner of the screen.
+              justifyContent: collapsed ? 'center' : undefined,
+              alignItems: collapsed ? 'flex-end' : undefined,
+              paddingBottom: collapsed ? 8 : undefined,
+              position: collapsed ? undefined : 'relative',
+              // Off during a drag — a drag fires this every pointer move, and
+              // animating each of those would make the border visibly lag
+              // behind the cursor instead of following it — and off for a
+              // system-level "reduce motion" request.
+              transition: resizing || prefersReducedMotion() ? 'none' : 'width 220ms ease',
             }}
           >
+            {collapsed ? (
+              <CommandButton
+                command="view.toggleSidebar"
+                icon={PanelLeftOpen}
+                label="Déplier la barre latérale"
+                variant="ghost"
+                size="icon-sm"
+              />
+            ) : (
+              <>
             {/*
               The header is the title and nothing else. Every action lives in the
               footer bar below, so the tree starts right under the heading that
@@ -583,7 +582,13 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
                   </div>
                 )}
                 {showSyncError && (
-                  <div role="alert" className="status-banner" style={{ margin: 0 }}>
+                  <div
+                    role="alert"
+                    className="status-banner"
+                    style={{ margin: 0 }}
+                    onMouseEnter={() => setSyncFeedbackHovered(true)}
+                    onMouseLeave={() => setSyncFeedbackHovered(false)}
+                  >
                     <span style={{ flex: 1 }}>{syncError}</span>
                     <Button
                       variant="ghost"
@@ -605,6 +610,8 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
                     }
                     style={{ margin: 0 }}
                     title={syncResultDetail}
+                    onMouseEnter={() => setSyncFeedbackHovered(true)}
+                    onMouseLeave={() => setSyncFeedbackHovered(false)}
                   >
                     <span style={{ flex: 1 }}>{syncResultLabel(lastResult)}</span>
                     <Button
@@ -753,6 +760,8 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
             />
             {newFolderDialog}
             {folderCreation.dialog}
+              </>
+            )}
           </div>
         </ContextMenuTrigger>
         {firstRoot !== undefined && (
