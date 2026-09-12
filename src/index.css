@@ -608,15 +608,6 @@
 .file-tree-row--active:hover {
   background: color-mix(in oklch, var(--foreground), transparent 88%);
 }
-/* A file that is not yours: the logo's orange, diluted. Never the grey it used
-   to be, which read as "disabled" rather than "read-only". */
-.file-tree-row--locked {
-  background: var(--locked-surface);
-}
-.file-tree-row--locked:hover {
-  background: var(--locked-surface-hover);
-}
-
 /*
  * The locked row's icon: the app's own mark, tinted. A mask keeps
  * `/favicon.svg` the ONE source of the artwork — the logo is painted in

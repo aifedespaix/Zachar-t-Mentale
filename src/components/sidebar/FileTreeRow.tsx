@@ -39,7 +39,7 @@ import { MapTypeBadge } from './MapTypeBadge'
  * The class list shared by every row: the base, then whichever state modifiers
  * apply. One function rather than a template string at each call site, so a row
  * can never end up half-styled — the drop highlight and the in-flight fade come
- * from the same place as the active / locked wash they replace.
+ * from the same place as the active wash they replace.
  */
 function rowClassName(modifiers: Array<string | false | undefined>): string {
   return ['file-tree-row', ...modifiers.filter(Boolean)].join(' ')
@@ -504,7 +504,7 @@ export function FileTreeRow({
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <ContextMenu>
           <ContextMenuTrigger asChild disabled={renaming}>
-            <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
               {renaming ? (
                 <input
                   autoFocus
@@ -534,7 +534,6 @@ export function FileTreeRow({
                   onDoubleClick={() => setRenaming(true)}
                   title={displayName === node.name ? undefined : node.name}
                   className={rowClassName([
-                    isLocked && 'file-tree-row--locked',
                     isActive && 'file-tree-row--active',
                     isDropTarget && 'file-tree-row--drop-target',
                     dragging && 'file-tree-row--dragging',

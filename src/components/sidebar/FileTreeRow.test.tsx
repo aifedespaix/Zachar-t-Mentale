@@ -931,6 +931,26 @@ describe('FileTreeRow', () => {
   })
 })
 
+describe('FileTreeRow — mise en page de la ligne', () => {
+  const node: FileTreeNode = { type: 'mindmap', name: 'Chapitre très long.zmap', path: '/cours/Chapitre très long.zmap' }
+
+  beforeEach(() => {
+    resetWorkspaceStore()
+    vi.mocked(useMindMapFormatValid).mockReturnValue(true)
+    vi.mocked(useMindMapAuthor).mockReturnValue(null)
+  })
+
+  it('borne la ligne pour que le nom s’ellipse au lieu d’élargir l’arborescence', () => {
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    // Le conteneur flex entre le bouton et la sidebar doit porter min-width: 0 :
+    // sans lui la ligne se dimensionne sur son contenu et déborde
+    // horizontalement au lieu de terminer le nom par « … ».
+    const button = screen.getByRole('button', { name: /Chapitre très long/ })
+    expect(button.parentElement).toHaveStyle({ minWidth: '0px' })
+  })
+})
+
 describe('FileTreeRow — verrouillage non-auteur', () => {
   beforeEach(() => {
     resetWorkspaceStore()
@@ -959,16 +979,16 @@ describe('FileTreeRow — verrouillage non-auteur', () => {
     expect(screen.getByLabelText(/aife.*lecture seule/)).toBeInTheDocument()
   })
 
-  it('dresses that lock in the app logo, tinted, and washes the row in the same orange', () => {
+  it('dresses that lock in the app logo, tinted, and leaves the row’s background alone', () => {
     useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
     vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' })
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    // The wash is a class, so the colour comes from `--locked` — the very same
-    // token the toolbar's padlock wears.
-    expect(screen.getByRole('button', { name: /Chapitre 1/ })).toHaveClass('file-tree-row--locked')
     // The mark itself: the app logo's masked silhouette, never a padlock glyph.
     expect(screen.getByLabelText(/aife.*lecture seule/)).toHaveClass('file-tree-row__logo')
+    // Seule l'icône dit « pas à toi » : la ligne garde le fond commun, sans
+    // lavis orange qui la détacherait du reste de l'arborescence.
+    expect(screen.getByRole('button', { name: /Chapitre 1/ })).not.toHaveClass('file-tree-row--locked')
     expect(document.querySelector('svg.lucide-lock')).toBeNull()
   })
 })
