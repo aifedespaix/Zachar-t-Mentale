@@ -52,6 +52,34 @@ type CardBlock =
   carte s'ouvre d'un double-clic depuis l'explorateur. Le contenu reste du JSON.
   Les anciens `.json` continuent de s'ouvrir, mais rien de neuf n'en écrit.
 
+## Où écrire le fichier
+
+L'arborescence de `.cartes-mentales/` est : `<matière>/<chapitre>/<fichier>.zmap`.
+
+- **Matière** : dossier kebab-case, nom complet non abrégé (`mathematiques`,
+  `physique-chimie`, `anglais`, `espagnol`, `francais`…). Réutiliser le
+  dossier existant de la matière ; n'en créer un nouveau que si elle n'existe
+  encore nulle part.
+- **Chapitre** : un dossier par chapitre, kebab-case. Préfixe numérique
+  (`01-`, `02-`…) UNIQUEMENT si le support source donne un vrai numéro de
+  chapitre ou un ordre explicite dans la progression — jamais inventé (déjà
+  dans les erreurs fréquentes ci-dessous). Sinon, un slug thématique seul
+  (`edward-hopper/`, `cahier-de-lecteur/`) : ces matières n'ont pas toujours
+  de progression numérotée, et ce n'est pas grave.
+- **Fichier** : nommé d'après le sous-thème précis qu'il couvre
+  (`introduction-et-formule.zmap`, `biographie.zmap`), jamais d'après le
+  chapitre déjà donné par le nom du dossier, et jamais suffixé par le type de
+  contenu (`-cours`, `-exo`…) — ce type est `meta.type`, pas le nom de
+  fichier. Un chapitre découpé en plusieurs fichiers (cf. « Si un chapitre est
+  trop gros ») les regroupe tous dans le MÊME dossier de chapitre.
+- **Jamais de PDF ni de support brut sous `.cartes-mentales/`** : les sources
+  restent dans `.cours/`. `.cartes-mentales/` ne contient que des `.zmap`
+  (et leurs `.assets/` générés par l'app elle-même).
+- **Ne jamais créer de dossier `.assets` à la main** : l'app le dérive du nom
+  du fichier `.zmap` lui-même (`nom-fichier.assets/`) dès qu'une image y est
+  ajoutée depuis l'interface — hors périmètre de cette skill (cf. « Pas de
+  bloc image » plus bas).
+
 ## Définition ou média : la carte est l'un OU l'autre
 
 Une carte est `kind: 'media'` quand son contenu n'énonce pas un fait ou une
@@ -347,6 +375,8 @@ dans l'arbre, à côté de trois distracteurs. Un renvoi y devient du bruit.
 | Renvoi d'une card à une autre (« comme ci-dessus ») | Une définition est lue seule en quiz, hors de son contexte |
 | Inventer un numéro de chapitre non trouvé dans les sources | Nommer par slug thématique si le numéro réel n'est pas connu |
 | Titre identique à celui d'une carte d'une autre branche | Rend le QCM titre→définition réellement ambigu — aucune des deux définitions n'est reconnaissable comme LA bonne réponse |
+| Écrire le `.zmap` directement sous `<matière>/`, sans dossier de chapitre | Casse l'arborescence `matière/chapitre/fichier.zmap` — même un chapitre à un seul fichier a son dossier |
+| Suffixer le nom de fichier par le type (`-cours`, `-exo`) | Le type est déjà `meta.type` ; le nom de fichier décrit le sous-thème, pas la nature du contenu |
 
 ## Adaptation à d'autres matières
 
