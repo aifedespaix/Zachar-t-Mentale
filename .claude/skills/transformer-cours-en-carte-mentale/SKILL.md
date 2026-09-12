@@ -8,7 +8,7 @@ description: Use when converting a course PDF (or any raw course material — wo
 ## Vue d'ensemble
 
 Convertit un support de cours brut (PDF, fiche à trous, carte mentale existante
-mal structurée) en un fichier `Card[]` JSON conforme au schéma de l'app
+mal structurée) en un fichier `.zmap` JSON, l'enveloppe `{ meta, cards }`, conforme au schéma de l'app
 (`src/types/card.ts`). **Le schéma de l'app est l'unique source de vérité
 structurelle** — jamais la mise en page ou la hiérarchie visuelle du document
 source, même s'il s'agit déjà d'une carte mentale (XMind, etc.) donnée en
