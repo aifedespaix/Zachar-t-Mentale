@@ -39,8 +39,15 @@ type CardBlock =
 
 - Un fichier = une racine unique = un chapitre. Arbre strict, un seul parent
   par card. Si un chapitre est trop gros, le découper en plusieurs fichiers.
-- Sortie : JSON array de `Card`, `JSON.stringify(cards, null, 2)`, un fichier
-  par chapitre (voir `src/persistence/serialization.ts`).
+- Sortie : l’ENVELOPPE `{ "meta": { … }, "cards": [ … ] }`, sérialisée
+  `JSON.stringify({ meta, cards }, null, 2)`, un fichier par chapitre.
+- `meta` = `{ "id": <uuid>, "author": <pseudo fourni>, "role": <"eleve" | "prof" fourni>, "lastModified": <ISO maintenant>, "type": <type> }`.
+  Le pseudo et le rôle sont ceux de la personne pour qui le fichier est produit ;
+  si l’invocation ne les donne pas, les DEMANDER avant d’écrire.
+- `type` appartient à `"cours" | "exo" | "prise de notes" | "corrections" | "default"` :
+  `cours` pour un contenu de référence, `exo` pour un entraînement,
+  `prise de notes` pour des notes à compléter, `corrections` pour une correction,
+  `default` si le document ne relève clairement d’aucun.
 - Extension : `.zmap` — c'est celle que l'installeur associe à l'app, donc la
   carte s'ouvre d'un double-clic depuis l'explorateur. Le contenu reste du JSON.
   Les anciens `.json` continuent de s'ouvrir, mais rien de neuf n'en écrit.
