@@ -14,6 +14,12 @@ export interface SyncStateEntry {
   lastSyncedPath?: string
   /** Absent = inconnu ; la détection de conflit retombe alors sur la révision. */
   lastSyncedContentHash?: string
+  /**
+   * Le type convenu au dernier push ou pull. Absent = inconnu (une entrée
+   * migrée depuis avant le champ), et le point d'accord implicite est alors
+   * `default` — jamais le type local.
+   */
+  lastSyncedType?: string
 }
 
 export interface ServerSyncState {

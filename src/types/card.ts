@@ -1,4 +1,5 @@
 import type { CardBlock } from './cardBlock'
+import type { MapType } from './mapType'
 
 export type CardLevel = 1 | 2 | 3 | 4
 
@@ -17,6 +18,12 @@ export interface MindMapMeta {
   author: string
   role: UserRole
   lastModified: string
+  /**
+   * Le type de la carte, posé à la publication (`default`) puis modifiable
+   * par l'auteur ou un prof. Absent = `default` : les fichiers écrits
+   * avant ce champ restent lisibles tels quels, sans migration.
+   */
+  type?: MapType
 }
 
 /**
