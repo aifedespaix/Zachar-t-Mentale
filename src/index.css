@@ -750,3 +750,40 @@
   color: var(--locked);
   background: var(--locked-surface-hover);
 }
+
+/*
+ * The quiz button, made to stand out from its neighbours: a spinning rainbow
+ * ring for a border (the gradient-border trick — a transparent border painted
+ * by two background layers, one clipped to the padding box for the button's
+ * own fill, one to the border box for the gradient) and the cap icon itself
+ * cycling through hue via a filter, since `currentColor` can't paint a stroke
+ * with more than one colour on its own.
+ */
+.toolbar-quiz--rainbow[data-variant='outline'] {
+  border: 2px solid transparent;
+  background-image: linear-gradient(var(--background), var(--background)),
+    conic-gradient(from 0deg, #ff3b3b, #ff9d3b, #ffe33b, #3bff6a, #3bd4ff, #7a3bff, #ff3bd4, #ff3b3b);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+}
+.toolbar-quiz--rainbow[data-variant='outline']:hover {
+  background-image: linear-gradient(var(--muted), var(--muted)),
+    conic-gradient(from 0deg, #ff3b3b, #ff9d3b, #ffe33b, #3bff6a, #3bd4ff, #7a3bff, #ff3bd4, #ff3b3b);
+}
+.toolbar-quiz--rainbow svg {
+  color: #ff3b3b;
+  animation: toolbar-quiz-hue 4s linear infinite;
+}
+
+@keyframes toolbar-quiz-hue {
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toolbar-quiz--rainbow svg {
+    animation: none;
+    color: color-mix(in oklch, #ff3b3b, #7a3bff 50%);
+  }
+}

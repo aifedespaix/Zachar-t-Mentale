@@ -338,7 +338,7 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
 
         <CommandButton command="card.addFloating" icon={Sparkles} />
         <CommandButton command="file.export" icon={Download} />
-        <CommandButton command="app.quiz" icon={GraduationCap} />
+        <CommandButton command="app.quiz" icon={GraduationCap} className="toolbar-quiz--rainbow" />
 
         <span className="toolbar-separator" aria-hidden />
 
