@@ -25,6 +25,7 @@ import type { Card } from '../../types/card'
 import { useCardsStore, selectEditsBlocked } from '../../state/useCardsStore'
 import { useCardDetailStore } from '../../state/useCardDetailStore'
 import { useCardHoverStore } from '../../state/useCardHoverStore'
+import { useCardSelectionStore } from '../../state/useCardSelectionStore'
 import { useWorkspaceStore } from '../../state/useWorkspaceStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
@@ -189,6 +190,19 @@ export function CardDetailPanel() {
     if (fiche === undefined) return
     fiche.scrollIntoView?.({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'nearest' })
   }, [hoveredCardId])
+
+  const selectedCardId = useCardSelectionStore(s => s.selectedCardId)
+  /**
+   * Same auto-scroll as the hover one above, keyed on selection instead — the
+   * one that matters for keyboard/minimap navigation, which moves the
+   * selection without ever touching the pointer.
+   */
+  useEffect(() => {
+    if (selectedCardId === null) return
+    const fiche = ficheRefs.current.get(selectedCardId)
+    if (fiche === undefined) return
+    fiche.scrollIntoView?.({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'nearest' })
+  }, [selectedCardId])
 
   // Same rationale as the file sidebar's: writing on every pointer move would
   // hammer `localStorage` a hundred times a drag for a value only the next
@@ -522,6 +536,11 @@ function CardFiche({
   const hovered = useCardHoverStore(s => s.hoveredCardId === card.id)
   const hoverCard = useCardHoverStore(s => s.hover)
   const unhoverCard = useCardHoverStore(s => s.unhover)
+  // The fiche half of the SELECTION cross-highlight, mirroring `CardNode`'s own
+  // `selected` — same neutral `--ring` colour on both sides, kept distinct
+  // from `hovered`'s level colour so "the card I clicked" and "the card my
+  // pointer happens to be over" never look the same fiche.
+  const selected = useCardSelectionStore(s => s.selectedCardId === card.id)
 
   return (
     <ContextMenu>
@@ -530,17 +549,28 @@ function CardFiche({
           ref={sectionRef}
           aria-label={`Fiche de ${card.title}`}
           data-hovered={hovered}
+          data-selected={selected}
           onMouseEnter={() => hoverCard(card.id)}
           onMouseLeave={() => unhoverCard(card.id)}
           style={{
             borderBottom: '1px solid var(--border)',
             // Discreet and symmetric with the card's halo: a faint level-tinted
-            // wash plus a crisp 2px accent bar at the panel's edge. The bar is an
+            // wash plus a crisp accent bar at the panel's edge. The bar is an
             // INSET SHADOW, not a border, so switching it on moves nothing.
-            background: hovered
-              ? `color-mix(in oklch, ${toCss(colors.bg)}, transparent 92%)`
-              : undefined,
-            boxShadow: `inset 2px 0 0 ${hovered ? toCss(colors.border) : 'transparent'}`,
+            //
+            // Selection wins the background wash when both states apply (a
+            // flat background can only show one tint at a time), but the bar
+            // stacks like the card's own ring: hover's 2px on top, selection's
+            // wider 4px showing through behind it.
+            background: selected
+              ? 'color-mix(in oklch, var(--ring), transparent 85%)'
+              : hovered
+                ? `color-mix(in oklch, ${toCss(colors.bg)}, transparent 92%)`
+                : undefined,
+            boxShadow: [
+              `inset 2px 0 0 ${hovered ? toCss(colors.border) : 'transparent'}`,
+              `inset 4px 0 0 ${selected ? 'var(--ring)' : 'transparent'}`,
+            ].join(', '),
             transition: 'background 140ms ease, box-shadow 140ms ease',
           }}
         >
@@ -610,9 +640,15 @@ function CardFiche({
                       ? `Désépingler la fiche de ${card.title}`
                       : `Épingler la fiche de ${card.title}`
                   }
+                  // Pinned reads as "belongs to this branch", so it borrows the
+                  // fiche's own level colour (the same one on the left band)
+                  // rather than a generic accent — a glance down the panel
+                  // tells which pins came from which colour without reading
+                  // the breadcrumb.
+                  style={pinned ? { color: toCss(colors.border) } : undefined}
                   onClick={pinned ? onUnpin : onPin}
                 >
-                  {pinned ? <PinOff /> : <Pin />}
+                  <Pin />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>

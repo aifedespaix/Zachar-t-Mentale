@@ -884,11 +884,11 @@ describe('CardNode footer', () => {
     expect(useCardsStore.getState().history.present[0].title).toBe('Titre initial')
   })
 
-  it('disables the "add description" button when the mind map is locked', () => {
+  it('hides the "add description" button when the mind map is locked', () => {
     useCardsStore.setState({ locked: true })
     renderCardNode(testCard)
 
-    expect(screen.getByRole('button', { name: /ajouter une description/i })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /ajouter une description/i })).not.toBeInTheDocument()
   })
 
   it('still opens the fiche of a card that HAS a description on a locked map', async () => {

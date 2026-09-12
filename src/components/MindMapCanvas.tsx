@@ -27,6 +27,10 @@ import {
   ZoomOut,
   Scan,
   Home,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
 } from 'lucide-react'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent } from './ui/context-menu'
 import { CommandButton } from './commands/CommandButton'
@@ -339,6 +343,10 @@ function MindMapCanvasInner() {
   const { setCenter, getZoom, flowToScreenPosition, screenToFlowPosition } = useReactFlow()
   const storeApi = useStoreApi()
   const openFicheIds = useCardDetailStore(s => s.open)
+  // Reactive read (the two existing uses below are imperative `.getState()`
+  // writes) — the minimap needs to re-render whenever selection moves so its
+  // highlighted node follows it.
+  const selectedCardId = useCardSelectionStore(s => s.selectedCardId)
 
   const layout = useMemo(() => computeLayout(cards), [cards])
 
@@ -759,6 +767,47 @@ function MindMapCanvasInner() {
                     <CommandButton command="view.fitView" icon={Expand} variant="ghost" />
                   </div>
                   {/*
+                    Moving the SELECTION rather than the viewport, so it gets
+                    its own cross-shaped pad instead of joining the zoom row
+                    above: up/down mirror `nav.previous`/`nav.next` (sœur du
+                    dessus/dessous), left/right mirror `nav.parent`/`nav.child`
+                    — the exact same layout as the arrow keys, so the pad reads
+                    as "the same shortcuts, for a mouse". Each button is a
+                    `CommandButton`, so it greys itself out (no parent, no
+                    child…) and its tooltip teaches the real keyboard shortcut
+                    without this pad ever having to know it.
+                  */}
+                  <div className="viewport-dock__navpad" role="group" aria-label="Se déplacer entre les cartes">
+                    <CommandButton
+                      command="nav.previous"
+                      icon={ArrowUp}
+                      variant="ghost"
+                      size="icon-sm"
+                      className="viewport-dock__navpad-up"
+                    />
+                    <CommandButton
+                      command="nav.parent"
+                      icon={ArrowLeft}
+                      variant="ghost"
+                      size="icon-sm"
+                      className="viewport-dock__navpad-left"
+                    />
+                    <CommandButton
+                      command="nav.child"
+                      icon={ArrowRight}
+                      variant="ghost"
+                      size="icon-sm"
+                      className="viewport-dock__navpad-right"
+                    />
+                    <CommandButton
+                      command="nav.next"
+                      icon={ArrowDown}
+                      variant="ghost"
+                      size="icon-sm"
+                      className="viewport-dock__navpad-down"
+                    />
+                  </div>
+                  {/*
                     Placed inside our own Panel, so the minimap drops React
                     Flow's own absolute positioning and flows under the buttons
                     as a single block. Its width/height are also what the
@@ -769,6 +818,10 @@ function MindMapCanvasInner() {
                     - zoomable: the wheel zooms around the pointer.
                     - nodeColor: the map's own level palette, so the overview
                       is a recognisable miniature of the canvas.
+                    - nodeStrokeColor: transparent for every card except the
+                      selected one, which gets the same neutral `--ring` used
+                      for its selection halo on the canvas and its fiche — the
+                      minimap's own way of saying "you are here".
                     - onNodeClick: take me to that card.
                   */}
                   <MiniMap
@@ -777,7 +830,8 @@ function MindMapCanvasInner() {
                     pannable
                     zoomable
                     nodeColor={node => minimapNodeColor(node, theme)}
-                    nodeStrokeColor="transparent"
+                    nodeStrokeColor={node => (node.id === selectedCardId ? 'var(--ring)' : 'transparent')}
+                    nodeStrokeWidth={3}
                     nodeBorderRadius={3}
                     ariaLabel="Aperçu de la carte — glissez pour déplacer la vue, molette pour zoomer"
                     onNodeClick={handleMinimapNodeClick}

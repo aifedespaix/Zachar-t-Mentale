@@ -295,6 +295,42 @@
   box-shadow: 0 6px 16px -8px oklch(0 0 0 / 45%);
 }
 
+/*
+ * The card-navigation pad: a 3×3 grid with only the 4 cross cells filled
+ * (up/left/right/down), so it reads as a compass rather than a row — the same
+ * spatial layout as the arrow keys it mirrors (nav.previous/next/parent/child).
+ * Same control-cluster chrome as `.viewport-dock__buttons` above it, so the
+ * dock still reads as one widget split into three purposes: zoom, navigate,
+ * overview.
+ */
+.viewport-dock__navpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  width: fit-content;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 6px 16px -8px oklch(0 0 0 / 45%);
+}
+.viewport-dock__navpad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+.viewport-dock__navpad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+.viewport-dock__navpad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+.viewport-dock__navpad-down {
+  grid-column: 2;
+  grid-row: 3;
+}
+
 /* The minimap wears the app palette instead of React Flow's defaults: same
    surface, hairline border, radius and shadow as the button group above it,
    so the two halves of the dock read as one widget. The mask is the part of
@@ -321,12 +357,15 @@
  * be the faint one.
  */
 .viewport-dock__buttons,
+.viewport-dock__navpad,
 .viewport-dock__minimap {
   opacity: 0.7;
   transition: opacity 160ms ease;
 }
 .viewport-dock__buttons:hover,
 .viewport-dock__buttons:focus-within,
+.viewport-dock__navpad:hover,
+.viewport-dock__navpad:focus-within,
 .viewport-dock__minimap:hover {
   opacity: 1;
 }
@@ -337,6 +376,7 @@
  */
 @media (hover: none) {
   .viewport-dock__buttons,
+  .viewport-dock__navpad,
   .viewport-dock__minimap {
     opacity: 1;
     transition: none;

@@ -249,6 +249,10 @@ function FicheBadge({
 }) {
   const blocks = contentOf(card)
   const hasContent = blocks.length > 0
+  // A locked map cannot write, so a card with nothing to read has nothing the
+  // badge can honestly offer — showing a disabled "add" button dangled an
+  // action nobody could take. No badge is the correct badge here.
+  if (locked && !hasContent) return null
   // The glyphs for READING, used on a locked map: the content kind when the
   // description leads with something other than text, an open book for plain
   // text, a pen when there is nothing to read. Not gated on
@@ -261,12 +265,12 @@ function FicheBadge({
   // The glyphs for WRITING, one verb each: a pencil for "go and change what is
   // written", a pen for "there is nothing written yet".
   const Icon = locked ? readIcon : hasContent ? Pencil : PenLine
+  // `locked` reaches this point only with content (see the early return
+  // above), so there is no "add" case to account for here.
   const label = locked
-    ? !hasContent
-      ? 'Ajouter une description'
-      : card.kind === 'media'
-        ? 'Afficher le média'
-        : 'Afficher la définition'
+    ? card.kind === 'media'
+      ? 'Afficher le média'
+      : 'Afficher la définition'
     : hasContent
       ? 'Modifier la description'
       : 'Ajouter une description'
@@ -278,7 +282,6 @@ function FicheBadge({
           type="button"
           aria-label={label}
           aria-pressed={active}
-          disabled={locked && !hasContent}
           onClick={event => {
             event.stopPropagation()
             onActivate()
@@ -303,7 +306,7 @@ function FicheBadge({
             background: 'var(--background)',
             color: borderColor,
             boxShadow: hasContent ? '0 1px 3px rgba(0, 0, 0, 0.15)' : 'none',
-            cursor: locked && !hasContent ? 'default' : 'pointer',
+            cursor: 'pointer',
           }}
         >
           <Icon size={13} strokeWidth={2.3} style={{ opacity: hasContent ? 1 : 0.6 }} />
@@ -426,6 +429,13 @@ export function CardNode({ data }: CardNodeProps) {
   const hovered = useCardHoverStore(s => s.hoveredCardId === card.id)
   const hoverCard = useCardHoverStore(s => s.hover)
   const unhoverCard = useCardHoverStore(s => s.unhover)
+  // Whether THIS card is the one selection acts on (click, or keyboard/minimap
+  // navigation) — see `useCardSelectionStore`. Deliberately a different colour
+  // family than `hovered` (the app's neutral `--ring` rather than the card's
+  // own level colour): hover reads as "what the pointer is over", selection as
+  // "what the keyboard/commands act on", and the two must stay tellable apart
+  // when they land on different cards at once.
+  const selected = useCardSelectionStore(s => s.selectedCardId === card.id)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const isDetached = card.detached === true
   // A floating card is painted grey whatever level it last had: its level is
@@ -652,6 +662,7 @@ export function CardNode({ data }: CardNodeProps) {
       data-reparent-target={isReparentTarget}
       data-detached={isDetached}
       data-hovered={hovered}
+      data-selected={selected}
       // Publishes the hover so the fiche panel can light up the same card's
       // description (and vice-versa) — see `useCardHoverStore`.
       onMouseEnter={() => hoverCard(card.id)}
@@ -711,7 +722,18 @@ export function CardNode({ data }: CardNodeProps) {
         // footprint must not move because the pointer entered it (règle
         // anti-décalage 1). While the card is a reparent target its CSS pulse
         // animation wins over this inline shadow, so the drop cue is untouched.
-        boxShadow: hovered ? `0 0 0 2px ${toCss(colors.border)}` : undefined,
+        //
+        // Selection stacks as a SECOND, wider ring in the neutral `--ring`
+        // colour, listed after the hover ring so it paints behind it: the two
+        // read as concentric bands (hover 0-2px, selection 2-4/0-3px) rather
+        // than one fighting the other when a card is both hovered and
+        // selected. Both entries are always present (falling back to
+        // `transparent`) so the shared `transition` animates every edge —
+        // in, out, and between the two.
+        boxShadow: [
+          `0 0 0 2px ${hovered ? toCss(colors.border) : 'transparent'}`,
+          `0 0 0 ${hovered ? 4 : 3}px ${selected ? 'var(--ring)' : 'transparent'}`,
+        ].join(', '),
         transition: 'box-shadow 140ms ease',
       }}
     >
