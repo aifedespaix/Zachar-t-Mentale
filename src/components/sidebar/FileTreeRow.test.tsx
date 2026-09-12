@@ -1022,6 +1022,21 @@ describe('FileTreeRow — type de carte', () => {
     expect(setMindMapType).toHaveBeenCalledWith(PATH, 'exo')
   })
 
+  it('propose « Sans type » pour retirer un classement', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useMindMapAuthor).mockReturnValue({ ...meta, type: 'exo' })
+    vi.mocked(setMindMapType).mockResolvedValue(undefined)
+    useSyncStore.setState({ currentUser: { username: 'aife', role: 'prof' } })
+    renderRow()
+    await screen.findByTestId('map-type-badge')
+    // La pilule « Exercices » fait partie du nom accessible de la ligne :
+    // on cible le bouton par expression plutôt que par son nom exact.
+    openMenu(/Chapitre/)
+    await user.hover(screen.getByText('Type'))
+    fireEvent.click(await screen.findByText('Sans type'))
+    expect(setMindMapType).toHaveBeenCalledWith(PATH, 'default')
+  })
+
   it('montre « Type » désactivé pour un brouillon, avec la raison', async () => {
     vi.mocked(useMindMapAuthor).mockReturnValue(null)
     renderRow()
@@ -1029,6 +1044,12 @@ describe('FileTreeRow — type de carte', () => {
     const label = await screen.findByText('Type')
     const item = label.closest('[data-slot="context-menu-item"]')
     expect(item).toHaveAttribute('aria-disabled', 'true')
-    expect(item).toHaveAttribute('title', 'Publiez cette carte pour pouvoir la classer')
+    // Le `title` vit sur l’enveloppe : l’item désactivé est retiré du
+    // hit-testing (`data-disabled:pointer-events-none`), donc un `title`
+    // posé sur lui ne serait jamais montré.
+    expect(item).not.toHaveAttribute('title')
+    const wrapper = item?.closest('[title]')
+    expect(wrapper).not.toBe(item)
+    expect(wrapper).toHaveAttribute('title', 'Publiez cette carte pour pouvoir la classer')
   })
 })

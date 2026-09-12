@@ -127,10 +127,10 @@ function App() {
   useEffect(() => {
     if (syncResult === null || syncResult === handledSyncResult.current) return
     handledSyncResult.current = syncResult
-    // Neither a pull nor a relocation: nothing moved on disk, so the tree is
-    // current and there is nobody to follow. `?? 0`: the counter is optional in
-    // `SyncResult`, and its readers take it that way.
-    if (syncResult.pulled === 0 && (syncResult.relocated ?? 0) === 0) return
+    // Neither a pull, a relocation nor a type adoption: nothing moved on
+    // disk, so the tree is current and there is nobody to follow. `?? 0`: the
+    // counters are optional in `SyncResult`, and its readers take them that way.
+    if (syncResult.pulled === 0 && (syncResult.relocated ?? 0) === 0 && (syncResult.reclassified ?? 0) === 0) return
 
     // The path open when the result came in: THAT file's move is the one that
     // matters here, not another file's in the same folder.
@@ -151,6 +151,10 @@ function App() {
       if (moved !== undefined && useWorkspaceStore.getState().currentFilePath === moved.from) {
         setCurrentFile(moved.to)
       }
+      // Une adoption de type a réécrit le `meta` sur le disque sans changer le
+      // chemin : forcer la révision fait relire chaque ligne par
+      // `useMindMapAuthor`, sinon la pilule garde l’ancien type.
+      useWorkspaceStore.getState().bumpFileMetaRevision()
       const folder = useSyncStore.getState().syncFolderPath
       if (folder !== null) await refreshFolder(folder)
     })()

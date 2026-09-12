@@ -30,7 +30,7 @@ import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
 import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import { useSyncStore } from '../../state/useSyncStore'
 import { canClassify } from '../../sync/permissions'
-import { MAP_TYPES, MAP_TYPE_LABELS } from '../../types/mapType'
+import { MAP_TYPES, MAP_TYPE_LABELS, type MapType } from '../../types/mapType'
 import { MapTypeBadge } from './MapTypeBadge'
 
 interface FileTreeRowProps {
@@ -277,7 +277,7 @@ export function FileTreeRow({
    * l'arbre (badge, auteur) et le compteur de synchronisation doivent la
    * relire au même instant.
    */
-  async function classify(type: (typeof MAP_TYPES)[number]) {
+  async function classify(type: MapType) {
     try {
       await setMindMapType(node.path, type)
       useWorkspaceStore.getState().bumpFileMetaRevision()
@@ -518,19 +518,31 @@ export function FileTreeRow({
                       {MAP_TYPE_LABELS[type]}
                     </ContextMenuItem>
                   ))}
+                  <ContextMenuItem onSelect={() => void classify('default')}>
+                    {meta?.type === undefined || meta?.type === 'default' ? (
+                      <Check size={14} />
+                    ) : (
+                      <span style={{ width: 14 }} />
+                    )}
+                    {MAP_TYPE_LABELS.default}
+                  </ContextMenuItem>
                 </ContextMenuSubContent>
               </ContextMenuSub>
             ) : (
-              <ContextMenuItem
-                disabled
+              // Le `title` est porté par l’enveloppe, jamais par l’item : Radix
+              // sort l’item désactivé du hit-testing (`data-disabled:pointer-events-none`),
+              // donc un `title` posé dessus ne serait jamais montré.
+              <div
                 title={
                   classifyBlockedBecauseDraft
                     ? 'Publiez cette carte pour pouvoir la classer'
                     : 'Seul l’auteur ou un prof peut classer cette carte'
                 }
               >
-                <Tag size={14} /> Type
-              </ContextMenuItem>
+                <ContextMenuItem disabled aria-disabled>
+                  <Tag size={14} /> Type
+                </ContextMenuItem>
+              </div>
             )}
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={startRenaming}>

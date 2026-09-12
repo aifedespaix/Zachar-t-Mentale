@@ -749,6 +749,20 @@ describe('App — suite d’un déplacement fait par la synchronisation', () => 
     notices: [],
   }
 
+  /** The report of a run whose only effect was ADOPTING a type classified elsewhere. */
+  const reclassification: SyncResult = {
+    pushed: 0,
+    pulled: 0,
+    errors: [],
+    cancelled: false,
+    conflicts: [],
+    transferred: [],
+    relocated: 0,
+    moved: [],
+    notices: [],
+    reclassified: 1,
+  }
+
   /**
    * The store ready for an AUTOMATIC run: nobody clicks the sidebar's button,
    * and `syncNow` is stubbed at the tail of a real run — all the network work
@@ -808,6 +822,27 @@ describe('App — suite d’un déplacement fait par la synchronisation', () => 
     expect(refreshFolder).toHaveBeenCalledWith('/cours')
     // The relocated file is the one being edited: the header follows it.
     expect(screen.getByText('a.zmap')).toBeInTheDocument()
+  })
+
+  it('rafraîchit les métadonnées de l’arbre après l’adoption d’un type', async () => {
+    let published: SyncResult | null = null
+    armAutoSync(() => published)
+    // L’adoption réécrit le `.zmap` sur le disque sans changer son chemin :
+    // `refreshFolder` rescanne l’arbre, mais seule la révision de `meta` fait
+    // relire la pilule par `useMindMapAuthor`.
+    const bumpFileMetaRevision = vi.spyOn(useWorkspaceStore.getState(), 'bumpFileMetaRevision')
+    const refreshFolder = vi.spyOn(useWorkspaceStore.getState(), 'refreshFolder')
+    render(<App />)
+    await openFile(SYNCED_PATH)
+
+    published = reclassification
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60_000)
+    })
+    await settle()
+
+    expect(bumpFileMetaRevision).toHaveBeenCalled()
+    expect(refreshFolder).toHaveBeenCalledWith('/cours')
   })
 
   it('flushes the pending save before moving the pointer', async () => {
