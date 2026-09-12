@@ -4,6 +4,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { FileTreeRow } from './FileTreeRow'
 import { useWorkspaceStore, createWorkspaceStore } from '../../state/useWorkspaceStore'
 import type { FileTreeNode } from '../../types/workspace'
+import type { MindMapMeta } from '../../types/card'
+import { TooltipProvider } from '../ui/tooltip'
 
 vi.mock('../../persistence/fileOps', async importOriginal => {
   const actual = await importOriginal<typeof import('../../persistence/fileOps')>()
@@ -26,6 +28,7 @@ vi.mock('../../persistence/fileStore', () => ({
   saveMindMap: vi.fn(),
   mindMapExists: vi.fn(),
   stampMindMapSyncMeta: vi.fn(),
+  setMindMapType: vi.fn(),
 }))
 vi.mock('../../persistence/exportIO', () => ({ pickXmindFile: vi.fn(), readBinaryFile: vi.fn() }))
 vi.mock('../../xmind/importXmind', () => ({ readXmindFile: vi.fn() }))
@@ -41,7 +44,7 @@ import {
   freeSiblingPath,
 } from '../../persistence/fileOps'
 import { scanFolder } from '../../persistence/fileTree'
-import { loadMindMap, saveMindMap, mindMapExists, stampMindMapSyncMeta } from '../../persistence/fileStore'
+import { loadMindMap, saveMindMap, mindMapExists, stampMindMapSyncMeta, setMindMapType } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
 import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
@@ -952,5 +955,80 @@ describe('FileTreeRow — verrouillage non-auteur', () => {
     vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' })
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
     expect(screen.getByLabelText(/aife.*lecture seule/)).toBeInTheDocument()
+  })
+})
+
+describe('FileTreeRow — type de carte', () => {
+  const PATH = '/cours/Chapitre.zmap'
+  const node: FileTreeNode = { type: 'mindmap', name: 'Chapitre.zmap', path: PATH }
+  const meta: MindMapMeta = { id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' }
+
+  beforeEach(() => {
+    resetWorkspaceStore()
+    vi.mocked(useMindMapFormatValid).mockReset().mockReturnValue(true)
+    vi.mocked(useMindMapAuthor).mockReset().mockReturnValue(null)
+    vi.mocked(setMindMapType).mockReset()
+    useSyncStore.setState({ currentUser: null, syncFolderPath: null })
+  })
+
+  /**
+   * Le montage de la ligne de ce fichier, enveloppé dans le `TooltipProvider`
+   * que `FileSidebar` monte en vrai : la pilule est un Tooltip Radix, qui exige
+   * ce contexte.
+   */
+  function renderRow() {
+    return render(
+      <TooltipProvider>
+        <FileTreeRow node={node} depth={0} onOpenFile={vi.fn()} />
+      </TooltipProvider>
+    )
+  }
+
+  /** Le clic droit de `openMenu`, sur l'unique ligne montée par `renderRow`. */
+  function openContextMenu() {
+    openMenu('Chapitre')
+  }
+
+  it('affiche la pilule du type de la carte', async () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue({ ...meta, type: 'exo' })
+    renderRow()
+    expect(await screen.findByTestId('map-type-badge')).toHaveTextContent('Exercices')
+  })
+
+  it('n’affiche aucune pilule pour une carte sans type', async () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue(meta)
+    renderRow()
+    await screen.findByText('Chapitre')
+    expect(screen.queryByTestId('map-type-badge')).toBeNull()
+  })
+
+  it('classe la carte depuis le sous-menu Type', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useMindMapAuthor).mockReturnValue(meta)
+    vi.mocked(setMindMapType).mockResolvedValue(undefined)
+    useSyncStore.setState({ currentUser: { username: 'aife', role: 'prof' } })
+    renderRow()
+    await screen.findByText('Chapitre')
+    openContextMenu()
+    await user.hover(screen.getByText('Type'))
+    // `fireEvent.click`, pas `user.click`, pour l'item niché dans le sous-menu :
+    // en jsdom, la chorégraphie hover/focus réaliste de `user.click` fait courir
+    // la détection de focus-extérieur de Radix contre le suivi de focus
+    // portail-aware de React et referme le sous-menu avant que le clic
+    // n'atterrisse (même contournement que les exports par sous-menu de
+    // `MindMapCanvas.test.tsx`). Le clic simple exerce quand même le vrai
+    // câblage `onSelect`.
+    fireEvent.click(await screen.findByText('Exercices'))
+    expect(setMindMapType).toHaveBeenCalledWith(PATH, 'exo')
+  })
+
+  it('montre « Type » désactivé pour un brouillon, avec la raison', async () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue(null)
+    renderRow()
+    openContextMenu()
+    const label = await screen.findByText('Type')
+    const item = label.closest('[data-slot="context-menu-item"]')
+    expect(item).toHaveAttribute('aria-disabled', 'true')
+    expect(item).toHaveAttribute('title', 'Publiez cette carte pour pouvoir la classer')
   })
 })

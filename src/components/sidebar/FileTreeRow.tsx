@@ -1,18 +1,27 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useEffect, useRef, useState } from 'react'
-import { Folder, FolderOpen, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, Lock, CloudUpload, CloudOff } from 'lucide-react'
+import { Folder, FolderOpen, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, Lock, CloudUpload, CloudOff, Check, Tag } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { renamePath, deletePath, duplicatePath, freeSiblingPath } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
 import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, withMindMapExtension, isInsideFolder } from '../../persistence/paths'
-import { loadMindMap, mindMapExists } from '../../persistence/fileStore'
+import { loadMindMap, mindMapExists, setMindMapType } from '../../persistence/fileStore'
 import { isAssetsSidecarName } from '../../persistence/assets'
 import { validateCards } from '../../validation/cardsValidation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
-import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu'
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubTrigger,
+  ContextMenuSubContent,
+} from '../ui/context-menu'
 import { ExportDialog } from './ExportDialog'
 import { NameDialog } from './NameDialog'
 import { useFolderCreation } from './useFolderCreation'
@@ -20,6 +29,9 @@ import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
 import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
 import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import { useSyncStore } from '../../state/useSyncStore'
+import { canClassify } from '../../sync/permissions'
+import { MAP_TYPES, MAP_TYPE_LABELS } from '../../types/mapType'
+import { MapTypeBadge } from './MapTypeBadge'
 
 interface FileTreeRowProps {
   node: FileTreeNode
@@ -97,6 +109,11 @@ export function FileTreeRow({
   const currentUser = useSyncStore(s => s.currentUser)
   const meta = useMindMapAuthor(node.type === 'mindmap' ? node.path : null)
   const isLocked = meta !== null && meta.author !== currentUser?.username
+  // Le classement est le geste d'un compte sur une carte qui a déjà une
+  // identité de synchronisation : `canClassify` en est la SEULE définition,
+  // partagée avec la synchronisation.
+  const classifyAllowed = currentUser !== null && canClassify(meta, currentUser)
+  const classifyBlockedBecauseDraft = meta === null
   const syncFolderPath = useSyncStore(s => s.syncFolderPath)
   /**
    * Une carte publiée mais sortie du dossier de synchronisation : elle a un
@@ -251,6 +268,23 @@ export function FileTreeRow({
       if (!isFolder) onOpenFile(destPath)
     } catch (error) {
       setWorkspaceError(`Impossible de dupliquer « ${node.name} » : ${describeError(error)}`)
+    }
+  }
+
+  /**
+   * Classe la carte. Le rafraîchissement est exactement celui de la
+   * publication : la nouvelle métadonnée est écrite dans le fichier, donc
+   * l'arbre (badge, auteur) et le compteur de synchronisation doivent la
+   * relire au même instant.
+   */
+  async function classify(type: (typeof MAP_TYPES)[number]) {
+    try {
+      await setMindMapType(node.path, type)
+      useWorkspaceStore.getState().bumpFileMetaRevision()
+      await refreshFolder(parentDirOf(node.path))
+      await useSyncStore.getState().refreshPendingCount()
+    } catch (error) {
+      setWorkspaceError('Impossible de classer « ' + node.name + ' » : ' + describeError(error))
     }
   }
 
@@ -440,6 +474,7 @@ export function FileTreeRow({
                     <FileJson size={16} />
                   )}
                   <span>{displayName}</span>
+                  <MapTypeBadge type={meta?.type} />
                   {outOfSyncFolder && (
                     <CloudOff size={13} aria-label="Hors du dossier de synchronisation" style={{ opacity: 0.7, flexShrink: 0 }}>
                       <title>Hors du dossier de synchronisation : cette carte ne sera plus envoyée.</title>
@@ -471,6 +506,32 @@ export function FileTreeRow({
             <ContextMenuItem onSelect={openExport}>
               <Download size={14} /> Exporter
             </ContextMenuItem>
+            {classifyAllowed ? (
+              <ContextMenuSub>
+                <ContextMenuSubTrigger>
+                  <Tag size={14} /> Type
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent>
+                  {MAP_TYPES.map(type => (
+                    <ContextMenuItem key={type} onSelect={() => void classify(type)}>
+                      {meta?.type === type ? <Check size={14} /> : <span style={{ width: 14 }} />}
+                      {MAP_TYPE_LABELS[type]}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+            ) : (
+              <ContextMenuItem
+                disabled
+                title={
+                  classifyBlockedBecauseDraft
+                    ? 'Publiez cette carte pour pouvoir la classer'
+                    : 'Seul l’auteur ou un prof peut classer cette carte'
+                }
+              >
+                <Tag size={14} /> Type
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={startRenaming}>
               <Pencil size={14} /> Renommer
