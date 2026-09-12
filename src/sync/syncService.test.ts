@@ -13,7 +13,11 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 vi.mock('@tauri-apps/api/path', () => ({
   join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
 }))
-vi.mock('../persistence/fileStore', () => ({ loadMindMap: vi.fn(), loadMindMapMeta: vi.fn() }))
+vi.mock('../persistence/fileStore', () => ({
+  loadMindMap: vi.fn(),
+  loadMindMapMeta: vi.fn(),
+  setMindMapType: vi.fn(),
+}))
 vi.mock('../persistence/fileTree', () => ({ scanFolder: vi.fn() }))
 vi.mock('../persistence/assets', () => ({
   readAssetBytes: vi.fn(),
@@ -22,7 +26,7 @@ vi.mock('../persistence/assets', () => ({
 }))
 
 import { exists, writeTextFile, readDir, rename, mkdir } from '@tauri-apps/plugin-fs'
-import { loadMindMap, loadMindMapMeta } from '../persistence/fileStore'
+import { loadMindMap, loadMindMapMeta, setMindMapType } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { readAssetBytes, writeAsset } from '../persistence/assets'
 import {
@@ -84,6 +88,7 @@ beforeEach(() => {
   vi.mocked(readDir).mockReset().mockResolvedValue([])
   vi.mocked(loadMindMap).mockReset()
   vi.mocked(loadMindMapMeta).mockReset()
+  vi.mocked(setMindMapType).mockReset().mockResolvedValue(undefined)
   vi.mocked(scanFolder).mockReset()
   vi.mocked(rename).mockReset().mockResolvedValue(undefined)
   vi.mocked(mkdir).mockReset().mockResolvedValue(undefined)
@@ -792,7 +797,12 @@ describe('sync — pull', () => {
 
     const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
 
-    expect(writeTextFile).toHaveBeenCalledWith('/cours/b.zmap', record.content)
+    expect(writeTextFile).toHaveBeenCalledTimes(1)
+    const [pulledPath, pulled] = vi.mocked(writeTextFile).mock.calls[0]
+    expect(pulledPath).toBe('/cours/b.zmap')
+    // Le fichier est RE-MATÉRIALISÉ : le champ `type` du serveur est appliqué au
+    // `meta` local avant écriture.
+    expect(JSON.parse(pulled as string).meta).toMatchObject({ id: 'file-2', author: 'prof', type: 'default' })
     expect(result.pulled).toBe(1)
   })
 
@@ -1272,11 +1282,15 @@ describe('sync — push par champ', () => {
 
     await runSync({ client, state })
 
+    // L'empreinte porte sur la chaîne FINALEMENT ÉCRITE (re-matérialisée), pas
+    // sur la chaîne reçue : c'est le fichier réel.
+    const written = vi.mocked(writeTextFile).mock.calls[0][1] as string
     expect(state.servers['https://pb.test'].entries['file-9']).toEqual({
       lastSyncedModified: 'u3',
       lastSyncedUpdated: 'u3',
       lastSyncedPath: 'sous/c.zmap',
-      lastSyncedContentHash: await hashContent(content),
+      lastSyncedContentHash: await hashContent(written),
+      lastSyncedType: 'default',
     })
   })
 
@@ -1346,3 +1360,155 @@ describe('sync — push par champ', () => {
     expect(state.servers['https://pb.test'].entries['file-1'].lastSyncedPath).toBeUndefined()
   })
 })
+
+describe('sync — classification', () => {
+  it('lets a prof send the type alone, never the content of an eleve s map', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, id: 'file-2', author: 'eleve1', role: 'eleve', type: 'cours' })
+    const update = vi.fn().mockResolvedValue({
+      id: 'rec-2',
+      file_id: 'file-2',
+      author: 'eleve1',
+      path: 'b.zmap',
+      content: 'x',
+      updated: 'u9',
+      type: 'cours',
+    })
+    const client = fakeClient({
+      mindMaps: {
+        getFullList: vi.fn().mockResolvedValue([
+          { id: 'rec-2', file_id: 'file-2', author: 'eleve1', path: 'b.zmap', content: 'x', updated: 'u1' },
+        ]),
+        update,
+      } as any,
+    })
+    const state = memory({
+      'file-2': {
+        lastSyncedModified: 'm-eleve',
+        lastSyncedUpdated: 'u1',
+        lastSyncedPath: 'b.zmap',
+        lastSyncedContentHash: await hashContent('x'),
+        lastSyncedType: 'default',
+      },
+    })
+
+    const result = await runSync({ client, state, currentUser: 'aife', currentRole: 'prof' })
+
+    expect(update).toHaveBeenCalledWith('rec-2', { type: 'cours' }, expect.anything())
+    expect(loadMindMap).not.toHaveBeenCalled()
+    expect(writeTextFile).not.toHaveBeenCalled()
+    expect(result.pushed).toBe(1)
+    expect(result.reclassified).toBe(0)
+    expect(state.servers['https://pb.test'].entries['file-2'].lastSyncedType).toBe('cours')
+  })
+
+  it('adopts a type the prof set on the eleve s own map, without touching the content', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, author: 'eleve1', role: 'eleve', type: 'default' })
+    vi.mocked(setMindMapType).mockResolvedValue(undefined)
+    const client = fakeClient({
+      mindMaps: {
+        getFullList: vi.fn().mockResolvedValue([
+          { id: 'rec-1', file_id: 'file-1', author: 'eleve1', path: 'a.zmap', content: '[]', updated: 'u2', type: 'cours' },
+        ]),
+      } as any,
+    })
+    const state = memory({
+      'file-1': {
+        lastSyncedModified: AIFE.lastModified,
+        lastSyncedUpdated: 'u1',
+        lastSyncedPath: 'a.zmap',
+        lastSyncedContentHash: await hashContent('[]'),
+        lastSyncedType: 'default',
+      },
+    })
+
+    const result = await runSync({ client, state, currentUser: 'eleve1', currentRole: 'eleve' })
+
+    expect(setMindMapType).toHaveBeenCalledWith('/cours/a.zmap', 'cours')
+    expect(client.mindMaps.update).not.toHaveBeenCalled()
+    expect(loadMindMap).not.toHaveBeenCalled()
+    expect(writeTextFile).not.toHaveBeenCalled()
+    expect(result.reclassified).toBe(1)
+    expect(result.pulled).toBe(0)
+    expect(state.servers['https://pb.test'].entries['file-1'].lastSyncedType).toBe('cours')
+  })
+
+  it('re-applies the record s type to the file it pulls, and remembers it as the agreement', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const embedded = JSON.stringify({
+      meta: { id: 'file-7', author: 'prof', role: 'prof', lastModified: '2026-01-01T00:00:00.000Z', type: 'default' },
+      cards: [],
+    })
+    const record = {
+      id: 'r7',
+      file_id: 'file-7',
+      author: 'prof',
+      path: 'c.zmap',
+      content: embedded,
+      type: 'corrections',
+      updated: 'u3',
+    }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([record]) } as any })
+    const state = memory()
+
+    await runSync({ client, state, currentUser: 'eleve1', currentRole: 'eleve' })
+
+    expect(writeTextFile).toHaveBeenCalledTimes(1)
+    const [writtenPath, written] = vi.mocked(writeTextFile).mock.calls[0]
+    expect(writtenPath).toBe('/cours/c.zmap')
+    expect(JSON.parse(written as string).meta.type).toBe('corrections')
+    expect(state.servers['https://pb.test'].entries['file-7'].lastSyncedType).toBe('corrections')
+    expect(state.servers['https://pb.test'].entries['file-7'].lastSyncedContentHash).toBe(
+      await hashContent(written as string)
+    )
+  })
+
+  it('never turns a remote type change into a conflict for the author who edited', async () => {
+    // Le type ne bumpe pas le contenu : l'empreinte reste égale, donc l'auteur
+    // n'est pas bloqué en conflit par un simple classement du prof.
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({
+      ...AIFE,
+      author: 'eleve1',
+      role: 'eleve',
+      type: 'default',
+      lastModified: '2026-02-01T00:00:00.000Z',
+    })
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const update = vi.fn().mockResolvedValue({
+      id: 'rec-1',
+      file_id: 'file-1',
+      author: 'eleve1',
+      path: 'a.zmap',
+      content: 'neuf',
+      updated: 'u2',
+      type: 'cours',
+    })
+    const remoteContent = '[]'
+    const client = fakeClient({
+      mindMaps: {
+        getFullList: vi.fn().mockResolvedValue([
+          { id: 'rec-1', file_id: 'file-1', author: 'eleve1', path: 'a.zmap', content: remoteContent, updated: 'u1', type: 'cours' },
+        ]),
+        update,
+      } as any,
+    })
+    const state = memory({
+      'file-1': {
+        lastSyncedModified: '2026-01-01T00:00:00.000Z',
+        lastSyncedUpdated: 'u1',
+        lastSyncedPath: 'a.zmap',
+        lastSyncedContentHash: await hashContent(remoteContent),
+        lastSyncedType: 'default',
+      },
+    })
+
+    const result = await runSync({ client, state, currentUser: 'eleve1', currentRole: 'eleve' })
+
+    expect(result.conflicts).toEqual([])
+    expect(result.reclassified).toBe(1)
+    expect(update).toHaveBeenCalledWith('rec-1', { content: expect.any(String) }, expect.anything())
+  })
+})
+

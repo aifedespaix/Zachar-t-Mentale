@@ -1,6 +1,6 @@
 import { exists, mkdir, readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
-import { loadMindMap, loadMindMapMeta } from '../persistence/fileStore'
+import { loadMindMap, loadMindMapMeta, setMindMapType } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { renamePath } from '../persistence/fileOps'
 import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
@@ -13,6 +13,7 @@ import { canClassify, canReorder } from './permissions'
 import { mapTypeOf } from '../types/mapType'
 import { hashContent } from './contentHash'
 import { reconcilePath, seedLastSyncedPath } from './pathReconciliation'
+import { reconcileType, seedLastSyncedType } from './typeReconciliation'
 
 export interface RemoteMindMapRecord {
   id: string
@@ -116,10 +117,13 @@ export interface SyncResult {
   moved?: { fileId: string; from: string; to: string }[]
   /** Ce qui n'est ni un échec ni un transfert : « les deux côtés avaient bougé ». */
   notices?: { fileId: string; message: string }[]
+  /** Combien de cartes ont adopté le type décidé ailleurs. */
+  reclassified?: number
 }
 
-/** Le résultat tel que `sync()` le construit : les trois champs de déplacement y sont toujours là. */
-type SyncRunResult = SyncResult & Required<Pick<SyncResult, 'relocated' | 'moved' | 'notices'>>
+/** Le résultat tel que `sync()` le construit : déplacements, notices et reclassements y sont toujours renseignés. */
+type SyncRunResult = SyncResult &
+  Required<Pick<SyncResult, 'relocated' | 'moved' | 'notices' | 'reclassified'>>
 
 export interface SyncParams {
   client: SyncClient
@@ -466,6 +470,7 @@ export async function sync({
     relocated: 0,
     moved: [],
     notices: [],
+    reclassified: 0,
   }
 
   const remoteRecords = await client.mindMaps.getFullList({ signal })
@@ -502,6 +507,44 @@ export async function sync({
       remotePath: remote?.path,
     })
     entry.lastSyncedPath = lastSyncedPath
+
+    // ── Type ────────────────────────────────────────────────────────────
+    // L'accord est amarré AVANT de décider : une entrée migrée (lastSyncedType
+    // absent) s'accorde implicitement sur default, jamais sur le type local, qui
+    // ferait passer un classement de prof pour un changement à moi. Un
+    // enregistrement ABSENT est le seul cas « pas de type » : un champ vide ou
+    // manquant vaut default, pas « aucun enregistrement ».
+    const seededLastSyncedType = seedLastSyncedType(entry.lastSyncedType)
+    entry.lastSyncedType = seededLastSyncedType
+    const typeAction = reconcileType({
+      localType: mapTypeOf(scan.meta.type),
+      lastSyncedType: seededLastSyncedType,
+      remoteType: remote === undefined ? undefined : (remote.type ?? ''),
+    })
+    if (typeAction.kind === 'adopt') {
+      try {
+        await setMindMapType(scan.path, typeAction.to)
+        // Le fichier porte désormais ce type : la copie en mémoire doit suivre,
+        // sinon la boucle d'envoi le relirait comme un écart local et
+        // reclasserait la carte dans l'autre sens.
+        scan.meta.type = typeAction.to
+        entry.lastSyncedType = typeAction.to
+        result.reclassified += 1
+        if (typeAction.bothMoved) {
+          result.notices.push({
+            fileId: scan.meta.id,
+            message: '« ' + relPath + ' » a été classé des deux côtés : le type du serveur a été appliqué',
+          })
+        }
+      } catch (error) {
+        result.errors.push({ fileId: scan.meta.id, message: describeSyncError(error) })
+      }
+    }
+    // Les deux côtés portent déjà le même type : réamarrer l'accord dessus,
+    // sinon le push suivant renverrait une valeur identique.
+    if (remote !== undefined && mapTypeOf(remote.type) === mapTypeOf(scan.meta.type)) {
+      entry.lastSyncedType = mapTypeOf(remote.type)
+    }
 
     const action = reconcilePath({
       relPath,
@@ -604,7 +647,7 @@ export async function sync({
     // ce plan, donc un prof ne pouvait jamais répercuter le rangement d'un
     // élève, et le badge « à envoyer » mentait pour toujours.
     const plan = planPush({ meta, relPath: relativeTo(syncFolderPath, scan.path), currentUser: viewer, entry: known })
-    if (!plan.content && !plan.path) return
+    if (!plan.content && !plan.path && !plan.type) return
 
     // Un conflit porte sur du CONTENU, jamais sur un rangement : le contrôle ne
     // s'applique donc que si c'est du contenu qu'on s'apprête à envoyer.
@@ -665,9 +708,10 @@ export async function sync({
         // Le champ qu'on a le droit d'écrire, et lui seul : le contenu à son
         // auteur, le chemin à qui peut réarranger. Envoyer les deux à chaque
         // fois laisserait l'élève annuler sans le savoir le rangement du prof.
-        const payload: { path?: string; content?: string } = {}
+        const payload: { path?: string; content?: string; type?: string } = {}
         if (plan.content) payload.content = content
         if (plan.path) payload.path = relPath
+        if (plan.type) payload.type = mapTypeOf(meta.type)
         savedRecord = await client.mindMaps.update(remote.id, payload, { signal })
       }
 
@@ -683,10 +727,10 @@ export async function sync({
         // l'utilisateur silencieusement défait.
         lastSyncedPath: sentPath ? relPath : known?.lastSyncedPath,
         // Même règle que le chemin : le `create` porte TOUJOURS le type, l'`update`
-        // ne l'enverra que quand le plan le demandera (tâche suivante). Tant
-        // qu'il n'est pas envoyé, l'accord reste celui qu'on connaissait —
-        // l'enregistrer ferait croire au serveur qu'il détient déjà ce type.
-        lastSyncedType: remote === undefined ? mapTypeOf(meta.type) : known?.lastSyncedType,
+        // seulement quand le plan le demande. Tant qu'il n'est pas envoyé, l'accord
+        // reste celui qu'on connaissait — l'enregistrer ferait croire au serveur
+        // qu'il détient déjà ce type.
+        lastSyncedType: plan.type || remote === undefined ? mapTypeOf(meta.type) : known?.lastSyncedType,
         lastSyncedContentHash: plan.content ? contentHash : known?.lastSyncedContentHash,
       }
       result.pushed += 1
@@ -749,21 +793,26 @@ export async function sync({
       }
 
       await ensureLocalFolder(localPath)
-      await writeTextFile(localPath, record.content)
-      await pullAssetsFor(client, localPath, referencedAssets(record.content, remoteAssets), { signal })
-      // L'empreinte est prise sur `record.content`, la chaîne REÇUE, jamais sur
-      // une re-sérialisation locale : c'est la seule qui corresponde à ce que
-      // le serveur détient, donc la seule qui rende la comparaison de conflit
-      // exacte au prochain passage.
+      // Le champ `type` de l'enregistrement fait foi : la copie locale est
+      // réécrite avec lui, sans toucher au reste du `meta`.
+      const applied = meta === null ? null : { ...meta, type: mapTypeOf(record.type) }
+      const serialized = serializeMindMap(applied, cards)
+      await writeTextFile(localPath, serialized)
+      // `referencedAssets` lit la chaîne ÉCRITE (`serialized`), jamais la chaîne
+      // reçue : ce sont les mêmes références, mais une seule est le fichier réel.
+      await pullAssetsFor(client, localPath, referencedAssets(serialized, remoteAssets), { signal })
+      // L'empreinte est prise sur la chaîne FINALEMENT ÉCRITE, jamais sur la
+      // chaîne reçue : c'est le fichier réel, donc la seule base juste pour la
+      // comparaison de conflit du prochain passage.
       entries[record.file_id] = {
         lastSyncedModified: meta?.lastModified ?? record.updated,
         lastSyncedUpdated: record.updated,
         lastSyncedPath: record.path,
-        lastSyncedContentHash: await hashContent(record.content),
+        lastSyncedType: mapTypeOf(record.type),
+        lastSyncedContentHash: await hashContent(serialized),
       }
       result.pulled += 1
       result.transferred.push({ fileId: record.file_id, path: record.path, direction: 'pull' })
-      void cards // validated by deserializeMindMap succeeding; the written file is the record's own content verbatim
     } catch (error) {
       if (aborted() || isAbortError(error)) {
         result.cancelled = true
