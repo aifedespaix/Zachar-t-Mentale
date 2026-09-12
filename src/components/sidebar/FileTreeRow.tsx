@@ -1,6 +1,6 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useEffect, useRef, useState } from 'react'
-import { Folder, FolderOpen, FolderInput, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, Lock, CloudUpload, CloudOff, Check, Tag } from 'lucide-react'
+import { Folder, FolderOpen, FolderInput, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, CloudUpload, CloudOff, Check, Tag } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
@@ -547,13 +547,17 @@ export function FileTreeRow({
                   style={{ ...indent }}
                 >
                   {isLocked ? (
-                    // The `<title>` child is the badge's tooltip: Lucide's own props
-                    // type has no `title`, and an SVG one is what a browser renders
-                    // on hover. The aria-label stays, since it is what names the
-                    // badge for assistive tech (and for the tests).
-                    <Lock size={16} aria-label={`Fichier de ${meta?.author}, lecture seule`}>
-                      <title>{`Fichier de ${meta?.author}, lecture seule`}</title>
-                    </Lock>
+                    // The app's own mark rather than a padlock: the row keeps
+                    // saying which FILE it is (the logo), and the orange says who
+                    // may edit it. The accessible name and the tooltip are
+                    // deliberately unchanged — they are what tells WHOSE file it
+                    // is, and a screen reader has no colour to read.
+                    <span
+                      className="file-tree-row__logo"
+                      role="img"
+                      aria-label={`Fichier de ${meta?.author}, lecture seule`}
+                      title={`Fichier de ${meta?.author}, lecture seule`}
+                    />
                   ) : formatValid ? (
                     <img src="/favicon.svg" width={16} height={16} alt="" />
                   ) : (

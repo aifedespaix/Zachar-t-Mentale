@@ -105,9 +105,15 @@ describe('AppToolbar', () => {
     const user = userEvent.setup()
     renderToolbar()
 
-    await user.click(screen.getByRole('button', { name: 'Verrouiller la carte' }))
+    const lock = screen.getByRole('button', { name: 'Verrouiller la carte' })
+    // Nothing engaged yet: the button wears its plain outline.
+    expect(lock).not.toHaveClass('toolbar-lock--active')
+
+    await user.click(lock)
     expect(useCardsStore.getState().locked).toBe(true)
-    expect(screen.getByRole('button', { name: 'Déverrouiller la carte' })).toBeInTheDocument()
+    // Engaged, it takes the same orange as the locked rows of the tree, so the
+    // two read as one state.
+    expect(screen.getByRole('button', { name: 'Déverrouiller la carte' })).toHaveClass('toolbar-lock--active')
   })
 
   it('offers the fork dialog instead of unlocking a map that is not theirs', async () => {

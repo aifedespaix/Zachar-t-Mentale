@@ -341,10 +341,14 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
 
         <span className="toolbar-separator" aria-hidden />
 
+        {/* Locked or not, the same outline button: what changes is the colour,
+            and it is the SAME orange as the locked rows of the tree — the two
+            are one state, and the colour is what says so. */}
         <CommandButton
           command="view.toggleLock"
           icon={editsBlocked ? Lock : LockOpen}
-          variant={editsBlocked ? 'default' : 'outline'}
+          variant="outline"
+          className={editsBlocked ? 'toolbar-lock--active' : undefined}
         />
         <CommandButton command="card.closeFiches" icon={PanelRightClose} />
         <CommandButton command="app.palette" icon={Command} />

@@ -31,6 +31,12 @@ interface CommandButtonProps {
    * the tests assert, whatever the state happens to be.
    */
   tooltipDetail?: string
+  /**
+   * Extra classes for the button itself, for the few states the variants cannot
+   * express — a locked padlock wearing the same colour as the rows it explains,
+   * for instance. Last resort, not the way buttons are styled here.
+   */
+  className?: string
 }
 
 /**
@@ -54,6 +60,7 @@ export function CommandButton({
   showLabel = false,
   spinning = false,
   tooltipDetail,
+  className,
 }: CommandButtonProps) {
   const definition = commandById(command)
   const enabled = useCommandEnabled(command)
@@ -70,6 +77,7 @@ export function CommandButton({
         <Button
           variant={variant}
           size={size ?? (showLabel ? 'default' : 'icon')}
+          className={className}
           aria-label={name}
           aria-keyshortcuts={binding ?? undefined}
           disabled={!enabled}

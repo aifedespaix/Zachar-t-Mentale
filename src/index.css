@@ -55,6 +55,14 @@
   --warning-bg: oklch(0.94 0.06 85);
   --warning-border: oklch(0.72 0.14 70);
   --warning-fg: oklch(0.4 0.12 60);
+  /* « Locked » is ONE state, worn both by the row in the tree and by the padlock
+     in the toolbar, so the colour alone says the two are the same thing. It is
+     the app logo's own orange (#F97316). The surfaces are that orange diluted —
+     pale enough to sit under a file name without competing with the row that is
+     currently open. */
+  --locked: oklch(0.7 0.19 48);
+  --locked-surface: color-mix(in oklch, var(--locked), transparent 91%);
+  --locked-surface-hover: color-mix(in oklch, var(--locked), transparent 84%);
   --info-bg: oklch(0.94 0.03 240);
   --info-border: oklch(0.7 0.1 240);
   --info-fg: oklch(0.35 0.08 240);
@@ -156,6 +164,11 @@
   --warning-bg: oklch(0.28 0.05 75);
   --warning-border: oklch(0.55 0.14 70);
   --warning-fg: oklch(0.9 0.08 80);
+  /* Dark needs a brighter, less saturated orange and a stronger wash: the same
+     dilution that reads as a hint on white vanishes on a dark surface. */
+  --locked: oklch(0.76 0.16 55);
+  --locked-surface: color-mix(in oklch, var(--locked), transparent 86%);
+  --locked-surface-hover: color-mix(in oklch, var(--locked), transparent 76%);
   --info-bg: oklch(0.28 0.05 240);
   --info-border: oklch(0.5 0.12 240);
   --info-fg: oklch(0.88 0.06 240);
@@ -595,11 +608,36 @@
 .file-tree-row--active:hover {
   background: color-mix(in oklch, var(--foreground), transparent 88%);
 }
+/* A file that is not yours: the logo's orange, diluted. Never the grey it used
+   to be, which read as "disabled" rather than "read-only". */
 .file-tree-row--locked {
-  background: color-mix(in oklch, var(--primary), transparent 92%);
+  background: var(--locked-surface);
 }
 .file-tree-row--locked:hover {
-  background: color-mix(in oklch, var(--primary), transparent 86%);
+  background: var(--locked-surface-hover);
+}
+
+/*
+ * The locked row's icon: the app's own mark, tinted. A mask keeps
+ * `/favicon.svg` the ONE source of the artwork — the logo is painted in
+ * `--locked` through its alpha channel instead of being redrawn here — so the
+ * row still says which CARD it is while the colour says who may edit it. The
+ * flattening is the point: one orange instead of four coloured dots is what
+ * makes a locked row unmistakable at a glance.
+ */
+.file-tree-row__logo {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  background-color: var(--locked);
+  -webkit-mask-image: url('/favicon.svg');
+  mask-image: url('/favicon.svg');
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 .file-tree-row:focus-visible {
   outline: 2px solid var(--ring);
@@ -704,4 +742,20 @@
 .sidebar-search:focus-visible {
   border-color: var(--ring);
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring), transparent 75%);
+}
+
+/*
+ * The padlock in the toolbar, in the SAME orange as the locked rows of the tree:
+ * one state, one colour, so nobody has to learn two conventions. Scoped to the
+ * outline variant — and written after the Tailwind imports — so it wins against
+ * the button's own utilities: two classes against their one.
+ */
+.toolbar-lock--active[data-variant='outline'] {
+  color: var(--locked);
+  background: var(--locked-surface);
+  border-color: color-mix(in oklch, var(--locked), transparent 55%);
+}
+.toolbar-lock--active[data-variant='outline']:hover {
+  color: var(--locked);
+  background: var(--locked-surface-hover);
 }

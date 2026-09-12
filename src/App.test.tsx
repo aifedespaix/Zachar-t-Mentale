@@ -205,6 +205,24 @@ describe('App file switching', () => {
     expect(saveMindMap).not.toHaveBeenCalled()
   })
 
+  it('gives the header’s file name an ellipsis instead of a horizontal scrollbar', async () => {
+    vi.mocked(loadMindMap).mockResolvedValue(cardsA)
+    render(<App />)
+    await openFile(PATH_A)
+
+    // Found by its `title` (the full path, which is what the ellipsis hides),
+    // so the assertion does not depend on which name the header happens to
+    // display. `minWidth: 0` is the load-bearing declaration: a flex item whose
+    // floor is the whole string is what pushed the header past the window edge.
+    // jsdom lays nothing out, so this pins the declaration, not the pixels.
+    expect(screen.getByTitle(PATH_A)).toHaveStyle({
+      minWidth: '0px',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    })
+  })
+
   it('dismisses the load-error message on demand', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.mocked(loadMindMap).mockRejectedValue(new Error('corrupt'))

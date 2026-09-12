@@ -958,6 +958,19 @@ describe('FileTreeRow — verrouillage non-auteur', () => {
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
     expect(screen.getByLabelText(/aife.*lecture seule/)).toBeInTheDocument()
   })
+
+  it('dresses that lock in the app logo, tinted, and washes the row in the same orange', () => {
+    useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
+    vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    // The wash is a class, so the colour comes from `--locked` — the very same
+    // token the toolbar's padlock wears.
+    expect(screen.getByRole('button', { name: /Chapitre 1/ })).toHaveClass('file-tree-row--locked')
+    // The mark itself: the app logo's masked silhouette, never a padlock glyph.
+    expect(screen.getByLabelText(/aife.*lecture seule/)).toHaveClass('file-tree-row__logo')
+    expect(document.querySelector('svg.lucide-lock')).toBeNull()
+  })
 })
 
 describe('FileTreeRow — type de carte', () => {
