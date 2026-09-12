@@ -121,6 +121,13 @@ export const MIND_MAP_FIELDS = [
   },
   { name: 'path', type: 'text', required: true, min: 1, max: 1024, help: 'Chemin relatif depuis la racine du dossier synchronisé.' },
   { name: 'content', type: 'text', required: true, min: 0, max: TEXT_MAX, help: 'Le .zmap entier, sérialisé (JSON). Un max à 0 le plafonnerait à 5000 caractères : ne pas y toucher.' },
+  {
+    name: 'type',
+    type: 'text',
+    required: false,
+    max: 64,
+    help: 'Type de la carte (cours, exo, prise de notes, corrections). Vide = non classée.',
+  },
 ]
 
 export const ASSET_FIELDS = [

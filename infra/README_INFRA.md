@@ -59,12 +59,17 @@ devrait avoir, et n'écrit que ce qui diffère. Relancée, elle répond
 « déjà à jour » — c'est aussi le moyen de vérifier un serveur existant.
 `--dry-run` affiche le plan sans rien écrire.
 
-> **Un serveur configuré AVANT l'arrivée du partage d'agencement doit être
-> réappliqué.** La règle `Update`/`Delete` de `cartes_mentales` a changé
-> (`author || prof`) : tant que le script n'a pas été relancé dessus, un prof
-> reçoit un **403** quand il pousse le `path` d'une carte d'élève — son
-> renommage n'atteint jamais le serveur, alors que tout le reste (contenu,
-> tirage, tests, journal) reste vert. Aucune autre étape n'est nécessaire :
+> **Un serveur configuré AVANT l'arrivée du partage d'agencement ou du champ
+> `type` doit être réappliqué.** Deux évolutions du schéma se rattrapent en
+> relançant le script : la règle `Update`/`Delete` de `cartes_mentales` a changé
+> (`author || prof`), et la collection a gagné le champ `type`. Tant que le
+> script n'a pas été relancé dessus, un prof reçoit un **403** quand il pousse le
+> `path` d'une carte d'élève, et un prof qui classe la carte d'un élève écrit
+> dans une colonne qui n'existe pas — le renommage comme le classement
+> n'atteignent jamais le serveur, alors que tout le reste (contenu, tirage,
+> tests, journal) reste vert. Les règles API, elles, sont **inchangées** : le
+> champ `type` ne s'accompagne d'aucune règle nouvelle. Aucune autre étape n'est
+> nécessaire :
 >
 > ```bash
 > bun run infra/setup-pocketbase.mjs --dry-run   # ce qui serait changé
@@ -78,11 +83,11 @@ Ce qu'elle installe :
 
 | Collection       | Champs                                                              | Règles API                                                                   |
 | ---------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `cartes_mentales` | `file_id` (unique), `author`, `path`, `content`                      | lecture publique ; création pour tout compte connecté ; modification et suppression par l'auteur, ou par un compte `prof` |
+| `cartes_mentales` | `file_id` (unique), `author`, `path`, `content`, `type`            | lecture publique ; création pour tout compte connecté ; modification et suppression par l'auteur, ou par un compte `prof` |
 | `assets`         | `hash` (unique), `extension`, `file` (≤ 10 Mio)                    | lecture publique ; création pour tout compte connecté ; jamais modifié        |
 | `users`          | ajoute `username` (unique, obligatoire) et `role` (`eleve`/`prof`)  | inscription publique fermée ; connexion par pseudo                            |
 
-Les règles exactes de `cartes_mentales`, telles que le script les applique :
+Les règles exactes de `cartes_mentales`, telles que le script les applique — **inchangées** (le champ `type` n'en ajoute ni n'en retire aucune) :
 
 ```
 List/View : (vide)

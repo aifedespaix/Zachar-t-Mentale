@@ -332,6 +332,20 @@ describe('mergeFields', () => {
   })
 })
 
+describe('MIND_MAP_FIELDS', () => {
+  it('décrit le champ type de cartes_mentales', () => {
+    const desired = desiredCollections().find(entry => entry.name === MIND_MAPS_COLLECTION)
+    const field = desired.fields.find(entry => entry.name === 'type')
+    expect(field).toEqual({
+      name: 'type',
+      type: 'text',
+      required: false,
+      max: 64,
+      help: 'Type de la carte (cours, exo, prise de notes, corrections). Vide = non classée.',
+    })
+  })
+})
+
 describe('mergeIndexes', () => {
   it('does not add an index the collection already enforces, whatever its name', () => {
     const existing = ['CREATE UNIQUE INDEX "another_name" ON "cartes_mentales" (file_id)']
@@ -360,7 +374,7 @@ describe('planCollection', () => {
     const desired = desiredCollections().find(entry => entry.name === MIND_MAPS_COLLECTION)
     const plan = planCollection(undefined, desired)
     expect(plan.create).toMatchObject({ name: MIND_MAPS_COLLECTION, type: 'base' })
-    expect(plan.create.fields.map(field => field.name)).toEqual(['file_id', 'author', 'path', 'content'])
+    expect(plan.create.fields.map(field => field.name)).toEqual(['file_id', 'author', 'path', 'content', 'type'])
     expect(plan.create.updateRule).toBe('@request.auth.username = author || @request.auth.role = "prof"')
     expect(plan.create.deleteRule).toBe('@request.auth.username = author || @request.auth.role = "prof"')
     expect(plan.changes).toEqual(['collection « cartes_mentales » créée'])
