@@ -143,16 +143,6 @@ describe('AppToolbar', () => {
     await waitFor(() => expect(useAppearanceSettingsStore.getState().themeMode).toBe('dark'))
   })
 
-  it('closes every open fiche, and offers nothing to close when there are none', async () => {
-    const user = userEvent.setup()
-    renderToolbar()
-    expect(screen.getByRole('button', { name: 'Fermer toutes les fiches' })).toBeDisabled()
-
-    act(() => useCardDetailStore.getState().show('root'))
-    await user.click(screen.getByRole('button', { name: 'Fermer toutes les fiches' }))
-    expect(useCardDetailStore.getState().open).toHaveLength(0)
-  })
-
   it('opens the export dialog on the map on screen', async () => {
     const user = userEvent.setup()
     renderToolbar()

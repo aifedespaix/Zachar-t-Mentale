@@ -330,7 +330,7 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
 
         <span className="toolbar-separator" aria-hidden />
 
-        <CommandButton command="file.save" icon={Save} />
+        <CommandButton command="file.new" icon={FilePlus} />
         <CommandButton command="edit.undo" icon={Undo2} />
         <CommandButton command="edit.redo" icon={Redo2} />
 
@@ -351,7 +351,6 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
           variant="outline"
           className={editsBlocked ? 'toolbar-lock--active' : undefined}
         />
-        <CommandButton command="card.closeFiches" icon={PanelRightClose} />
         <CommandButton command="app.palette" icon={Command} />
 
         {/* The theme button keeps its own handler rather than going through the

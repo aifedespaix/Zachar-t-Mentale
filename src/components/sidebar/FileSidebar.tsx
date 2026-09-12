@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { CloudSync, Eye, EyeOff, FolderPlus, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, X } from 'lucide-react'
+import { CloudSync, Eye, EyeOff, FolderPlus, FoldVertical, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, X } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent } from '../ui/context-menu'
@@ -100,6 +100,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const workspaceError = useWorkspaceStore(s => s.workspaceError)
   const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
   const expandPaths = useWorkspaceStore(s => s.expandPaths)
+  const collapseAllFolders = useWorkspaceStore(s => s.collapseAllFolders)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const syncStatus = useSyncStore(s => s.status)
   const syncError = useSyncStore(s => s.error)
@@ -339,6 +340,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   })
   useCommand('file.addRootFolder', () => void handleAddFolder())
   useCommand('file.refresh', () => void handleRefreshAll())
+  useCommand('view.collapseFolders', () => collapseAllFolders(), rootFolders.length > 0)
   useCommand(
     'file.newFolder',
     () => setNewFolderParent(defaultFolderTarget()),
@@ -650,6 +652,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
             >
               <CommandButton command="file.addRootFolder" icon={FolderPlus} variant="ghost" size="icon-sm" />
               <CommandButton command="file.refresh" icon={RefreshCw} variant="ghost" size="icon-sm" />
+              <CommandButton command="view.collapseFolders" icon={FoldVertical} variant="ghost" size="icon-sm" />
               <SidebarIconButton
                 label={showUnreadable ? 'Masquer les fichiers non lisibles' : 'Afficher les fichiers non lisibles'}
                 hint="Fichiers que l’application ne peut pas ouvrir"

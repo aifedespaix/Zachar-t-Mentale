@@ -47,6 +47,11 @@ interface WorkspaceState {
    * into a collapsed tree with no visible trace.
    */
   expandPaths: (paths: string[]) => void
+  /**
+   * Collapses every folder except the configured root folders — one gesture
+   * to fold a tree that's grown deep, without hiding the roots themselves.
+   */
+  collapseAllFolders: () => void
   setCurrentFile: (path: string | null) => void
   setWorkspaceError: (message: string | null) => void
 }
@@ -233,6 +238,13 @@ export function createWorkspaceStore(): WorkspaceStore {
       set(state => {
         const next = new Set(state.expandedPaths)
         for (const path of paths) next.add(path)
+        saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next] })
+        return { expandedPaths: next }
+      }),
+    collapseAllFolders: () =>
+      set(state => {
+        const rootPaths = new Set(state.rootFolders.map(f => f.path))
+        const next = new Set([...state.expandedPaths].filter(path => rootPaths.has(path)))
         saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next] })
         return { expandedPaths: next }
       }),

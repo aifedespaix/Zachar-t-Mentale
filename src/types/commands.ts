@@ -416,6 +416,13 @@ export const COMMANDS = [
     defaultBinding: 'Mod+F',
   },
   {
+    id: 'view.collapseFolders',
+    label: 'Replier tous les dossiers',
+    description: 'Replie tous les sous-dossiers de l’arborescence, sans toucher aux dossiers de travail eux-mêmes.',
+    category: 'view',
+    defaultBinding: null,
+  },
+  {
     id: 'view.toggleDetailPanel',
     label: 'Afficher ou masquer les fiches',
     description: 'Replie le panneau des fiches pour donner toute la place à la carte.',
