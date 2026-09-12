@@ -1357,6 +1357,183 @@ Expected: FAIL — `setMindMapType` n'est jamais appelé, `result.reclassified` 
 
 
 
+- [ ] **Step 4: `SyncResult.reclassified` et l'alias interne**
+
+Dans `src/sync/syncService.ts`, ajouter le champ au résultat public :
+
+```ts
+  /** Ce qui n'est ni un échec ni un transfert : « les deux côtés avaient bougé ». */
+  notices?: { fileId: string; message: string }[]
+  /** Combien de cartes ont adopté le type décidé ailleurs. */
+  reclassified?: number
+```
+
+Puis élargir l'alias interne, pour que `sync()` ait le droit de l'incrémenter :
+
+```ts
+type SyncRunResult = SyncResult &
+  Required<Pick<SyncResult, 'relocated' | 'moved' | 'notices' | 'reclassified'>>
+```
+
+Et initialiser `reclassified: 0` dans l'objet `result` construit au début de `sync()`.
+
+- [ ] **Step 5: La passe de réconciliation adopte le type**
+
+Dans `reconcileOne`, juste après `entry.lastSyncedPath = lastSyncedPath` et AVANT la décision de chemin :
+
+```ts
+    // ── Type ────────────────────────────────────────────────────────────
+    // L'accord est amarré AVANT de décider : un type local non-default face à
+    // un serveur sans type doit rester un changement à pousser, et planPush
+    // exige un lastSyncedType connu.
+    entry.lastSyncedType = seedLastSyncedType(entry.lastSyncedType)
+    const typeAction = reconcileType({
+      localType: mapTypeOf(scan.meta.type),
+      lastSyncedType: entry.lastSyncedType,
+      remoteType: remote?.type,
+    })
+    if (typeAction.kind === 'adopt') {
+      try {
+        await setMindMapType(scan.path, typeAction.to)
+        entry.lastSyncedType = typeAction.to
+        result.reclassified += 1
+        if (typeAction.bothChanged) {
+          result.notices.push({
+            fileId: scan.meta.id,
+            message: '« ' + relPath + ' » a été classé des deux côtés : le type du serveur a été appliqué',
+          })
+        }
+      } catch (error) {
+        result.errors.push({ fileId: scan.meta.id, message: describeSyncError(error) })
+      }
+    }
+    // Les deux côtés portent déjà le même type : réamarrer l'accord dessus,
+    // sinon le push suivant renverrait une valeur identique.
+    if (remote !== undefined && mapTypeOf(remote.type) === mapTypeOf(scan.meta.type)) {
+      entry.lastSyncedType = mapTypeOf(remote.type)
+    }
+```
+
+Imports à ajouter : `reconcileType`, `seedLastSyncedType` (`./typeReconciliation`), `mapTypeOf` (`../types/mapType`), `setMindMapType` (`../persistence/fileStore`).
+
+- [ ] **Step 6: Le push porte `{ type }` seul**
+
+Dans `pushOne` :
+
+```ts
+        const payload: { path?: string; content?: string; type?: string } = {}
+        if (plan.content) payload.content = content
+        if (plan.path) payload.path = relPath
+        if (plan.type) payload.type = mapTypeOf(meta.type)
+        savedRecord = await client.mindMaps.update(remote.id, payload, { signal })
+```
+
+Et dans l'entrée enregistrée :
+
+```ts
+        lastSyncedType: plan.type || remote === undefined ? mapTypeOf(meta.type) : known?.lastSyncedType,
+```
+
+Le `create` porte le type :
+
+```ts
+        savedRecord = await client.mindMaps.create(
+          { file_id: meta.id, author: meta.author, path: relPath, content, type: mapTypeOf(meta.type) },
+          { signal }
+        )
+```
+
+- [ ] **Step 7: Le tirage réapplique `record.type`**
+
+Dans `pullOne`, remplacer l'écriture verbatim par la matérialisation qui applique le champ :
+
+```ts
+      const applied = meta === null ? null : { ...meta, type: mapTypeOf(record.type) }
+      const serialized = serializeMindMap(applied, cards)
+      await writeTextFile(localPath, serialized)
+      await pullAssetsFor(client, localPath, referencedAssets(serialized, remoteAssets), { signal })
+      entries[record.file_id] = {
+        lastSyncedModified: meta?.lastModified ?? record.updated,
+        lastSyncedUpdated: record.updated,
+        lastSyncedPath: record.path,
+        lastSyncedType: mapTypeOf(record.type),
+        lastSyncedContentHash: await hashContent(serialized),
+      }
+```
+
+`referencedAssets` lit la chaîne écrite (`serialized`), jamais la chaîne reçue : ce sont les mêmes références, mais une seule est le fichier réel.
+
+- [ ] **Step 8: Lancer la suite et committer**
+
+Run: `bunx vitest run src/sync/syncService.test.ts`
+Expected: PASS.
+
+```bash
+git add src/sync/syncService.ts src/sync/syncService.test.ts src/sync/pocketBaseAdapter.test.ts
+git commit -m "feat(sync): pousser, adopter et tirer le type"
+```
+
+---
+
+### Task 8: `src/sync/syncResultLabel.ts` — « reclassé(s) »
+
+**Files:**
+- Modify: `src/sync/syncResultLabel.ts`
+- Test: `src/sync/syncResultLabel.test.ts`
+
+**Interfaces:**
+- Consumes: `SyncResult.reclassified` (Task 7).
+- Produces: le libellé mentionne « N reclassé(s) ».
+
+- [ ] **Step 1: Write the failing test**
+
+Ajouter à `src/sync/syncResultLabel.test.ts` :
+
+```ts
+it('mentionne les reclassements', () => {
+  expect(
+    syncResultLabel({
+      pushed: 0,
+      pulled: 0,
+      errors: [],
+      cancelled: false,
+      transferred: [],
+      conflicts: [],
+      reclassified: 2,
+    })
+  ).toContain('2 reclassé(s)')
+})
+```
+
+- [ ] **Step 2: Lancer le test et vérifier l'échec**
+
+Run: `bunx vitest run src/sync/syncResultLabel.test.ts`
+Expected: FAIL — la ligne « reclassé(s) » manque.
+
+- [ ] **Step 3: Ajouter la ligne au compte rendu**
+
+Dans `src/sync/syncResultLabel.ts`, juste après la ligne des déplacements :
+
+```ts
+  // Une adoption de type n'est ni un envoi ni une réception : comme un
+  // déplacement, elle doit se lire même quand les deux compteurs sont à zéro.
+  if ((result.reclassified ?? 0) > 0) parts.push(`${result.reclassified ?? 0} reclassé(s)`)
+```
+
+- [ ] **Step 4: Lancer le test et vérifier qu'il passe**
+
+Run: `bunx vitest run src/sync/syncResultLabel.test.ts`
+Expected: PASS.
+
+> `src/state/useSyncStore.ts` reste inchangé : `reclassified` est optionnel, et le store appelle déjà `syncResultLabel(result)` pour le journal.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/sync/syncResultLabel.ts src/sync/syncResultLabel.test.ts
+git commit -m "feat(sync): le compte rendu dit les reclassements"
+```
+
 ---
 
 ### Task 9: `src/components/sidebar/MapTypeBadge.tsx` — la pilule de type
