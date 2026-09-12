@@ -3,6 +3,8 @@ import type { FileTreeNode, RootFolder } from '../types/workspace'
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../persistence/workspaceConfig'
 import { scanFolder } from '../persistence/fileTree'
 import { loadSessionState, saveSessionState } from '../persistence/sessionState'
+import { movePath } from '../persistence/fileOps'
+import { fileNameOf, parentDirOf, separatorOf } from '../persistence/paths'
 
 interface WorkspaceState {
   rootFolders: RootFolder[]
@@ -30,6 +32,14 @@ interface WorkspaceState {
   removeRootFolder: (path: string) => Promise<void>
   refreshFolder: (folderPath: string) => Promise<void>
   refreshAll: () => Promise<void>
+  /**
+   * Moves a file or folder into another folder, and reports whether it
+   * happened. Everything that keys off a path has to follow the move:
+   * `currentFilePath` (or the open file inside the moved folder),
+   * `expandedPaths` (a folder keeps its open branches wherever it lands), and
+   * both the source and the destination listings.
+   */
+  moveNode: (sourcePath: string, destFolderPath: string, isFolder: boolean) => Promise<boolean>
   toggleExpanded: (path: string) => void
   /**
    * Expands every folder in `paths` (a root-to-leaf trail), so a file created
@@ -184,6 +194,40 @@ export function createWorkspaceStore(): WorkspaceStore {
         return folder
       })
       set({ rootFolders, workspaceError: failed.length > 0 ? scanFailureMessage(failed) : null })
+    },
+    moveNode: async (sourcePath, destFolderPath, isFolder) => {
+      const name = fileNameOf(sourcePath)
+      const separator = separatorOf(sourcePath)
+      const destination = `${destFolderPath}${separatorOf(destFolderPath)}${name}`
+      const sourceParent = parentDirOf(sourcePath)
+      try {
+        await movePath(sourcePath, destFolderPath, isFolder)
+      } catch (error) {
+        set({
+          workspaceError: `Impossible de déplacer « ${name} » vers « ${folderDisplayName(destFolderPath)} » : ${describeError(error)}`,
+        })
+        return false
+      }
+      // The paths are rewritten BEFORE the refreshes below: those re-render the
+      // rows, and a row that remounts while `currentFilePath` still names the
+      // old location would try to open a file that is no longer there.
+      set(state => {
+        const follow = (path: string) => {
+          if (path === sourcePath) return destination
+          if (isFolder && path.startsWith(sourcePath + separator)) return destination + path.slice(sourcePath.length)
+          return path
+        }
+        const currentFilePath = state.currentFilePath === null ? null : follow(state.currentFilePath)
+        const expandedPaths = new Set([...state.expandedPaths].map(follow))
+        // So the moved file is actually visible where it landed, rather than
+        // dropped into a destination that happens to be collapsed.
+        expandedPaths.add(destFolderPath)
+        saveSessionState({ currentFilePath, expandedPaths: [...expandedPaths] })
+        return { currentFilePath, expandedPaths }
+      })
+      await get().refreshFolder(sourceParent)
+      await get().refreshFolder(destFolderPath)
+      return true
     },
     expandPaths: paths =>
       set(state => {

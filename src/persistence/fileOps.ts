@@ -3,7 +3,17 @@ import { join } from '@tauri-apps/api/path'
 import { createRootCard } from '../state/cardsReducer'
 import { serializeMindMap } from './serialization'
 import { loadMindMap, mindMapExists, stripMindMapSyncMeta } from './fileStore'
-import { isMindMapPath, sanitizeFileName, withMindMapExtension, mindMapBaseName, parentDirOf, fileNameOf } from './paths'
+import {
+  isMindMapPath,
+  sanitizeFileName,
+  withMindMapExtension,
+  mindMapBaseName,
+  parentDirOf,
+  fileNameOf,
+  separatorOf,
+  isSameFilePath,
+  isInsideFolder,
+} from './paths'
 import { titleCase } from '../utils/titleCase'
 import { sidecarDirOf } from './assets'
 import type { MindMapMeta, UserRole } from '../types/card'
@@ -196,4 +206,86 @@ export async function duplicateMap(sourcePath: string, author: string, role: Use
   if (await exists(sourceSidecar)) await copyDirRecursive(sourceSidecar, sidecarDirOf(destPath))
 
   return destPath
+}
+
+/**
+ * The same tree, copied verbatim — sync identity and all.
+ *
+ * `duplicatePath` cannot serve here: it deliberately STRIPS a mind map's `meta`
+ * so a copy comes out as a fresh, purely local draft. A MOVE must keep that
+ * identity, because the file it produces IS the file the user dragged; dropping
+ * its `file_id` would orphan its remote record and publish the same course
+ * again under a new id.
+ */
+async function copyPathVerbatim(sourcePath: string, destPath: string, isFolder: boolean): Promise<void> {
+  if (isFolder) {
+    await copyDirRecursive(sourcePath, destPath)
+    return
+  }
+  await copyFile(sourcePath, destPath)
+  if (!isMindMapPath(sourcePath)) return
+
+  const sourceSidecar = sidecarDirOf(sourcePath)
+  if (await exists(sourceSidecar)) await copyDirRecursive(sourceSidecar, sidecarDirOf(destPath))
+}
+
+/**
+ * Moves a file or folder into `destFolderPath`, keeping its own name — the
+ * gesture behind a drag & drop in the sidebar.
+ *
+ * A move between two folders IS a rename across directories, so it goes through
+ * `renamePath` and inherits its sidecar handling: moving `chapitre.zmap`
+ * takes `chapitre.assets` along, and every image in the map keeps working.
+ *
+ * Three refusals, each raised before anything is written so the caller can turn
+ * it into a banner: the destination is already the file's own parent (a no-op),
+ * the name is already taken there (a move must never silently overwrite — the
+ * user renames first), and a folder dropped into itself or one of its own
+ * descendants (an infinite tree).
+ *
+ * A rename across devices (`EXDEV` — two configured roots on two drives, or a
+ * network share) is the one case `rename` cannot serve, and the move is then
+ * emulated: copy verbatim, then delete the original. Deliberately NOT the
+ * default path, since it duplicates before it deletes and a failure in between
+ * leaves two files behind — hence the explicit message for that outcome.
+ */
+export async function movePath(sourcePath: string, destFolderPath: string, isFolder: boolean): Promise<void> {
+  const name = fileNameOf(sourcePath)
+  const destination = `${destFolderPath}${separatorOf(destFolderPath)}${name}`
+
+  if (isSameFilePath(parentDirOf(sourcePath), destFolderPath)) {
+    throw new Error(`« ${name} » est déjà dans ce dossier`)
+  }
+  if (isFolder && isInsideFolder(destFolderPath, sourcePath)) {
+    throw new Error(`« ${name} » ne peut pas être déplacé dans lui-même`)
+  }
+  if (await exists(destination)) {
+    throw new Error(`« ${name} » existe déjà dans ce dossier`)
+  }
+
+  let renameError: unknown = null
+  try {
+    await renamePath(sourcePath, destination)
+    return
+  } catch (error) {
+    // Reported as-is unless the copy fallback below succeeds: a permission
+    // error is far more informative than the copy failure it causes.
+    renameError = error
+  }
+  // If the source is gone, the rename half-happened and copying would be wrong.
+  if (!(await exists(sourcePath))) throw renameError
+
+  try {
+    await copyPathVerbatim(sourcePath, destination, isFolder)
+  } catch {
+    throw renameError
+  }
+
+  try {
+    await deletePath(sourcePath, isFolder)
+  } catch {
+    throw new Error(
+      `« ${name} » a bien été copiée dans ce dossier, mais l’original n’a pas pu être supprimé : il y en a maintenant deux`
+    )
+  }
 }

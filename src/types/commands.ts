@@ -409,6 +409,13 @@ export const COMMANDS = [
     defaultBinding: 'Mod+B',
   },
   {
+    id: 'view.findInTree',
+    label: 'Rechercher dans l’arborescence',
+    description: 'Filtre les cartes et les dossiers par nom, et place le curseur dans le champ de recherche.',
+    category: 'view',
+    defaultBinding: 'Mod+F',
+  },
+  {
     id: 'view.toggleLock',
     label: 'Verrouiller ou déverrouiller',
     description: 'Empêche (ou réautorise) toute modification de la carte mentale.',

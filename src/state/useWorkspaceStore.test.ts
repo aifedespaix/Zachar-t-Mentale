@@ -6,6 +6,7 @@ vi.mock('../persistence/workspaceConfig', () => ({
   saveWorkspaceConfig: vi.fn(),
 }))
 vi.mock('../persistence/fileTree', () => ({ scanFolder: vi.fn() }))
+vi.mock('../persistence/fileOps', () => ({ movePath: vi.fn() }))
 vi.mock('../persistence/sessionState', () => ({
   loadSessionState: vi.fn(),
   saveSessionState: vi.fn(),
@@ -14,12 +15,14 @@ vi.mock('../persistence/sessionState', () => ({
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../persistence/workspaceConfig'
 import { scanFolder } from '../persistence/fileTree'
 import { loadSessionState, saveSessionState } from '../persistence/sessionState'
+import { movePath } from '../persistence/fileOps'
 
 describe('useWorkspaceStore', () => {
   beforeEach(() => {
     vi.mocked(loadWorkspaceConfig).mockReset()
     vi.mocked(saveWorkspaceConfig).mockReset().mockResolvedValue(undefined)
     vi.mocked(scanFolder).mockReset()
+    vi.mocked(movePath).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadSessionState)
       .mockReset()
       .mockReturnValue({ currentFilePath: null, expandedPaths: [] })
@@ -298,5 +301,83 @@ describe('useWorkspaceStore', () => {
       currentFilePath: null,
       expandedPaths: ['/cours/chimie'],
     })
+  })
+})
+
+describe('useWorkspaceStore.moveNode', () => {
+  function storeWithTree() {
+    const store = createWorkspaceStore()
+    store.setState({
+      rootFolders: [
+        {
+          path: '/cours-svt',
+          tree: [
+            {
+              type: 'folder',
+              name: 'SVT',
+              path: '/cours-svt/SVT',
+              children: [
+                { type: 'mindmap', name: 'a.zmap', path: '/cours-svt/SVT/a.zmap' },
+                { type: 'folder', name: 'Lycée', path: '/cours-svt/SVT/Lycée', children: [] },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+    return store
+  }
+
+  it('moves the file, follows the open path, and re-scans both folders', async () => {
+    const store = storeWithTree()
+    store.setState({ currentFilePath: '/cours-svt/SVT/a.zmap', expandedPaths: new Set(['/cours-svt/SVT']) })
+    vi.mocked(scanFolder).mockResolvedValue([])
+
+    const moved = await store.getState().moveNode('/cours-svt/SVT/a.zmap', '/cours-svt/SVT/Lycée', false)
+
+    expect(moved).toBe(true)
+    expect(movePath).toHaveBeenCalledWith('/cours-svt/SVT/a.zmap', '/cours-svt/SVT/Lycée', false)
+    expect(store.getState().currentFilePath).toBe('/cours-svt/SVT/Lycée/a.zmap')
+    // Opened where it landed, so the file is not dropped into a closed folder.
+    expect(store.getState().expandedPaths.has('/cours-svt/SVT/Lycée')).toBe(true)
+    expect(scanFolder).toHaveBeenCalledWith('/cours-svt/SVT')
+    expect(scanFolder).toHaveBeenCalledWith('/cours-svt/SVT/Lycée')
+    expect(saveSessionState).toHaveBeenCalled()
+  })
+
+  it('carries every path of a moved folder with it, open file and open branches alike', async () => {
+    const store = storeWithTree()
+    store.setState({
+      currentFilePath: '/cours-svt/SVT/Lycée/a.zmap',
+      expandedPaths: new Set(['/cours-svt/SVT', '/cours-svt/SVT/Lycée']),
+    })
+    vi.mocked(scanFolder).mockResolvedValue([])
+
+    await store.getState().moveNode('/cours-svt/SVT', '/cours-svt/Divers', true)
+
+    const state = store.getState()
+    expect(state.currentFilePath).toBe('/cours-svt/Divers/SVT/Lycée/a.zmap')
+    expect(state.expandedPaths.has('/cours-svt/Divers/SVT')).toBe(true)
+    expect(state.expandedPaths.has('/cours-svt/Divers/SVT/Lycée')).toBe(true)
+    // Opened as a destination, so the folder that just arrived is visible.
+    expect(state.expandedPaths.has('/cours-svt/Divers')).toBe(true)
+  })
+
+  it('reports a refused move and leaves the open file, the tree and the session alone', async () => {
+    const store = storeWithTree()
+    store.setState({ currentFilePath: '/cours-svt/SVT/a.zmap', expandedPaths: new Set(['/cours-svt/SVT']) })
+    vi.mocked(movePath).mockRejectedValue(new Error('« a.zmap » existe déjà dans ce dossier'))
+
+    const moved = await store.getState().moveNode('/cours-svt/SVT/a.zmap', '/cours-svt/SVT/Lycée', false)
+
+    expect(moved).toBe(false)
+    expect(store.getState().currentFilePath).toBe('/cours-svt/SVT/a.zmap')
+    expect([...store.getState().expandedPaths]).toEqual(['/cours-svt/SVT'])
+    expect(store.getState().workspaceError).toBe(
+      'Impossible de déplacer « a.zmap » vers « Lycée » : « a.zmap » existe déjà dans ce dossier'
+    )
+    // Nothing was re-scanned: the tree on screen still describes the disk.
+    expect(scanFolder).not.toHaveBeenCalled()
+    expect(saveSessionState).not.toHaveBeenCalled()
   })
 })

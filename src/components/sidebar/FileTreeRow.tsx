@@ -1,14 +1,16 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useEffect, useRef, useState } from 'react'
-import { Folder, FolderOpen, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, Lock, CloudUpload, CloudOff, Check, Tag } from 'lucide-react'
+import { Folder, FolderOpen, FolderInput, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, Lock, CloudUpload, CloudOff, Check, Tag } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
+import { useTreeDragStore } from '../../state/useTreeDragStore'
 import { renamePath, deletePath, duplicatePath, freeSiblingPath } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
 import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, withMindMapExtension, isInsideFolder } from '../../persistence/paths'
 import { loadMindMap, mindMapExists, setMindMapType } from '../../persistence/fileStore'
-import { isAssetsSidecarName } from '../../persistence/assets'
+import { beginTreeDrag, consumeSwallowedClick, isValidDropTarget } from './treeDrag'
+import { flattenFolders, isRowVisible, type FolderOption } from './treeFilter'
 import { validateCards } from '../../validation/cardsValidation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
@@ -33,6 +35,50 @@ import { canClassify } from '../../sync/permissions'
 import { MAP_TYPES, MAP_TYPE_LABELS, type MapType } from '../../types/mapType'
 import { MapTypeBadge } from './MapTypeBadge'
 
+/**
+ * The class list shared by every row: the base, then whichever state modifiers
+ * apply. One function rather than a template string at each call site, so a row
+ * can never end up half-styled — the drop highlight and the in-flight fade come
+ * from the same place as the active / locked wash they replace.
+ */
+function rowClassName(modifiers: Array<string | false | undefined>): string {
+  return ['file-tree-row', ...modifiers.filter(Boolean)].join(' ')
+}
+
+/**
+ * « Déplacer vers… » — the drag & drop's keyboard and touch equivalent.
+ *
+ * The drag is the fast path, but it is only a pointer gesture: this menu is how
+ * the same move stays reachable without one, and it is also what makes the
+ * destinations discoverable on a long tree, where the folder you want may be
+ * scrolled out of sight and therefore impossible to drag onto.
+ */
+function MoveToSubmenu({
+  destinations,
+  onSelect,
+}: {
+  destinations: FolderOption[]
+  onSelect: (path: string) => void
+}) {
+  return (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger>
+        <FolderInput size={14} /> Déplacer vers…
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent>
+        {destinations.map(option => (
+          <ContextMenuItem key={option.path} onSelect={() => onSelect(option.path)}>
+            {/* Indentation, not a tree widget: the menu only has to say which
+                folder is a subfolder of which. */}
+            <span style={{ width: option.depth * 10, flexShrink: 0 }} />
+            {option.name}
+          </ContextMenuItem>
+        ))}
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  )
+}
+
 interface FileTreeRowProps {
   node: FileTreeNode
   depth: number
@@ -41,6 +87,12 @@ interface FileTreeRowProps {
   onRemoveRoot?: (path: string) => void
   /** Whether files the app cannot open (`type: 'other'`) are shown at all. */
   showUnreadable?: boolean
+  /**
+   * Folders the search has opened by itself. A view, never persisted: the row
+   * treats them as expanded without writing anything to `expandedPaths`, so
+   * clearing the field restores the tree exactly as it was.
+   */
+  forcedExpanded?: ReadonlySet<string>
 }
 
 interface NamingAction {
@@ -86,6 +138,7 @@ export function FileTreeRow({
   isRoot = false,
   onRemoveRoot,
   showUnreadable = false,
+  forcedExpanded,
 }: FileTreeRowProps) {
   const expandedPaths = useWorkspaceStore(s => s.expandedPaths)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
@@ -93,6 +146,12 @@ export function FileTreeRow({
   const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
   const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
+  const rootFolders = useWorkspaceStore(s => s.rootFolders)
+  const moveNode = useWorkspaceStore(s => s.moveNode)
+  // Two booleans, not the drag state itself: subscribing a row to the pointer
+  // position would re-render the whole tree on every mouse move.
+  const dragging = useTreeDragStore(s => s.source?.path === node.path)
+  const isDropTarget = useTreeDragStore(s => s.targetPath === node.path)
 
   const [renaming, setRenaming] = useState(false)
   const [draftRenameName, setDraftRenameName] = useState(node.name)
@@ -158,6 +217,23 @@ export function FileTreeRow({
     node.type === 'mindmap' ? mindMapBaseName(node.name).length : node.name.length
 
   const renameInputRef = useRef<HTMLInputElement>(null)
+
+  /**
+   * Where « Déplacer vers… » may send this row. Exactly the destinations the
+   * gesture itself accepts, from the same predicate: a menu option that would
+   * be refused on drop is not offered at all.
+   */
+  const moveDestinations = flattenFolders(rootFolders).filter(option =>
+    isValidDropTarget(
+      { path: node.path, name: node.name, kind: node.type === 'folder' ? 'folder' : 'mindmap' },
+      option.path
+    )
+  )
+
+  /** Moves this row through the store, which owns every consequence of a move. */
+  function moveTo(destFolderPath: string) {
+    void moveNode(node.path, destFolderPath, node.type === 'folder')
+  }
 
   // Applied in an effect rather than at mount: the field has to exist and be
   // focused before a selection range sticks, and `autoFocus` only focuses it
@@ -289,9 +365,11 @@ export function FileTreeRow({
   }
 
   if (node.type === 'folder') {
-    const isExpanded = expandedPaths.has(node.path)
+    const isExpanded = expandedPaths.has(node.path) || forcedExpanded?.has(node.path) === true
     return (
-      <div>
+      // The whole branch is a drop zone, not just the header: `dropTargetAt`
+      // walks up to it, so dropping on any file means « dans ce dossier ».
+      <div data-drop-folder={node.path}>
         <ContextMenu>
           <ContextMenuTrigger asChild disabled={renaming}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -315,26 +393,28 @@ export function FileTreeRow({
               ) : (
                 <button
                   type="button"
+                  className={rowClassName([
+                    isDropTarget && 'file-tree-row--drop-target',
+                    dragging && 'file-tree-row--dragging',
+                  ])}
+                  data-tree-row={node.path}
+                  data-tree-kind="folder"
+                  onPointerDown={event => {
+                    // A configured root is workspace configuration, not content:
+                    // it can receive a drop but never be dragged out of the list.
+                    if (isRoot) return
+                    beginTreeDrag(event, { path: node.path, name: node.name, kind: 'folder' })
+                  }}
                   onClick={() => toggleExpanded(node.path)}
                   onDoubleClick={() => {
                     if (!isRoot) setRenaming(true)
                   }}
                   aria-expanded={isExpanded}
-                  style={{
-                    ...indent,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    flex: 1,
-                    background: 'transparent',
-                    border: 'none',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                  }}
+                  style={{ ...indent }}
                 >
                   {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
-                  <span>{node.name}</span>
+                  <span className="file-tree-row__name">{node.name}</span>
                 </button>
               )}
             </div>
@@ -352,6 +432,9 @@ export function FileTreeRow({
               <ContextMenuItem onSelect={openDuplicateDialog}>
                 <Copy size={14} /> Dupliquer
               </ContextMenuItem>
+            )}
+            {!isRoot && moveDestinations.length > 0 && (
+              <MoveToSubmenu destinations={moveDestinations} onSelect={moveTo} />
             )}
             {!isRoot && (
               <>
@@ -400,7 +483,7 @@ export function FileTreeRow({
 
         {isExpanded &&
           node.children
-            .filter(child => (isAssetsSidecarName(child.name) ? showUnreadable : showUnreadable || child.type !== 'other'))
+            .filter(child => isRowVisible(child, showUnreadable))
             .map(child => (
               <FileTreeRow
                 key={child.path}
@@ -408,6 +491,7 @@ export function FileTreeRow({
                 depth={depth + 1}
                 onOpenFile={onOpenFile}
                 showUnreadable={showUnreadable}
+                forcedExpanded={forcedExpanded}
               />
             ))}
       </div>
@@ -441,24 +525,26 @@ export function FileTreeRow({
               ) : (
                 <button
                   type="button"
-                  onClick={() => onOpenFile(node.path)}
+                  onClick={() => {
+                    // The click that follows the pointerup ending a drag is not
+                    // a request to open the map: the map just moved.
+                    if (consumeSwallowedClick()) return
+                    onOpenFile(node.path)
+                  }}
                   onDoubleClick={() => setRenaming(true)}
                   title={displayName === node.name ? undefined : node.name}
-                  style={{
-                    ...indent,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    flex: 1,
-                    background: isLocked
-                      ? 'color-mix(in oklch, var(--primary), transparent 92%)'
-                      : isActive
-                        ? 'var(--muted)'
-                        : 'transparent',
-                    border: 'none',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                  }}
+                  className={rowClassName([
+                    isLocked && 'file-tree-row--locked',
+                    isActive && 'file-tree-row--active',
+                    isDropTarget && 'file-tree-row--drop-target',
+                    dragging && 'file-tree-row--dragging',
+                  ])}
+                  data-tree-row={node.path}
+                  data-tree-kind="mindmap"
+                  onPointerDown={event =>
+                    beginTreeDrag(event, { path: node.path, name: displayName, kind: 'mindmap' })
+                  }
+                  style={{ ...indent }}
                 >
                   {isLocked ? (
                     // The `<title>` child is the badge's tooltip: Lucide's own props
@@ -473,7 +559,7 @@ export function FileTreeRow({
                   ) : (
                     <FileJson size={16} />
                   )}
-                  <span>{displayName}</span>
+                  <span className="file-tree-row__name">{displayName}</span>
                   <MapTypeBadge type={meta?.type} />
                   {outOfSyncFolder && (
                     <CloudOff size={13} aria-label="Hors du dossier de synchronisation" style={{ opacity: 0.7, flexShrink: 0 }}>
@@ -503,6 +589,9 @@ export function FileTreeRow({
             <ContextMenuItem onSelect={openDuplicateDialog}>
               <Copy size={14} /> Dupliquer
             </ContextMenuItem>
+            {moveDestinations.length > 0 && (
+              <MoveToSubmenu destinations={moveDestinations} onSelect={moveTo} />
+            )}
             <ContextMenuItem onSelect={openExport}>
               <Download size={14} /> Exporter
             </ContextMenuItem>

@@ -161,7 +161,9 @@ describe('FileTreeRow', () => {
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    expect(screen.getByRole('button', { name: 'chapitre1' })).toHaveStyle({ background: 'var(--muted)' })
+    // A class, not an inline background: the wash has to be overridable by the
+    // row's own hover, and an inline style would outrank it.
+    expect(screen.getByRole('button', { name: 'chapitre1' })).toHaveClass('file-tree-row--active')
   })
 
   it('renders an "other" file as visually inert and never calls onOpenFile', async () => {

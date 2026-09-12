@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createMindMapFile, createSubfolder, renamePath, deletePath, freeMindMapPath, freeSiblingPath, duplicatePath } from './fileOps'
+import {
+  createMindMapFile,
+  createSubfolder,
+  renamePath,
+  deletePath,
+  freeMindMapPath,
+  freeSiblingPath,
+  duplicatePath,
+  movePath,
+} from './fileOps'
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
   mkdir: vi.fn(),
@@ -314,5 +323,87 @@ describe('duplicateMap', () => {
   it('throws a French error when the source file no longer exists', async () => {
     vi.mocked(loadMindMap).mockResolvedValue(null)
     await expect(duplicateMap('/cours/Gone.zmap', 'eleve1', 'eleve')).rejects.toThrow('Gone.zmap')
+  })
+})
+
+describe('movePath', () => {
+  beforeEach(() => {
+    vi.mocked(rename).mockReset().mockResolvedValue(undefined)
+    vi.mocked(copyFile).mockReset().mockResolvedValue(undefined)
+    vi.mocked(remove).mockReset().mockResolvedValue(undefined)
+    vi.mocked(readDir).mockReset().mockResolvedValue([])
+    vi.mocked(exists).mockReset().mockResolvedValue(false)
+  })
+
+  it('moves a map into the destination folder, taking its asset sidecar along', async () => {
+    // The `.assets` folder is the one thing that must never be left behind:
+    // every image in the map is addressed relative to it.
+    vi.mocked(exists).mockImplementation(async path => path === '/cours/SVT/Chapitre 1.assets')
+
+    await movePath('/cours/SVT/Chapitre 1.zmap', '/cours/SVT/Lycée', false)
+
+    expect(rename).toHaveBeenNthCalledWith(1, '/cours/SVT/Chapitre 1.zmap', '/cours/SVT/Lycée/Chapitre 1.zmap')
+    expect(rename).toHaveBeenNthCalledWith(2, '/cours/SVT/Chapitre 1.assets', '/cours/SVT/Lycée/Chapitre 1.assets')
+    expect(copyFile).not.toHaveBeenCalled()
+  })
+
+  it('moves a folder without touching its contents one by one', async () => {
+    vi.mocked(exists).mockImplementation(async path => String(path).endsWith('.assets'))
+
+    await movePath('/cours/SVT', '/cours/Divers', true)
+
+    expect(rename).toHaveBeenCalledTimes(1)
+    expect(rename).toHaveBeenCalledWith('/cours/SVT', '/cours/Divers/SVT')
+  })
+
+  it('refuses a name that is already taken, rather than overwriting a course', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+
+    await expect(movePath('/cours/a.zmap', '/cours/Divers', false)).rejects.toThrow('existe déjà')
+    expect(rename).not.toHaveBeenCalled()
+  })
+
+  it('refuses a move that would not move anything', async () => {
+    await expect(movePath('/cours/a.zmap', '/cours', false)).rejects.toThrow('déjà dans ce dossier')
+    expect(rename).not.toHaveBeenCalled()
+  })
+
+  it('refuses to drop a folder into itself or one of its own descendants', async () => {
+    await expect(movePath('/cours/SVT', '/cours/SVT/Chapitre 1', true)).rejects.toThrow('lui-même')
+    expect(rename).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a verbatim copy when the two folders are not on the same device', async () => {
+    // `rename` cannot cross a drive boundary (EXDEV). The copy carries the sync
+    // identity with it — a move is not a duplicate.
+    vi.mocked(rename).mockRejectedValue(new Error('cross-device link'))
+    vi.mocked(exists).mockImplementation(async path => path === '/cours/a.zmap' || path === '/cours/a.assets')
+    vi.mocked(readDir).mockImplementation(async path =>
+      path === '/cours/a.assets'
+        ? [{ name: 'img.png', isDirectory: false, isFile: true, isSymlink: false }]
+        : []
+    )
+
+    await movePath('/cours/a.zmap', '/autre/dossier', false)
+
+    expect(copyFile).toHaveBeenCalledWith('/cours/a.zmap', '/autre/dossier/a.zmap')
+    expect(copyFile).toHaveBeenCalledWith('/cours/a.assets/img.png', '/autre/dossier/a.assets/img.png')
+    expect(remove).toHaveBeenCalledWith('/cours/a.zmap', { recursive: false })
+  })
+
+  it('reports the rename failure when the copy cannot be made either', async () => {
+    vi.mocked(rename).mockRejectedValue(new Error('accès refusé'))
+    vi.mocked(exists).mockImplementation(async path => path === '/cours/a.zmap')
+    vi.mocked(copyFile).mockRejectedValue(new Error('copie impossible'))
+
+    await expect(movePath('/cours/a.zmap', '/autre/dossier', false)).rejects.toThrow('accès refusé')
+  })
+
+  it('says so when the copy worked but the original could not be removed', async () => {
+    vi.mocked(rename).mockRejectedValue(new Error('cross-device link'))
+    vi.mocked(exists).mockImplementation(async path => path === '/cours/a.zmap')
+    vi.mocked(remove).mockRejectedValue(new Error('fichier verrouillé'))
+
+    await expect(movePath('/cours/a.zmap', '/autre/dossier', false)).rejects.toThrow('il y en a maintenant deux')
   })
 })

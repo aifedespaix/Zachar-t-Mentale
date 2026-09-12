@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { CloudSync, Eye, EyeOff, FolderPlus, PanelLeftClose, PanelLeftOpen, RefreshCw, X } from 'lucide-react'
+import { CloudSync, Eye, EyeOff, FolderPlus, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, X } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent } from '../ui/context-menu'
@@ -18,6 +18,8 @@ import { useSyncStore } from '../../state/useSyncStore'
 import { syncResultLabel } from '../../sync/syncResultLabel'
 import { formatRelativeTime } from '../../utils/relativeTime'
 import { FileTreeRow } from './FileTreeRow'
+import { TreeDragGhost } from './TreeDragGhost'
+import { filterTree } from './treeFilter'
 import {
   clampSidebarWidth,
   loadSidebarWidth,
@@ -113,6 +115,14 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const syncUserName = useSyncStore(s => s.currentUser?.username ?? null)
   const syncFolderPath = useSyncStore(s => s.syncFolderPath)
   const [collapsed, setCollapsed] = useState(false)
+  /** What the search field holds. A view over the tree — never persisted. */
+  const [search, setSearch] = useState('')
+  /**
+   * Bumped by « Mod + F ». A counter rather than a boolean, so pressing the
+   * shortcut twice re-focuses and re-selects the field instead of being a no-op
+   * the second time.
+   */
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0)
   /** The folder « Nouveau dossier » is about to create in — `null` when the dialog is closed. */
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null)
   // Same reason as the width below: read synchronously so the tree doesn't
@@ -129,6 +139,16 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
    */
   const [syncFeedbackDismissed, setSyncFeedbackDismissed] = useState(false)
   const handleRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  // Selecting what is already there is what makes the shortcut a REPLACEMENT:
+  // pressing it again retypes the query from scratch rather than appending to
+  // the last one.
+  useEffect(() => {
+    if (searchFocusRequest === 0) return
+    searchInputRef.current?.focus()
+    searchInputRef.current?.select()
+  }, [searchFocusRequest])
 
   // Right-clicking the sidebar's own empty space (the header, the gap under the
   // tree, the footer bar) targets the FIRST configured folder: it is the one
@@ -291,6 +311,12 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
     true,
     collapsed ? 'Afficher l’arborescence' : 'Masquer l’arborescence'
   )
+  useCommand('view.findInTree', () => {
+    // Unfold first: the field only exists in the unfolded bar, so focusing it
+    // while the tree is folded away would do nothing at all.
+    setCollapsed(false)
+    setSearchFocusRequest(request => request + 1)
+  })
   useCommand('file.addRootFolder', () => void handleAddFolder())
   useCommand('file.refresh', () => void handleRefreshAll())
   useCommand(
@@ -405,6 +431,30 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
       ? undefined
       : [localOnlyDetail, pendingDetail, lastSyncDetail].filter(part => part !== null).join(' · ')
 
+  /**
+   * The search is a VIEW over the tree, never a mutation of it: nothing here
+   * touches `expandedPaths` or the filesystem, so clearing the field puts back
+   * exactly the tree the user had.
+   *
+   * Each root goes through `filterTree` WHOLE rather than only its children, so
+   * a root that matches by NAME keeps its whole subtree like any other folder —
+   * and a root with no match disappears instead of sitting there empty.
+   */
+  const query = search.trim()
+  const searching = query !== ''
+  const visibleRoots = rootFolders.map(root => {
+    const rootNode: FileTreeNode = {
+      type: 'folder',
+      name: folderDisplayName(root.path),
+      path: root.path,
+      children: root.tree,
+    }
+    if (!searching) return { root, node: rootNode, forcedExpanded: undefined, matches: 0 }
+    const result = filterTree([rootNode], query, showUnreadable)
+    return { root, node: result.nodes[0], forcedExpanded: result.expanded, matches: result.count }
+  })
+  const matchCount = visibleRoots.reduce((total, entry) => total + entry.matches, 0)
+
   return (
     <TooltipProvider>
       <ContextMenu>
@@ -428,33 +478,71 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
               names it and the buttons sit where the file rows end — one bar, one
               place to look, instead of a header cluster and a footer one.
             */}
-            <div style={{ padding: 8 }}>
+            <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>Cartes mentales</span>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <Search
+                  size={13}
+                  style={{ position: 'absolute', left: 7, color: 'var(--muted-foreground)', pointerEvents: 'none' }}
+                />
+                <input
+                  ref={searchInputRef}
+                  className="sidebar-search"
+                  type="text"
+                  value={search}
+                  placeholder="Rechercher…"
+                  aria-label="Rechercher une carte ou un dossier"
+                  onChange={event => setSearch(event.target.value)}
+                  onKeyDown={event => {
+                    // Échap hands the keyboard back to the tree without leaving
+                    // the field through a second, different gesture.
+                    if (event.key !== 'Escape') return
+                    setSearch('')
+                    event.currentTarget.blur()
+                  }}
+                  style={{ paddingLeft: 24, paddingRight: search === '' ? 8 : 26 }}
+                />
+                {search !== '' && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Effacer la recherche"
+                    onClick={() => setSearch('')}
+                    style={{ position: 'absolute', right: 2 }}
+                  >
+                    <X size={13} />
+                  </Button>
+                )}
+              </div>
             </div>
+
+            {/* Portalled to `document.body`, so its place in this tree is only
+                a matter of keeping it near the state it renders. */}
+            <TreeDragGhost />
 
             <div style={{ overflowY: 'auto', flex: 1 }}>
               {rootFolders.length === 0 && (
                 <p style={{ padding: 8, fontSize: 13, color: 'var(--muted-foreground)' }}>Aucun dossier configuré.</p>
               )}
-              {rootFolders.map(root => {
-                const rootNode: FileTreeNode = {
-                  type: 'folder',
-                  name: folderDisplayName(root.path),
-                  path: root.path,
-                  children: root.tree,
-                }
-                return (
+              {searching && matchCount === 0 && (
+                <p role="status" style={{ padding: 8, fontSize: 13, color: 'var(--muted-foreground)' }}>
+                  Aucun résultat pour « {query} ».
+                </p>
+              )}
+              {visibleRoots.map(({ root, node, forcedExpanded }) =>
+                node === undefined ? null : (
                   <FileTreeRow
                     key={root.path}
-                    node={rootNode}
+                    node={node}
                     depth={0}
                     onOpenFile={onOpenFile}
                     isRoot
                     onRemoveRoot={handleRemoveRoot}
                     showUnreadable={showUnreadable}
+                    forcedExpanded={forcedExpanded}
                   />
                 )
-              })}
+              )}
             </div>
 
             {/*

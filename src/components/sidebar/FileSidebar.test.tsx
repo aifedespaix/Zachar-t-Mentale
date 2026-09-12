@@ -8,6 +8,7 @@ import {
   MIN_SIDEBAR_WIDTH,
 } from '../../persistence/sidebarWidth'
 import { useWorkspaceStore, createWorkspaceStore } from '../../state/useWorkspaceStore'
+import type { FileTreeNode } from '../../types/workspace'
 import { useSyncStore } from '../../state/useSyncStore'
 
 vi.mock('../../persistence/workspaceConfig', () => ({
@@ -622,5 +623,111 @@ describe('FileSidebar', () => {
     await user.type(field, 'B{Enter}')
 
     await waitFor(() => expect(createMindMapFile).toHaveBeenCalledWith('/autre', 'B'))
+  })
+})
+
+/**
+ * The search field. Its own `describe` because it is a VIEW over the tree
+ * rather than another action on it: nothing here writes to `expandedPaths`, the
+ * filesystem, or the config, and several of these tests exist precisely to hold
+ * that line.
+ */
+describe('FileSidebar — recherche', () => {
+  const SEARCH_FIELD = { name: 'Rechercher une carte ou un dossier' }
+  const CHAPTER: FileTreeNode[] = [
+    {
+      type: 'folder',
+      name: 'Chapitre 1',
+      path: '/cours/Chapitre 1',
+      children: [
+        { type: 'mindmap', name: 'Évaluation.zmap', path: '/cours/Chapitre 1/Évaluation.zmap' },
+        { type: 'mindmap', name: 'Cours.zmap', path: '/cours/Chapitre 1/Cours.zmap' },
+      ],
+    },
+  ]
+
+  beforeEach(() => {
+    localStorage.clear()
+    resetWorkspaceStore()
+    resetSyncStore()
+    vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: ['/cours'] })
+    vi.mocked(saveWorkspaceConfig).mockReset().mockResolvedValue(undefined)
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadServerSyncState).mockReset().mockResolvedValue({ version: 2, servers: {} })
+    vi.mocked(open).mockReset()
+    vi.mocked(createMindMapFile).mockReset()
+    vi.mocked(freeSiblingPath).mockReset()
+    vi.mocked(scanFolder).mockReset().mockResolvedValue(CHAPTER)
+  })
+
+  it('filtre les lignes par nom, sans tenir compte des accents ni de la casse', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('cours')
+
+    await user.type(screen.getByRole('textbox', SEARCH_FIELD), 'evaluation')
+
+    expect(await screen.findByText('Évaluation')).toBeInTheDocument()
+    expect(screen.queryByText('Cours')).not.toBeInTheDocument()
+  })
+
+  it('montre le dossier qui correspond avec tout ce qu’il contient', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('cours')
+
+    await user.type(screen.getByRole('textbox', SEARCH_FIELD), 'chapitre')
+
+    expect(await screen.findByText('Évaluation')).toBeInTheDocument()
+    expect(screen.getByText('Cours')).toBeInTheDocument()
+  })
+
+  it('rend l’arbre exactement comme avant quand on efface la recherche', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('cours')
+    // The folder was never opened by hand, and the filter must not open it for
+    // longer than it is showing something.
+    expect(screen.queryByText('Évaluation')).not.toBeInTheDocument()
+
+    // Nothing is open: 'Chapitre 1' is a child of the collapsed root, so it is
+    // not even rendered yet.
+    const rootRow = () => screen.getByRole('button', { name: 'cours' })
+    expect(rootRow()).toHaveAttribute('aria-expanded', 'false')
+
+    await user.type(screen.getByRole('textbox', SEARCH_FIELD), 'evaluation')
+    // The filter opened the way down to the match, and only because of it.
+    await screen.findByText('Évaluation')
+    expect(rootRow()).toHaveAttribute('aria-expanded', 'true')
+
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByText('Évaluation')).not.toBeInTheDocument()
+    expect(rootRow()).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('textbox', SEARCH_FIELD)).toHaveValue('')
+  })
+
+  it('le dit quand rien ne correspond, plutôt que de laisser un arbre vide', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('cours')
+
+    await user.type(screen.getByRole('textbox', SEARCH_FIELD), 'zzz')
+
+    expect(await screen.findByText(/Aucun résultat pour « zzz »/)).toBeInTheDocument()
+  })
+
+  it('s’efface aussi depuis le bouton de la croix', async () => {
+    const user = userEvent.setup()
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('cours')
+
+    await user.type(screen.getByRole('textbox', SEARCH_FIELD), 'evaluation')
+    await screen.findByText('Évaluation')
+
+    await user.click(screen.getByRole('button', { name: 'Effacer la recherche' }))
+
+    expect(screen.getByRole('textbox', SEARCH_FIELD)).toHaveValue('')
+    expect(screen.queryByText('Évaluation')).not.toBeInTheDocument()
   })
 })
