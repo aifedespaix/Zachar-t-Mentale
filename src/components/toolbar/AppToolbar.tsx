@@ -15,6 +15,7 @@ import {
   Lock,
   LockOpen,
   Moon,
+  PanelLeftClose,
   PanelRightClose,
   PenLine,
   Redo2,
@@ -397,6 +398,7 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
             <CommandDropdownItem command="app.shortcuts" icon={Keyboard} />
             <DropdownMenuSeparator />
             <CommandDropdownItem command="view.toggleSidebar" icon={PanelRightClose} />
+            <CommandDropdownItem command="view.toggleDetailPanel" icon={PanelLeftClose} />
             <CommandDropdownItem command="view.toggleTheme" icon={resolvedTheme === 'dark' ? Sun : Moon} />
           </DropdownMenuContent>
         </DropdownMenu>

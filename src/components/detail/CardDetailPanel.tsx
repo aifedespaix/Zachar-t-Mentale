@@ -6,7 +6,21 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { ChevronDown, ChevronRight, Eraser, Layers, Pencil, Pin, PinOff, Plus, Trash2, X } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Eraser,
+  Layers,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
+  Pin,
+  PinOff,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react'
 import type { Card } from '../../types/card'
 import { useCardsStore, selectEditsBlocked } from '../../state/useCardsStore'
 import { useCardDetailStore } from '../../state/useCardDetailStore'
@@ -14,10 +28,11 @@ import { useCardHoverStore } from '../../state/useCardHoverStore'
 import { useWorkspaceStore } from '../../state/useWorkspaceStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
+import { useCommand } from '../../hooks/useCommand'
 import { ancestorTitles } from '../../state/cardsReducer'
 import { clampCardLevel, detachedColors } from '../../colors/levelColors'
 import { toCss } from '../../colors/contrast'
-import { contentOf } from '../../content/blocks'
+import { contentOf, blocksToPlainText } from '../../content/blocks'
 import { BlockView } from '../../content/BlockView'
 import { ContentKindBadges } from '../../content/ContentKindBadges'
 import { DescriptionDialog } from '../../content/DescriptionDialog'
@@ -25,6 +40,7 @@ import { imageBlockFrom } from '../../content/imageBlock'
 import { pickImageFile } from '../../content/pickImage'
 import { assetSrc } from '../../persistence/assets'
 import { prefersReducedMotion } from '../../utils/prefersReducedMotion'
+import { normalizeForComparison } from '../../utils/textSimilarity'
 import {
   clampCardDetailWidth,
   loadCardDetailWidth,
@@ -33,6 +49,7 @@ import {
   MIN_CARD_DETAIL_WIDTH,
 } from '../../persistence/cardDetailWidth'
 import { Button } from '../ui/button'
+import { CommandButton } from '../commands/CommandButton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import {
   ContextMenu,
@@ -100,6 +117,14 @@ export function CardDetailPanel() {
   const [width, setWidth] = useState(loadCardDetailWidth)
   const [resizing, setResizing] = useState(false)
   const handleRef = useRef<HTMLDivElement>(null)
+  /** What the search field holds. A view over the open fiches — never persisted. */
+  const [search, setSearch] = useState('')
+  /**
+   * Hides the panel down to a thin strip, like the file sidebar's own fold —
+   * but only ever while there is something to hide: with nothing open the
+   * panel already goes away on its own (see `mounted` below).
+   */
+  const [manuallyCollapsed, setManuallyCollapsed] = useState(false)
 
   const isOpen = openEntries.length > 0
   // Stays mounted a beat after the last fiche closes, so the panel can shrink
@@ -124,6 +149,15 @@ export function CardDetailPanel() {
       return () => clearTimeout(timer)
     }
   }, [isOpen])
+
+  const openCountRef = useRef(openEntries.length)
+  useEffect(() => {
+    // Opening a fiche is the whole point of opening it, so a fold from
+    // earlier does not survive a NEW fiche joining the list — whether the
+    // panel was empty or already had others open.
+    if (openEntries.length > openCountRef.current) setManuallyCollapsed(false)
+    openCountRef.current = openEntries.length
+  }, [openEntries.length])
 
   useEffect(() => {
     if (!entering) return
@@ -202,10 +236,63 @@ export function CardDetailPanel() {
     }
   }
 
+  // Registered unconditionally (like the file sidebar's own fold command), so
+  // the shortcut still reaches the panel while it is folded away — only
+  // disabled with nothing open to fold in the first place.
+  useCommand(
+    'view.toggleDetailPanel',
+    () => setManuallyCollapsed(current => !current),
+    isOpen,
+    manuallyCollapsed ? 'Afficher les fiches' : 'Masquer les fiches'
+  )
+
   if (!mounted) return null
+
+  if (isOpen && manuallyCollapsed) {
+    return (
+      <TooltipProvider>
+        <div
+          style={{
+            width: 32,
+            flexShrink: 0,
+            borderLeft: '1px solid var(--border)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-end',
+            paddingBottom: 8,
+          }}
+        >
+          <CommandButton
+            command="view.toggleDetailPanel"
+            icon={PanelRightOpen}
+            label="Déplier le panneau des fiches"
+            variant="ghost"
+            size="icon-sm"
+          />
+        </div>
+      </TooltipProvider>
+    )
+  }
 
   const renderedWidth = isOpen && !entering ? width : 0
   const editingCard = editingCardId === null ? undefined : cards.find(card => card.id === editingCardId)
+
+  /**
+   * The search is a VIEW over the open fiches, never a mutation of them: it
+   * never touches `collapsed` or `pinned`, so a fiche that only matches
+   * through its description stays exactly as folded as it was.
+   */
+  const query = search.trim()
+  const searching = query !== ''
+  const needle = normalizeForComparison(query)
+  const visibleEntries = !searching
+    ? openEntries
+    : openEntries.filter(entry => {
+        const card = cards.find(c => c.id === entry.cardId)
+        if (card === undefined) return true
+        if (normalizeForComparison(card.title).includes(needle)) return true
+        return normalizeForComparison(blocksToPlainText(contentOf(card))).includes(needle)
+      })
 
   return (
     <TooltipProvider>
@@ -221,7 +308,6 @@ export function CardDetailPanel() {
               flexDirection: 'column',
               borderLeft: '1px solid var(--border)',
               background: 'var(--background)',
-              overflowY: 'auto',
               // Off during a drag and for "reduce motion", same rationale as
               // the file sidebar's own width transition.
               transition: resizing || prefersReducedMotion() ? 'none' : 'width 220ms ease',
@@ -255,16 +341,95 @@ export function CardDetailPanel() {
               }}
             />
 
+            {/* Same split as the file sidebar: the header names the panel, every
+                action lives in the footer bar below. */}
+            <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Fiches de cartes</span>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <Search
+                  size={13}
+                  style={{ position: 'absolute', left: 7, color: 'var(--muted-foreground)', pointerEvents: 'none' }}
+                />
+                <input
+                  className="sidebar-search"
+                  type="text"
+                  value={search}
+                  placeholder="Rechercher…"
+                  aria-label="Rechercher dans les fiches"
+                  onChange={event => setSearch(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key !== 'Escape') return
+                    setSearch('')
+                    event.currentTarget.blur()
+                  }}
+                  style={{ paddingLeft: 24, paddingRight: search === '' ? 8 : 26 }}
+                />
+                {search !== '' && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Effacer la recherche"
+                    onClick={() => setSearch('')}
+                    style={{ position: 'absolute', right: 2 }}
+                  >
+                    <X size={13} />
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {searching && visibleEntries.length === 0 && (
+                <p role="status" style={{ padding: 8, fontSize: 13, color: 'var(--muted-foreground)' }}>
+                  Aucun résultat pour « {query} ».
+                </p>
+              )}
+              {visibleEntries.map(entry => {
+                const card = cards.find(c => c.id === entry.cardId)
+                // Guarded rather than assumed: `retain` clears fiches for deleted
+                // cards, but it runs on a store subscription and this render can be
+                // the one in between.
+                if (card === undefined) return null
+                return (
+                  <CardFiche
+                    key={entry.cardId}
+                    card={card}
+                    cards={cards}
+                    pinned={entry.pinned}
+                    collapsed={entry.collapsed}
+                    onPin={() => pin(card.id)}
+                    onUnpin={() => unpin(card.id)}
+                    onClose={() => close(card.id)}
+                    onToggleCollapsed={() => toggleCollapsed(card.id)}
+                    onEdit={() => setEditing(card.id)}
+                    sectionRef={element => {
+                      if (element === null) ficheRefs.current.delete(card.id)
+                      else ficheRefs.current.set(card.id, element)
+                    }}
+                  />
+                )
+              })}
+            </div>
+
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'flex-end',
                 gap: 2,
                 padding: '4px 6px',
-                borderBottom: '1px solid var(--border)',
+                borderTop: '1px solid var(--border)',
+                flexShrink: 0,
+                flexWrap: 'wrap',
               }}
             >
+              <CommandButton
+                command="view.toggleDetailPanel"
+                icon={PanelRightClose}
+                label="Replier le panneau des fiches"
+                variant="ghost"
+                size="icon-sm"
+              />
+              <span className="toolbar-separator" aria-hidden />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -299,32 +464,6 @@ export function CardDetailPanel() {
                 </TooltipContent>
               </Tooltip>
             </div>
-
-            {openEntries.map(entry => {
-              const card = cards.find(c => c.id === entry.cardId)
-              // Guarded rather than assumed: `retain` clears fiches for deleted
-              // cards, but it runs on a store subscription and this render can be
-              // the one in between.
-              if (card === undefined) return null
-              return (
-                <CardFiche
-                  key={entry.cardId}
-                  card={card}
-                  cards={cards}
-                  pinned={entry.pinned}
-                  collapsed={entry.collapsed}
-                  onPin={() => pin(card.id)}
-                  onUnpin={() => unpin(card.id)}
-                  onClose={() => close(card.id)}
-                  onToggleCollapsed={() => toggleCollapsed(card.id)}
-                  onEdit={() => setEditing(card.id)}
-                  sectionRef={element => {
-                    if (element === null) ficheRefs.current.delete(card.id)
-                    else ficheRefs.current.set(card.id, element)
-                  }}
-                />
-              )
-            })}
 
             {/* One editor for the whole panel, keyed by card, rather than one per
                 fiche: two dialogs for the same card must be impossible, and the
