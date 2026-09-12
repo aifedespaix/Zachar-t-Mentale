@@ -51,4 +51,31 @@ describe('mapTypeColors', () => {
     expect(oklchWcagContrast(neutralMapTypeColors.light.bg, neutralMapTypeColors.light.text)).toBeGreaterThanOrEqual(4.5)
     expect(oklchWcagContrast(neutralMapTypeColors.dark.bg, neutralMapTypeColors.dark.text)).toBeGreaterThanOrEqual(4.5)
   })
+
+  // A value the app does not know (a future version, a typo in a hand-edited
+  // file) used to make mapTypeColor index an absent key and throw mid-render,
+  // which unmounts the whole app. It now falls back to the neutral palette.
+  it('falls back to the neutral palette for a value the app does not know, in both themes, without throwing', () => {
+    expect(mapTypeColor('futur', 'light')).toBe(neutralMapTypeColors.light)
+    expect(mapTypeColor('futur', 'dark')).toBe(neutralMapTypeColors.dark)
+    expect(() => mapTypeColor('futur', 'light')).not.toThrow()
+  })
+
+  it('renders no pill at all for undefined, the empty string and default', () => {
+    expect(mapTypeColor(undefined, 'light')).toBeNull()
+    expect(mapTypeColor(undefined, 'dark')).toBeNull()
+    expect(mapTypeColor('', 'light')).toBeNull()
+    expect(mapTypeColor('', 'dark')).toBeNull()
+    expect(mapTypeColor('default', 'light')).toBeNull()
+    expect(mapTypeColor('default', 'dark')).toBeNull()
+  })
+
+  it('keeps the four known types on their own palette, never the neutral fallback', () => {
+    for (const type of ['cours', 'exo', 'prise de notes', 'corrections'] as const) {
+      expect(mapTypeColor(type, 'light')).toBe(mapTypeColors[type].light)
+      expect(mapTypeColor(type, 'dark')).toBe(mapTypeColors[type].dark)
+      expect(mapTypeColor(type, 'light')).not.toBe(neutralMapTypeColors.light)
+      expect(mapTypeColor(type, 'dark')).not.toBe(neutralMapTypeColors.dark)
+    }
+  })
 })

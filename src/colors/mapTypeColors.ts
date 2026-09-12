@@ -90,8 +90,16 @@ export const neutralMapTypeColors: MapTypeColorPair = {
   },
 }
 
-/** `null` pour `default` : il n'a pas de couleur, donc rien à rendre. */
-export function mapTypeColor(type: MapType, theme: 'light' | 'dark'): MapTypeColor | null {
-  if (type === 'default') return null
-  return mapTypeColors[type][theme]
+/**
+ * `null` quand il n'y a rien à rendre : `default`, une chaîne vide, `undefined`.
+ * Toute autre valeur est traitée comme « classé, mais inconnu de l'app » et
+ * reçoit la pilule neutre. La fonction est TOTALE : elle n'indexe jamais
+ * `mapTypeColors` sans vérifier, car ce chemin est emprunté pendant le rendu et
+ * un `undefined` y jette, ce qui démonte toute l'application — la même garde
+ * que `levelColors.ts`.
+ */
+export function mapTypeColor(type: string | undefined, theme: 'light' | 'dark'): MapTypeColor | null {
+  if (type === undefined || type === '' || type === 'default') return null
+  const known: MapTypeColorPair | undefined = mapTypeColors[type as Exclude<MapType, 'default'>]
+  return known === undefined ? neutralMapTypeColors[theme] : known[theme]
 }
