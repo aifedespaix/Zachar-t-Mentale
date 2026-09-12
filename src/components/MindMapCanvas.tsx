@@ -336,7 +336,7 @@ function MindMapCanvasInner() {
   const quizResults = useQuizStore(s => s.results)
   const theme = useResolvedTheme()
   const levelAppearance = useAppearanceSettingsStore(s => s.levels)
-  const { setCenter, getZoom, flowToScreenPosition } = useReactFlow()
+  const { setCenter, getZoom, flowToScreenPosition, screenToFlowPosition } = useReactFlow()
   const storeApi = useStoreApi()
   const openFicheIds = useCardDetailStore(s => s.open)
 
@@ -625,17 +625,30 @@ function MindMapCanvasInner() {
   // position stays whatever `onNodesChange` gave it (live under the pointer),
   // and nothing is committed to the store until drop.
   const handleNodeDrag: OnNodeDrag = useCallback(
-    (_event, draggedNode) => {
+    (event, draggedNode) => {
       const cardIds = new Set(cards.map(c => c.id))
+      // The dragged card's own box is reduced to the pointer's position (zero
+      // size) rather than the card's actual bounding box: it's the cursor, not
+      // wherever on the card you happened to grab it, that should decide
+      // reparent-vs-insert and before/after. See `boxesOverlap`/`centerOf`.
+      const pointer = screenToFlowPosition(
+        'touches' in event
+          ? { x: event.touches[0].clientX, y: event.touches[0].clientY }
+          : { x: event.clientX, y: event.clientY }
+      )
       const boxes: NodeBox[] = nodes
         .filter(node => cardIds.has(node.id))
-        .map(node => ({
-          id: node.id,
-          x: node.id === draggedNode.id ? draggedNode.position.x : node.position.x,
-          y: node.id === draggedNode.id ? draggedNode.position.y : node.position.y,
-          width: node.measured?.width ?? CARD_WIDTH,
-          height: node.measured?.height ?? NOMINAL_NODE_HEIGHT,
-        }))
+        .map(node =>
+          node.id === draggedNode.id
+            ? { id: node.id, x: pointer.x, y: pointer.y, width: 0, height: 0 }
+            : {
+                id: node.id,
+                x: node.position.x,
+                y: node.position.y,
+                width: node.measured?.width ?? CARD_WIDTH,
+                height: node.measured?.height ?? NOMINAL_NODE_HEIGHT,
+              }
+        )
       const target = resolveDropTarget(cards, boxes, draggedNode.id)
       setDropTarget(previous => (sameDropTarget(previous, target) ? previous : target))
 
@@ -659,7 +672,7 @@ function MindMapCanvasInner() {
         return indicator ? [...patched, indicator] : patched
       })
     },
-    [cards, layout, nodes, setNodes]
+    [cards, layout, nodes, setNodes, screenToFlowPosition]
   )
 
   const handleNodeDragStop: OnNodeDrag = useCallback(
