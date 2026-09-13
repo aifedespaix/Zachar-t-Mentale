@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { loadQuizSettings, saveQuizSettings } from './quizSettings'
+import type { QuizSettings } from '../types/quizSettings'
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
   exists: vi.fn(),
@@ -14,6 +15,14 @@ vi.mock('@tauri-apps/api/path', () => ({
 
 import { exists, readTextFile, writeTextFile, mkdir } from '@tauri-apps/plugin-fs'
 
+const DEFAULT_CONFIG = { levels: [1, 2, 3, 4], difficulty: 'moyen', qcmMode: false }
+const DEFAULTS = {
+  similarityThreshold: 100,
+  lengthGuideEnabled: true,
+  liveLetterFeedback: false,
+  lastQuizConfig: DEFAULT_CONFIG,
+}
+
 describe('loadQuizSettings', () => {
   beforeEach(() => {
     vi.mocked(exists).mockReset()
@@ -23,7 +32,7 @@ describe('loadQuizSettings', () => {
   it('returns the defaults when no settings file exists yet', async () => {
     vi.mocked(exists).mockResolvedValue(false)
     const settings = await loadQuizSettings()
-    expect(settings).toEqual({ similarityThreshold: 100, lengthGuideEnabled: true, liveLetterFeedback: false })
+    expect(settings).toEqual(DEFAULTS)
   })
 
   it('reads and parses an existing settings file', async () => {
@@ -31,18 +40,59 @@ describe('loadQuizSettings', () => {
     vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ similarityThreshold: 85, lengthGuideEnabled: false }))
     const settings = await loadQuizSettings()
     expect(readTextFile).toHaveBeenCalledWith('/fake/config/quiz-settings.json')
-    expect(settings).toEqual({ similarityThreshold: 85, lengthGuideEnabled: false, liveLetterFeedback: false })
+    expect(settings).toEqual({ similarityThreshold: 85, lengthGuideEnabled: false, liveLetterFeedback: false, lastQuizConfig: DEFAULT_CONFIG })
   })
 
   it('fills in a default for a field missing from an older settings file', async () => {
     vi.mocked(exists).mockResolvedValue(true)
     vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ similarityThreshold: 85 }))
     const settings = await loadQuizSettings()
-    expect(settings).toEqual({ similarityThreshold: 85, lengthGuideEnabled: true, liveLetterFeedback: false })
+    expect(settings).toEqual({ similarityThreshold: 85, lengthGuideEnabled: true, liveLetterFeedback: false, lastQuizConfig: DEFAULT_CONFIG })
+  })
+
+  it('restores the last quiz configuration saved on disk', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(
+      JSON.stringify({ lastQuizConfig: { levels: [2, 4], difficulty: 'difficile', qcmMode: true } })
+    )
+    const settings = await loadQuizSettings()
+    expect(settings.lastQuizConfig).toEqual({ levels: [2, 4], difficulty: 'difficile', qcmMode: true })
+  })
+
+  it('sanitizes a malformed last quiz configuration instead of letting it reach the modal', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(
+      JSON.stringify({ lastQuizConfig: { levels: [0, 2, 2, 5, '3'], difficulty: 'impossible', qcmMode: 'yes' } })
+    )
+    const settings = await loadQuizSettings()
+    expect(settings.lastQuizConfig).toEqual({ levels: [2], difficulty: 'moyen', qcmMode: false })
+  })
+
+  it('keeps an intentionally empty level selection', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(
+      JSON.stringify({ lastQuizConfig: { levels: [], difficulty: 'facile', qcmMode: true } })
+    )
+    const settings = await loadQuizSettings()
+    expect(settings.lastQuizConfig).toEqual({ levels: [], difficulty: 'facile', qcmMode: true })
+  })
+
+  it('falls back to the default configuration when the field is not an object', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ lastQuizConfig: 'nope' }))
+    const settings = await loadQuizSettings()
+    expect(settings.lastQuizConfig).toEqual(DEFAULT_CONFIG)
   })
 })
 
 describe('saveQuizSettings', () => {
+  const saved: QuizSettings = {
+    similarityThreshold: 90,
+    lengthGuideEnabled: false,
+    liveLetterFeedback: false,
+    lastQuizConfig: { levels: [1], difficulty: 'facile', qcmMode: true },
+  }
+
   beforeEach(() => {
     vi.mocked(exists).mockReset()
     vi.mocked(writeTextFile).mockReset()
@@ -51,17 +101,14 @@ describe('saveQuizSettings', () => {
 
   it('creates the app config directory if missing, then writes the settings file', async () => {
     vi.mocked(exists).mockResolvedValue(false)
-    await saveQuizSettings({ similarityThreshold: 90, lengthGuideEnabled: false, liveLetterFeedback: false })
+    await saveQuizSettings(saved)
     expect(mkdir).toHaveBeenCalledWith('/fake/config', { recursive: true })
-    expect(writeTextFile).toHaveBeenCalledWith(
-      '/fake/config/quiz-settings.json',
-      JSON.stringify({ similarityThreshold: 90, lengthGuideEnabled: false, liveLetterFeedback: false }, null, 2)
-    )
+    expect(writeTextFile).toHaveBeenCalledWith('/fake/config/quiz-settings.json', JSON.stringify(saved, null, 2))
   })
 
   it('does not recreate the config directory when it already exists', async () => {
     vi.mocked(exists).mockResolvedValue(true)
-    await saveQuizSettings({ similarityThreshold: 100, lengthGuideEnabled: true, liveLetterFeedback: false })
+    await saveQuizSettings({ ...saved, similarityThreshold: 100, lengthGuideEnabled: true })
     expect(mkdir).not.toHaveBeenCalled()
   })
 })

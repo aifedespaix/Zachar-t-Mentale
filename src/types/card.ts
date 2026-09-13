@@ -3,6 +3,9 @@ import type { MapType } from './mapType'
 
 export type CardLevel = 1 | 2 | 3 | 4
 
+/** Every card level, in the order the UI lists them. */
+export const ALL_CARD_LEVELS: readonly CardLevel[] = [1, 2, 3, 4]
+
 export type CardKind = 'definition' | 'media'
 
 export type UserRole = 'eleve' | 'prof'

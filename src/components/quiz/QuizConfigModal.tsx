@@ -1,16 +1,18 @@
 // src/components/quiz/QuizConfigModal.tsx
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Sprout, Zap, Flame, Check, type LucideIcon } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { useQuizStore } from '../../state/useQuizStore'
+import { useCardsStore } from '../../state/useCardsStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
+import { useQuizSettingsStore } from '../../state/useQuizSettingsStore'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 import { toCss, pickReadableTextColor } from '../../colors/contrast'
-import type { CardLevel } from '../../types/card'
+import { presentLevels } from '../../quiz/levels'
+import { ALL_CARD_LEVELS, type CardLevel } from '../../types/card'
 import type { QuizDifficulty } from '../../types/quiz'
-
-const ALL_LEVELS: CardLevel[] = [1, 2, 3, 4]
 
 interface DifficultyOption {
   value: QuizDifficulty
@@ -28,6 +30,8 @@ const DIFFICULTIES: DifficultyOption[] = [
   { value: 'difficile', label: 'Difficile', icon: Flame, hidePercent: 75, color: '#dc2626', help: 'La première lettre seulement' },
 ]
 
+const ABSENT_LEVEL_HINT = 'Aucune carte à ce niveau dans la carte mentale'
+
 interface QuizConfigModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -37,16 +41,51 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
   const startQuiz = useQuizStore(s => s.startQuiz)
   const theme = useResolvedTheme()
   const levelAppearance = useAppearanceSettingsStore(s => s.levels)
-  const [levels, setLevels] = useState<CardLevel[]>(ALL_LEVELS)
-  const [difficulty, setDifficulty] = useState<QuizDifficulty>('moyen')
-  const [qcmMode, setQcmMode] = useState(false)
+  const lastQuizConfig = useQuizSettingsStore(s => s.lastQuizConfig)
+  const setLastQuizConfig = useQuizSettingsStore(s => s.setLastQuizConfig)
+  // The levels the map actually holds — a level with no card cannot be asked
+  // about, so its box is greyed out and refuses to be ticked. Shallow-compared
+  // so an edit that does not add or remove a level (typing a title) does not
+  // re-render the toolbar's always-mounted modal.
+  const present = useCardsStore(useShallow(s => presentLevels(s.history.present)))
+
+  // enabledLevels is the MANUAL selection, not the effective one: it keeps
+  // levels that are absent right now, so greying a level out never erases the
+  // choice the user made while it still had cards.
+  const [enabledLevels, setEnabledLevels] = useState<CardLevel[]>(lastQuizConfig.levels)
+  const [difficulty, setDifficulty] = useState<QuizDifficulty>(lastQuizConfig.difficulty)
+  const [qcmMode, setQcmMode] = useState(lastQuizConfig.qcmMode)
+
+  // Re-seed on every open: the toolbar mounts this modal once, so state left
+  // from the previous launch would otherwise survive a close and a reopen.
+  useEffect(() => {
+    if (!open) return
+    setEnabledLevels(lastQuizConfig.levels)
+    setDifficulty(lastQuizConfig.difficulty)
+    setQcmMode(lastQuizConfig.qcmMode)
+  }, [open, lastQuizConfig])
+
+  const includedLevels = useMemo(
+    () => enabledLevels.filter(level => present.includes(level)),
+    [enabledLevels, present]
+  )
 
   function toggleLevel(level: CardLevel) {
-    setLevels(current => (current.includes(level) ? current.filter(l => l !== level) : [...current, level].sort()))
+    if (!present.includes(level)) return
+    setEnabledLevels(current =>
+      current.includes(level) ? current.filter(l => l !== level) : [...current, level].sort((a, b) => a - b)
+    )
   }
 
   function handleLaunch() {
-    startQuiz({ levels, difficulty, qcmMode })
+    // Remember the MANUAL selection even for levels that are absent right now;
+    // the quiz itself only ever draws from the levels that are present.
+    void setLastQuizConfig({
+      levels: [...enabledLevels].sort((a, b) => a - b),
+      difficulty,
+      qcmMode,
+    })
+    startQuiz({ levels: includedLevels, difficulty, qcmMode })
     onOpenChange(false)
   }
 
@@ -62,13 +101,15 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
             Niveaux inclus
           </legend>
           <div style={{ display: 'flex', gap: 8 }}>
-            {ALL_LEVELS.map(level => {
-              const checked = levels.includes(level)
+            {ALL_CARD_LEVELS.map(level => {
+              const available = present.includes(level)
+              const checked = available && enabledLevels.includes(level)
               const bg = toCss(levelAppearance[level].color[theme].border)
               const text = toCss(pickReadableTextColor(levelAppearance[level].color[theme].border))
               return (
                 <label
                   key={level}
+                  title={available ? undefined : ABSENT_LEVEL_HINT}
                   style={{
                     flex: 1,
                     aspectRatio: '1 / 1',
@@ -79,7 +120,8 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
                     textAlign: 'center',
                     fontSize: 12,
                     fontWeight: 700,
-                    cursor: 'pointer',
+                    cursor: available ? 'pointer' : 'not-allowed',
+                    opacity: available ? 1 : 0.4,
                     background: checked ? bg : 'var(--muted)',
                     color: checked ? text : 'var(--muted-foreground)',
                   }}
@@ -87,6 +129,7 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
                   <input
                     type="checkbox"
                     checked={checked}
+                    disabled={!available}
                     onChange={() => toggleLevel(level)}
                     aria-label={levelAppearance[level].label}
                     style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
@@ -222,7 +265,7 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Annuler
           </Button>
-          <Button disabled={levels.length === 0} onClick={handleLaunch}>
+          <Button disabled={includedLevels.length === 0} onClick={handleLaunch}>
             Lancer le quiz
           </Button>
         </DialogFooter>

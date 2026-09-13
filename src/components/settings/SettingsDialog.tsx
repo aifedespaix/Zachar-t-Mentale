@@ -61,8 +61,9 @@ export function SettingsDialog({ open, onOpenChange, updateCheck, initialTab = '
   const similarityThreshold = useQuizSettingsStore(s => s.similarityThreshold)
   const lengthGuideEnabled = useQuizSettingsStore(s => s.lengthGuideEnabled)
   const liveLetterFeedback = useQuizSettingsStore(s => s.liveLetterFeedback)
+  const lastQuizConfig = useQuizSettingsStore(s => s.lastQuizConfig)
   const appearance: AppearanceSettings = { levels, fontFamily, themeMode }
-  const quiz: QuizSettings = { similarityThreshold, lengthGuideEnabled, liveLetterFeedback }
+  const quiz: QuizSettings = { similarityThreshold, lengthGuideEnabled, liveLetterFeedback, lastQuizConfig }
 
   // Re-snapshot on every OPEN, not once on mount: the window is reopened many
   // times per session, and a snapshot from the first open would revert edits
