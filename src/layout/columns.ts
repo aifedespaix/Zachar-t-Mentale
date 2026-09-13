@@ -1,5 +1,5 @@
 import type { Card } from '../types/card'
-import { COLUMN_WIDTH, ROW_HEIGHT } from './cardGeometry'
+import { COLUMN_WIDTH, ROW_HEIGHT, BRANCH_GAP } from './cardGeometry'
 
 /**
  * The grid two pitches are DERIVED from the card size in layout/cardGeometry:
@@ -11,7 +11,7 @@ import { COLUMN_WIDTH, ROW_HEIGHT } from './cardGeometry'
  * Re-exported here because the layout, the canvas and the export all read them
  * from this module.
  */
-export { COLUMN_WIDTH, ROW_HEIGHT }
+export { COLUMN_WIDTH, ROW_HEIGHT, BRANCH_GAP }
 
 // The floating-cards ("cartes volantes") zone sits below the tree, as its own
 // grid: detached cards are outside the hierarchy, so they get neither a level
@@ -56,7 +56,28 @@ export function computeLayout(cards: Card[]): Record<string, Position> {
     group.sort((a, b) => a.order - b.order)
   }
 
-  let nextRow = 0
+  // The leaf rows are the vertical rhythm the whole map is built from: every
+  // leaf takes the next row, and each parent is centred on its children. The
+  // step between two leaves is the plain ROW_HEIGHT when they share a parent
+  // (they are the same sibling group) and ROW_HEIGHT + BRANCH_GAP when the
+  // parent changes within one column — two adjacent cards of the same level
+  // that belong to different branches. Requiring the same `level` too keeps a
+  // leaf-then-deeper-leaf step (never a same-column pair) from widening the map
+  // for nothing.
+  let previousLeaf: { y: number; parentId: string | null; level: number } | null = null
+
+  function nextLeafY(card: Card): number {
+    if (previousLeaf === null) {
+      previousLeaf = { y: 0, parentId: card.parentId, level: card.level }
+      return 0
+    }
+    const sameColumn = card.level === previousLeaf.level
+    const sameParent = card.parentId === previousLeaf.parentId
+    const step = sameColumn && !sameParent ? ROW_HEIGHT + BRANCH_GAP : ROW_HEIGHT
+    const y = previousLeaf.y + step
+    previousLeaf = { y, parentId: card.parentId, level: card.level }
+    return y
+  }
 
   // Guards against a corrupt file whose parent links form a loop: without it,
   // `layoutSubtree` would recurse until the stack blows. A card already being
@@ -69,8 +90,7 @@ export function computeLayout(cards: Card[]): Record<string, Position> {
     inProgress.add(card.id)
     let y: number
     if (children.length === 0) {
-      y = nextRow * ROW_HEIGHT
-      nextRow += 1
+      y = nextLeafY(card)
     } else {
       const childYs = children.map(layoutSubtree)
       y = (Math.min(...childYs) + Math.max(...childYs)) / 2

@@ -44,3 +44,15 @@ export const COLUMN_WIDTH = CARD_WIDTH * COLUMN_PITCH_RATIO
  * card height (144) + 2 x 13.6 + about 23 = 194, rounded to 200.
  */
 export const ROW_HEIGHT = 200
+
+/**
+ * Extra vertical air, on top of ROW_HEIGHT, between two vertically adjacent
+ * cards of the SAME column that belong to DIFFERENT parents. Siblings keep the
+ * plain pitch, so a branch boundary reads as a break in the rhythm rather than
+ * as one more sibling.
+ *
+ * Deliberately not derived from the card size: what it marks is a change of
+ * parent, not a change of box. 40px is enough to read as "a bit more" without
+ * stretching the tree.
+ */
+export const BRANCH_GAP = 40
