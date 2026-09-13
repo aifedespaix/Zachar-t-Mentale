@@ -163,17 +163,17 @@ export function matchesTarget(typedChar: string, targetChar: string): boolean {
  * answer. An overwrite that repeats the letter already there is simply a
  * no-op.
  *
- * A frontier keystroke can further be swallowed when it only repeats the
- * letter the field just skipped. Structure and revealed letters are never
+ * A frontier keystroke can further be swallowed when it only repeats a
+ * character the field just skipped. Structure and revealed letters are never
  * typed — they are shown for free and the next editable box comes right after
- * them. But a user spelling the word naturally still "says" that letter as
- * they go, and if it lands in the box meant for something else, it would be
- * graded as a wrong guess for the wrong reason. So: when the newly typed
- * letter matches the one just skipped AND does not answer the current box, the
- * keystroke is dropped rather than filed as a mistake. It must NOT fire when
- * the skipped letter and the current box's answer happen to be the same letter
- * (e.g. a double letter around a reveal) — there, the keystroke genuinely
- * answers the box.
+ * them. But a user spelling the word naturally still "says" those characters
+ * as they go, and if one lands in the box meant for something else, it would
+ * be graded as a wrong guess for the wrong reason. So: when the newly typed
+ * character matches ANY character in the skipped run AND does not answer the
+ * current box, the keystroke is dropped rather than filed as a mistake. It
+ * must NOT fire when a skipped character and the current box's answer happen
+ * to be the same (e.g. a double letter around a reveal) — there, the keystroke
+ * genuinely answers the box.
  *
  * Only handles the common case of one character typed forward (`nextTyped`
  * one longer than `previousTyped`); a deletion or a paste passes through
@@ -200,10 +200,21 @@ export function resolveTypedInsert(
   const editable = editableIndices(target, revealed)
   const insertedChar = nextTyped[position]
   const targetIndex = editable[position]
-  const previousTargetIndex = position > 0 ? editable[position - 1] : -1
-  const justSkipped = targetIndex - previousTargetIndex > 1 ? target[targetIndex - 1] : null
+  // Past the last box: the field truncates this overflow, and there is no box
+  // to compare against, so there is nothing to forgive or punish.
+  if (targetIndex === undefined) return [...nextTyped]
 
-  if (justSkipped !== null && matchesTarget(insertedChar, justSkipped) && !matchesTarget(insertedChar, target[targetIndex])) {
+  const previousTargetIndex = position > 0 ? editable[position - 1] : -1
+  // EVERYTHING between the previous box and this one is skipped — a revealed
+  // letter, a space, a colon, several of them in a row. The user spelling the
+  // title naturally "says" them all, so forgiving only the last one still
+  // filed the others as wrong guesses. Comparing against the whole run keeps
+  // both spellings honest: typing every character forgives the run, while
+  // typing only the missing letters matches none of it and lands normally.
+  const chars = Array.from(target)
+  const skipped = chars.slice(previousTargetIndex + 1, targetIndex)
+
+  if (skipped.some(char => matchesTarget(insertedChar, char)) && !matchesTarget(insertedChar, chars[targetIndex])) {
     return [...previousTyped]
   }
   return [...nextTyped]

@@ -285,4 +285,45 @@ describe('resolveTypedInsert', () => {
     const revealed = new Set([0])
     expect(resolveTypedInsert('Bonsoir', revealed, ['o', 'n'], ['o', 'n', 's'], 3)).toEqual(['o', 'n', 's'])
   })
+
+  // Simulates typing a whole sequence one key at a time, the way the field
+  // feeds resolveTypedInsert: each key is appended, then the field truncates
+  // the result to the number of editable boxes.
+  const typeAll = (target: string, revealed: ReadonlySet<number>, keys: string[]): string[] => {
+    const boxes = editableIndices(target, revealed).length
+    let typed: string[] = []
+    for (const key of keys) {
+      typed = resolveTypedInsert(target, revealed, typed, [...typed, key], typed.length + 1).slice(0, boxes)
+    }
+    return typed
+  }
+
+  it('swallows a revealed letter and a space the user spells through on the way to the next box', () => {
+    // "chien sympa" shown as "c_i_n _y__a". Between the box for "e" (index 3)
+    // and the box for "s" (index 6) sit a revealed "n" AND a space; only the
+    // last of the two used to be forgiven, so the "n" landed in the "s" box.
+    const revealed = new Set([0, 2, 4, 7, 10])
+    expect(mask('chien sympa', revealed)).toBe('c_i_n _y__a')
+    expect(typeAll('chien sympa', revealed, ['c', 'h', 'i', 'e', 'n', ' ', 's', 'y', 'm', 'p', 'a'])).toEqual([
+      'h',
+      'e',
+      's',
+      'm',
+      'p',
+    ])
+  })
+
+  it('still lets someone typing only the missing letters fill every box', () => {
+    const revealed = new Set([0, 2, 4, 7, 10])
+    expect(typeAll('chien sympa', revealed, ['h', 'e', 's', 'm', 'p'])).toEqual(['h', 'e', 's', 'm', 'p'])
+  })
+
+  it('forgives a run of several structure characters, not just the last one', () => {
+    // "Titre : suite" hides a space, a colon and a space again between "Titre"
+    // and "suite"; spelling the colon must not fill the "s" box with it.
+    const revealed = new Set([0])
+    expect(
+      typeAll('Titre : suite', revealed, ['T', 'i', 't', 'r', 'e', ' ', ':', ' ', 's', 'u', 'i', 't', 'e'])
+    ).toEqual(['i', 't', 'r', 'e', 's', 'u', 'i', 't', 'e'])
+  })
 })

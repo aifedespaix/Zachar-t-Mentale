@@ -216,6 +216,30 @@ describe('BlankFillField', () => {
     expect(input).toHaveValue('ba')
   })
 
+  it('forgives a whole run of skipped letters and spaces, not just the last one', async () => {
+    function ChienHarness() {
+      const [typed, setTyped] = useState<string[]>([])
+      return (
+        <BlankFillField
+          target="chien sympa"
+          revealed={new Set([0, 2, 4, 7, 10])}
+          typed={typed}
+          onTypedChange={setTyped}
+        />
+      )
+    }
+    const user = userEvent.setup()
+    render(<ChienHarness />)
+    const input = screen.getByLabelText('Réponse') as HTMLInputElement
+
+    // "chien sympa" shown as "c_i_n _y__a": spelling every letter — the
+    // revealed "n" and "y" included, plus the space — must not file them in
+    // the boxes for the "s" and the "m".
+    await user.type(input, 'chien sympa')
+
+    expect(input).toHaveValue('hesmp')
+  })
+
   it('leaves an empty box uncoloured rather than marking it wrong', async () => {
     const user = userEvent.setup()
     const { container } = render(<Harness target="Bonsoir" liveFeedback />)
