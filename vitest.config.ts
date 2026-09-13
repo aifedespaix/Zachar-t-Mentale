@@ -18,6 +18,10 @@ export default defineConfig({
     // `tools/` holds standalone scripts with their own node runners
     // (e.g. `node test/rewrite.test.mjs`). Vitest would collect them as
     // suites and fail on files that contain no `describe`/`it`.
-    exclude: [...configDefaults.exclude, 'tools/**'],
+    //
+    // Worktrees are full second checkouts of this repo (see .gitignore and
+    // .git/info/exclude). Collecting them runs every suite twice and trips
+    // over the standalone runners inside their own copy of `tools/`.
+    exclude: [...configDefaults.exclude, 'tools/**', '.claude/**', '.worktrees/**'],
   },
 })
