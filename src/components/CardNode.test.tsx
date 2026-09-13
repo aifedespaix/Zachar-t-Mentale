@@ -988,6 +988,41 @@ describe('CardNode footer', () => {
     expect(screen.getByText('Autre titre')).toBeInTheDocument()
   })
 
+  it('shows the fill-in-the-blank title in a qcm-title dialog when the card has no definition — the recall question it would have been outside QCM mode', async () => {
+    const user = userEvent.setup()
+    renderCardNode(testCard, false, false, {
+      type: 'qcm-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+    })
+
+    // The masked title is drawn on the card, but the modal overlay blurs it —
+    // without repeating it inside the dialog there is nothing to orient with.
+    const blank = screen.getByTestId('quiz-title').textContent as string
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByText(blank)).toBeInTheDocument()
+    expect(dialog.queryByText(/position de la carte/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps the definition as the only textual hint of a qcm-title dialog when the card has one', async () => {
+    const user = userEvent.setup()
+    renderCardNode(cardWithDefinition, false, false, {
+      type: 'qcm-title',
+      result: 'unanswered',
+      distractorTitles: ['Autre titre'],
+      hint: 'Un indice',
+    })
+
+    const blank = screen.getByTestId('quiz-title').textContent as string
+    await user.click(screen.getByRole('button', { name: /répondre/i }))
+
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByText('Un indice')).toBeInTheDocument()
+    expect(dialog.queryByText(blank)).not.toBeInTheDocument()
+  })
+
   it('records the qcm-title answer in the quiz store once a choice is made', async () => {
     vi.useFakeTimers()
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })

@@ -387,6 +387,18 @@ export function CardNode({ data }: CardNodeProps) {
         })()
       : null
 
+  // A `qcm-title` question on a card WITHOUT a definition is the `recall`
+  // (fill-in-the-blank) question in disguise: turning QCM mode on only swapped
+  // typing the title for picking it out of four choices, it did not give the
+  // card a definition to serve as a hint. The masked title drawn on the card
+  // (`blankPreview`) is then the ONLY thing to orient with — and the modal
+  // overlay blurs it, so it has to be repeated inside the dialog. A card that
+  // DOES have a definition keeps it as its hint (`quiz.hint`); the
+  // difficulty-"difficile" case, where `quiz.hint` is absent on purpose, is
+  // not this case and stays on the graph-position note.
+  const blankTitleHint =
+    quiz?.type === 'qcm-title' && !card.definition ? (blankPreview ?? undefined) : undefined
+
   // React Flow keeps CardNode mounted for the life of the app (nodes are keyed
   // by card id, not remounted between quizzes), so an answer dialog left open
   // by a PREVIOUS quiz must not reappear over a later one.
@@ -1188,7 +1200,7 @@ export function CardNode({ data }: CardNodeProps) {
                 ? headingForMediaTitle(contentOf(card))
                 : 'Quel est le titre de cette carte ?'
           }
-          hint={quiz.type === 'qcm-title' ? quiz.hint : undefined}
+          hint={quiz.type === 'qcm-title' ? (quiz.hint ?? blankTitleHint) : undefined}
           hintNode={
             // `quiz.hint !== undefined` is a proxy for "difficulty allows a hint",
             // since `buildHint` returns undefined exactly on difficulty
@@ -1202,7 +1214,9 @@ export function CardNode({ data }: CardNodeProps) {
             ) : undefined
           }
           noHintNote={
-            (quiz.type === 'qcm-title' || quiz.type === 'qcm-media-title') && !quiz.hint
+            (quiz.type === 'qcm-title' || quiz.type === 'qcm-media-title') &&
+            !quiz.hint &&
+            !blankTitleHint
               ? 'Aide-toi de la position de la carte dans l’arbre.'
               : undefined
           }
