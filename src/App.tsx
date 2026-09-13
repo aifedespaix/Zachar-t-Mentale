@@ -17,6 +17,7 @@ import { useAutosave } from './persistence/useAutosave'
 import { loadMindMap, saveMindMap, mindMapExists, loadMindMapMeta } from './persistence/fileStore'
 import { duplicateMap } from './persistence/fileOps'
 import { useSyncStore } from './state/useSyncStore'
+import { canEditContent } from './sync/permissions'
 import { ReadOnlyMapDialog } from './components/ReadOnlyMapDialog'
 import { fileNameOf, parentDirOf, repairedCopyPath } from './persistence/paths'
 import { repairCards, validateCards, type CardIssue } from './validation/cardsValidation'
@@ -193,7 +194,8 @@ function App() {
       const mapPath = useWorkspaceStore.getState().currentFilePath
       if (mapPath === null) return
       const meta = await loadMindMapMeta(mapPath).catch(() => null)
-      if (meta !== null && meta.author !== useSyncStore.getState().currentUser?.username) return
+      const dropUser = useSyncStore.getState().currentUser
+      if (meta !== null && (dropUser === null || !canEditContent(meta, dropUser))) return
       try {
         const source = { bytes: await readFile(path), mime: mimeForPath(path), name: fileNameOf(path) }
         // Re-checked AFTER the read: a large file takes long enough for the
@@ -381,7 +383,7 @@ function App() {
   }, [pendingRepair, refreshFolder, setCurrentFile])
 
   const currentFileName = currentFilePath ? fileNameOf(currentFilePath) : null
-  const isReadOnly = loadedMeta !== null && loadedMeta.author !== currentUser?.username
+  const isReadOnly = currentUser !== null && !canEditContent(loadedMeta, currentUser)
 
   /**
    * Publishes "this map is someone else's" to the store every editing

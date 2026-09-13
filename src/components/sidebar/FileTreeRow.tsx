@@ -32,7 +32,7 @@ import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
 import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
 import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import { useSyncStore } from '../../state/useSyncStore'
-import { canClassify } from '../../sync/permissions'
+import { canClassify, canEditContent } from '../../sync/permissions'
 import { MAP_TYPES, MAP_TYPE_LABELS, type MapType } from '../../types/mapType'
 import { MapTypeBadge } from './MapTypeBadge'
 
@@ -191,7 +191,7 @@ export function FileTreeRow({
   const formatValid = useMindMapFormatValid(node.type === 'mindmap' ? node.path : null)
   const currentUser = useSyncStore(s => s.currentUser)
   const meta = useMindMapAuthor(node.type === 'mindmap' ? node.path : null)
-  const isLocked = meta !== null && meta.author !== currentUser?.username
+  const isLocked = meta !== null && (currentUser === null || !canEditContent(meta, currentUser))
   // Le classement est le geste d'un compte sur une carte qui a déjà une
   // identité de synchronisation : `canClassify` en est la SEULE définition,
   // partagée avec la synchronisation.

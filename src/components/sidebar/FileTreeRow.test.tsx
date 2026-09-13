@@ -1055,6 +1055,13 @@ describe('FileTreeRow — verrouillage non-auteur', () => {
     expect(screen.getByLabelText(/aife.*lecture seule/)).toBeInTheDocument()
   })
 
+  it('shows no lock for a prof correcting an eleve s map', () => {
+    useSyncStore.setState({ currentUser: { username: 'aife', role: 'prof' } })
+    vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'f1', author: 'eleve1', role: 'eleve', lastModified: 'x' })
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+    expect(screen.queryByLabelText(/lecture seule/)).not.toBeInTheDocument()
+  })
+
   it('dresses that lock in the app logo, tinted, and leaves the row’s background alone', () => {
     useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
     vi.mocked(useMindMapAuthor).mockReturnValue({ id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' })
