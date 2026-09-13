@@ -141,6 +141,61 @@ describe('DescriptionDialog', () => {
     expect(props.onSave).not.toHaveBeenCalled()
   })
 
+  it('states the question and the three ways out of the discard prompt', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' modifiée')
+    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
+
+    // The question used to live in `aria-label` only: the panel showed a bare
+    // paragraph and three unexplained buttons, one of which closed the editor.
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Abandonner les modifications ?')
+
+    for (const name of [/continuer l’édition/i, /fermer sans enregistrer/i, /enregistrer et fermer/i]) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
+    }
+  })
+
+  it('saves from the discard prompt rather than forcing a choice between losing the work and cancelling', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog()
+
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' modifiée')
+    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
+    await user.click(screen.getByRole('button', { name: /enregistrer et fermer/i }))
+
+    expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Une définition modifiée' }])
+    expect(props.onClose).toHaveBeenCalled()
+  })
+
+  it('keeps the discard choices inside the panel when the labels are too wide for one row', async () => {
+    // jsdom has no layout engine, so the overflow cannot be reproduced by
+    // measuring anything — the guard is the property that fixes it. Without
+    // `flex-wrap` the three labels, which are all `whitespace-nowrap`, painted
+    // their last button past the edge of the panel.
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' modifiée')
+    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
+
+    expect(screen.getByRole('group', { name: /choix possibles/i })).toHaveStyle({ 'flex-wrap': 'wrap' })
+  })
+
+  it('asks before deleting a description that exists, and says what it deletes', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog()
+
+    await user.click(screen.getByRole('button', { name: /^supprimer$/i }))
+
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Supprimer cette description ?')
+    await user.click(screen.getByRole('button', { name: /supprimer la description/i }))
+
+    expect(props.onSave).toHaveBeenCalledWith([])
+    expect(props.onClose).toHaveBeenCalled()
+  })
+
   it('treats a change typed and undone as no change at all', async () => {
     const user = userEvent.setup()
     const props = renderDialog()

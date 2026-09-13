@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
-import { Trash2 } from 'lucide-react'
+import { AlertTriangle, Pencil, Save, Trash2, X } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
 import { BlockEditor, type BlockEditorProps } from './BlockEditor'
 import { BlockView } from './BlockView'
@@ -258,24 +258,47 @@ export function DescriptionDialog({
 
           {confirmingDiscard && (
             <ConfirmOverlay
-              label="Abandonner les modifications ?"
-              message="Cette description a été modifiée. Fermer sans enregistrer perdra les changements."
-              onCancel={() => setConfirmingDiscard(false)}
-              cancelLabel="Continuer l’édition"
-              confirmLabel="Fermer sans enregistrer"
-              onConfirm={onClose}
-              extra={<Button onClick={save}>Enregistrer</Button>}
+              tone="warning"
+              icon={<AlertTriangle size={18} />}
+              title="Abandonner les modifications ?"
+              message="Cette description a été modifiée. Si vous fermez sans enregistrer, vos changements seront perdus."
+              actions={
+                <>
+                  <Button variant="outline" onClick={() => setConfirmingDiscard(false)}>
+                    <Pencil />
+                    Continuer l’édition
+                  </Button>
+                  <Button variant="destructive" onClick={onClose}>
+                    <X />
+                    Fermer sans enregistrer
+                  </Button>
+                  <Button onClick={save}>
+                    <Save />
+                    Enregistrer et fermer
+                  </Button>
+                </>
+              }
             />
           )}
 
           {confirmingDelete && (
             <ConfirmOverlay
-              label="Supprimer cette description ?"
-              message="Le contenu de cette fiche sera définitivement supprimé."
-              onCancel={() => setConfirmingDelete(false)}
-              cancelLabel="Annuler"
-              confirmLabel="Supprimer"
-              onConfirm={deleteDescription}
+              tone="danger"
+              icon={<Trash2 size={18} />}
+              title="Supprimer cette description ?"
+              message="Le contenu de cette fiche sera définitivement supprimé, sans possibilité de revenir en arrière."
+              actions={
+                <>
+                  <Button variant="outline" onClick={() => setConfirmingDelete(false)}>
+                    <X />
+                    Annuler
+                  </Button>
+                  <Button variant="destructive" onClick={deleteDescription}>
+                    <Trash2 />
+                    Supprimer la description
+                  </Button>
+                </>
+              }
             />
           )}
         </DialogPrimitive.Content>
@@ -288,28 +311,37 @@ export function DescriptionDialog({
  * The "are you sure?" overlay shared by the discard-changes and
  * delete-description prompts — same modal-within-a-modal treatment so a
  * second nested Radix dialog isn't needed for either.
+ *
+ * The action row WRAPS. That is the shape the bug demanded: three French
+ * labels, each carrying an icon and each refusing to shrink (the shared
+ * `Button` is `whitespace-nowrap`), need more width than the old 380px card
+ * offered — and a non-wrapping flex row answered that by painting the last
+ * button straight past the card's edge. Wrapping keeps every choice inside the
+ * panel, and the panel is capped against the overlay it lives in so it cannot
+ * outgrow the dialog hosting it either.
  */
 function ConfirmOverlay({
-  label,
+  tone,
+  icon,
+  title,
   message,
-  cancelLabel,
-  confirmLabel,
-  onCancel,
-  onConfirm,
-  extra,
+  actions,
 }: {
-  label: string
+  /** Colours the badge glyph: `warning` when the choice risks work, `danger` when it destroys content. */
+  tone: 'warning' | 'danger'
+  /** Sits in the round badge beside the title; size it at the call site. */
+  icon: ReactNode
+  title: string
   message: string
-  cancelLabel: string
-  confirmLabel: string
-  onCancel: () => void
-  onConfirm: () => void
-  extra?: ReactNode
+  actions: ReactNode
 }) {
+  const accent = tone === 'danger' ? 'var(--destructive)' : 'var(--warning-fg)'
+
   return (
     <div
       role="alertdialog"
-      aria-label={label}
+      aria-modal="true"
+      aria-label={title}
       style={{
         position: 'absolute',
         inset: 0,
@@ -317,13 +349,16 @@ function ConfirmOverlay({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        padding: 16,
         background: 'color-mix(in oklch, var(--popover), transparent 12%)',
         borderRadius: 12,
       }}
     >
       <div
         style={{
-          maxWidth: 380,
+          width: 'min(460px, 100%)',
+          maxHeight: '100%',
+          overflowY: 'auto',
           padding: 20,
           borderRadius: 10,
           border: '1px solid var(--border)',
@@ -331,15 +366,40 @@ function ConfirmOverlay({
           boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
         }}
       >
-        <p style={{ margin: '0 0 14px', fontSize: 14 }}>{message}</p>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button variant="outline" onClick={onCancel}>
-            {cancelLabel}
-          </Button>
-          <Button variant="destructive" onClick={onConfirm}>
-            {confirmLabel}
-          </Button>
-          {extra}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <span
+            aria-hidden
+            style={{
+              flexShrink: 0,
+              display: 'grid',
+              placeItems: 'center',
+              width: 32,
+              height: 32,
+              borderRadius: 9,
+              color: accent,
+              background: `color-mix(in oklch, ${accent}, transparent 88%)`,
+            }}
+          >
+            {icon}
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 600, lineHeight: 1.3 }}>{title}</p>
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.45, opacity: 0.7 }}>{message}</p>
+          </div>
+        </div>
+
+        <div
+          role="group"
+          aria-label="Choix possibles"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end',
+            gap: 8,
+            marginTop: 18,
+          }}
+        >
+          {actions}
         </div>
       </div>
     </div>
