@@ -109,8 +109,12 @@ const TITLE_LINE_HEIGHT = 1.2
  *
  * Centring the text inside a box of fixed height is what keeps a one-line
  * title balanced in a box sized for four, and a four-line title filling it.
- * overflow: hidden clips a longer title instead of growing the card or showing
- * a scrollbar: the box owns the height, never the content.
+ * A title longer than that scrolls inside the box instead of growing the
+ * card or getting cut off unreadably: `overflowY: auto` only shows a
+ * scrollbar once content actually exceeds the box. The `nowheel` class is
+ * @xyflow/react's own escape hatch (see ZoomPane) — without it, a wheel
+ * scroll over that scrollbar zooms the whole canvas instead of scrolling
+ * the title, because the pane's own wheel handler sees the event first.
  *
  * The height is written in em so it follows the card font size rather than
  * being a pixel count that would silently drift from TITLE_LINE_HEIGHT.
@@ -120,7 +124,8 @@ const TITLE_ZONE_STYLE: CSSProperties = {
   alignItems: "center",
   width: "100%",
   height: `calc(${TITLE_LINES} * ${TITLE_LINE_HEIGHT}em + 0.2rem + 4px)`,
-  overflow: "hidden",
+  overflowY: "auto",
+  overflowX: "hidden",
 }
 
 /**
@@ -891,19 +896,16 @@ export function CardNode({ data }: CardNodeProps) {
         answer dialog, and an editable-looking field there only invited people
         to type into a card that would never grade what they wrote.
       */}
-      <div data-testid="title-zone" style={TITLE_ZONE_STYLE}>
+      <div data-testid="title-zone" className="nowheel" style={TITLE_ZONE_STYLE}>
         {quiz ? (
           <div
             data-testid="quiz-title"
             style={{
               ...TITLE_BOX_STYLE,
-              // The same TITLE_LINES lines the textarea stands in for — see
-              // TITLE_ZONE_STYLE. -webkit-line-clamp is what Chromium (and
-              // therefore the Tauri WebView) uses for a multi-line ellipsis.
-              display: '-webkit-box',
-              WebkitBoxOrient: 'vertical',
-              WebkitLineClamp: TITLE_LINES,
-              overflow: 'hidden',
+              // Longer than TITLE_LINES lines simply overflows into the
+              // scrollable TITLE_ZONE_STYLE box around it (same treatment as
+              // the editor textarea below), rather than clamping to an
+              // ellipsis that would hide part of the question for good.
               fontFamily: displayMasked ? 'ui-monospace, monospace' : 'inherit',
               letterSpacing: displayMasked ? '0.12em' : undefined,
               fontWeight: displayMasked ? 700 : 'inherit',

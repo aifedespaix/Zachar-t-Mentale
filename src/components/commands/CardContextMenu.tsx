@@ -52,22 +52,32 @@ interface CardContextMenuProps {
  */
 export function CardContextMenu({ cardId, disabled = false, children }: CardContextMenuProps) {
   const storeApi = useStoreApi()
-  if (disabled) return <>{children}</>
 
   return (
     <ContextMenu>
+      {/* `disabled` on the trigger itself (Radix's own prop), never a
+          conditional Fragment/ContextMenu swap around `children`: swapping
+          the wrapper's element type forced React to unmount and remount
+          everything inside it — including the title textarea — every time a
+          quiz started or the map got locked, silently discarding its
+          measured height (see CardNode's title auto-resize effect). */}
       <ContextMenuTrigger
         asChild
-        onContextMenu={event => {
-          // Stops the canvas's own menu (whose trigger wraps the whole pane)
-          // from opening on top of this one.
-          event.stopPropagation()
-          // Through React Flow, so the outline moves to this card too — the
-          // mirror alone would leave the menu acting on one card while another
-          // still looks selected.
-          storeApi.getState().addSelectedNodes([cardId])
-          useCardSelectionStore.getState().select(cardId)
-        }}
+        disabled={disabled}
+        onContextMenu={
+          disabled
+            ? undefined
+            : event => {
+                // Stops the canvas's own menu (whose trigger wraps the whole pane)
+                // from opening on top of this one.
+                event.stopPropagation()
+                // Through React Flow, so the outline moves to this card too — the
+                // mirror alone would leave the menu acting on one card while another
+                // still looks selected.
+                storeApi.getState().addSelectedNodes([cardId])
+                useCardSelectionStore.getState().select(cardId)
+              }
+        }
       >
         {children}
       </ContextMenuTrigger>

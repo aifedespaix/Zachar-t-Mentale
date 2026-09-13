@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
@@ -884,6 +884,22 @@ describe('CardNode footer', () => {
     expect(useCardsStore.getState().history.present[0].title).toBe('Titre initial')
   })
 
+  it('keeps the same title textarea node when the mind map gets locked, so its auto-sized height survives', () => {
+    // Locking used to swap the card's whole context-menu wrapper between a
+    // Fragment and a Radix ContextMenu tree, which forced React to unmount
+    // and remount everything inside it — including this textarea — silently
+    // discarding the height the auto-resize effect had measured for it and
+    // collapsing every title to one line.
+    renderCardNode(testCard)
+    const before = screen.getByRole('textbox', { name: /titre/i })
+
+    act(() => {
+      useCardsStore.setState({ locked: true })
+    })
+
+    expect(screen.getByRole('textbox', { name: /titre/i })).toBe(before)
+  })
+
   it('hides the "add description" button when the mind map is locked', () => {
     useCardsStore.setState({ locked: true })
     renderCardNode(testCard)
@@ -1142,13 +1158,10 @@ describe('CardNode size', () => {
     expect(screen.getByTestId(`card-${longTitled.id}`).style.width).toBe(edited)
   })
 
-  it('clamps the masked title to the four lines the title zone reserves', () => {
+  it('sizes the masked title like the textarea it stands in for, letting the zone scroll it', () => {
     renderCardNode(longTitled, false, false, { type: 'recall', result: 'unanswered' })
 
     const title = screen.getByTestId('quiz-title')
-    // The same TITLE_LINES lines the textarea stands in for — see
-    // `TITLE_ZONE_STYLE`.
-    expect(title).toHaveStyle({ WebkitLineClamp: '4', overflow: 'hidden' })
     // Same box metrics as the textarea it stands in for. Read off the element's
     // own style rather than through `toHaveStyle`: jsdom's computed style does
     // not resolve a percentage width.
@@ -1156,7 +1169,7 @@ describe('CardNode size', () => {
     expect(title.style.lineHeight).toBe('1.2')
   })
 
-  it('centres the title in a fixed four-line zone, so no title length can resize the card', () => {
+  it('centres the title in a fixed four-line zone that scrolls instead of resizing the card', () => {
     renderCardNode(testCard)
 
     const zone = screen.getByTestId('title-zone')
@@ -1165,7 +1178,10 @@ describe('CardNode size', () => {
     // 4 lines x 1.2 line-height, plus the title box's own padding and border.
     // jsdom re-serialises the calc, so assert the line box it contains.
     expect(zone.style.height).toContain('4.8em')
-    expect(zone.style.overflow).toBe('hidden')
+    expect(zone.style.overflowY).toBe('auto')
+    // `nowheel` is @xyflow/react's own escape hatch: without it, scrolling this
+    // zone would zoom the canvas instead of scrolling the title.
+    expect(zone.className).toContain('nowheel')
   })
 
   it('renders the title field one row tall, so the zone can centre it', () => {
