@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { FileTreeRow } from './FileTreeRow'
+import { FileTreeRow, RENAME_CLICK_GRACE_MS } from './FileTreeRow'
 import { TreeDragGhost } from './TreeDragGhost'
 import { useWorkspaceStore, createWorkspaceStore } from '../../state/useWorkspaceStore'
 import { useTreeDragStore } from '../../state/useTreeDragStore'
@@ -138,6 +138,37 @@ describe('FileTreeRow — glisser-déposer', () => {
 
     await waitFor(() => expect(movePath).toHaveBeenCalled())
     expect(onOpenFile).not.toHaveBeenCalled()
+  })
+
+  it('does not fold or unfold the folder whose click merely ends a drag', async () => {
+    render(<FileTreeRow node={ROOT} depth={1} onOpenFile={() => {}} />)
+    const folder = screen.getByRole('button', { name: 'Chapitre 1' })
+
+    fireEvent.pointerDown(folder, { button: 0, clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(window, { clientX: 60, clientY: 60 })
+    fireEvent.pointerUp(window)
+    fireEvent.click(folder)
+
+    // The delivered click is the tail of the gesture, never a fold/unfold — not
+    // even the deferred one, which would otherwise land seconds later.
+    await new Promise(resolve => setTimeout(resolve, RENAME_CLICK_GRACE_MS + 50))
+    expect(useWorkspaceStore.getState().expandedPaths.has('/cours/Chapitre 1')).toBe(false)
+  })
+
+  it('still folds a ROOT folder on the click that follows an unrelated drag', async () => {
+    // A drag ending over empty space leaves the swallowed-click flag set, and no
+    // row ever consumed it. The root below must not eat its next click anyway:
+    // it is the one row kind that can never have started a drag.
+    render(<FileTreeRow node={ROOT} depth={0} onOpenFile={() => {}} isRoot onRemoveRoot={() => {}} />)
+    const root = screen.getByRole('button', { name: 'cours' })
+    const child = screen.getByRole('button', { name: 'Chapitre 1' })
+
+    fireEvent.pointerDown(child, { button: 0, clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(window, { clientX: 60, clientY: 60 })
+    fireEvent.pointerUp(window)
+    fireEvent.click(root)
+
+    expect(useWorkspaceStore.getState().expandedPaths.has('/cours')).toBe(false)
   })
 
   it('opens the map on a plain click, which is not a drag', async () => {

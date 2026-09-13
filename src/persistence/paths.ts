@@ -67,6 +67,20 @@ export function mindMapBaseName(path: string): string {
 }
 
 /**
+ * The exact suffix `path` already carries — `.zmap`, a legacy `.json`, or `''`
+ * for a folder or an unknown extension — with its original case.
+ *
+ * Where `withMindMapExtension` imposes the extension the app WRITES, this is
+ * what a rename needs: the extension must survive the edit untouched, so
+ * renaming a legacy map keeps it a `.json` instead of silently turning it into
+ * a `.zmap`.
+ */
+export function mindMapExtensionSuffix(path: string): string {
+  const extension = mindMapExtensionOf(path)
+  return extension === null ? '' : fileNameOf(path).slice(-extension.length)
+}
+
+/**
  * Where a repaired copy of `path` goes: « [Nom original] (Réparée).zmap », next
  * to the original. The copy is a file the app writes from scratch, so it gets
  * the current extension even when the broken original was a legacy `.json`.

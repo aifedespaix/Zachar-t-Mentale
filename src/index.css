@@ -690,6 +690,37 @@
 }
 
 /*
+ * The row while its name is being edited: the same box as the row it stands in
+ * for — chevron, icon and badges stay, and the field takes exactly the name's
+ * slot — but it is no longer a button.
+ */
+.file-tree-row--editing {
+  cursor: default;
+}
+
+/*
+ * The rename field IS the name slot: it inherits the row's type so the text does
+ * not move when it replaces the label, and stays transparent apart from a focus
+ * ring. This is an edit of the name, not a dialog dropped into the tree.
+ */
+.file-tree-row__name-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  outline: none;
+  user-select: text;
+}
+.file-tree-row__name-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+/*
  * The row in flight: faded, exactly like `.react-flow__node.dragging
  * .card-node` on the canvas, so the same gesture reads the same way in either
  * panel — "this one is lifted; the tree is about to reflow around it".

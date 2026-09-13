@@ -1,7 +1,7 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { FileTreeRow } from './FileTreeRow'
+import { FileTreeRow, RENAME_CLICK_GRACE_MS } from './FileTreeRow'
 import { useWorkspaceStore, createWorkspaceStore } from '../../state/useWorkspaceStore'
 import type { FileTreeNode } from '../../types/workspace'
 import type { MindMapMeta } from '../../types/card'
@@ -286,7 +286,26 @@ describe('FileTreeRow', () => {
     expect(screen.getByText('archives')).toBeInTheDocument()
   })
 
-  it('toggles a folder open/closed and shows/hides its children', async () => {
+  it('folds a folder from its chevron without waiting out the rename window', async () => {
+    const user = userEvent.setup()
+    const node: FileTreeNode = {
+      type: 'folder',
+      name: 'chimie',
+      path: '/cours/chimie',
+      children: [{ type: 'mindmap', name: 'atomes.json', path: '/cours/chimie/atomes.json' }],
+    }
+    const { container } = render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    expect(screen.queryByText('atomes')).not.toBeInTheDocument()
+
+    await user.click(container.querySelector('[data-instant-toggle]')!)
+    expect(screen.getByText('atomes')).toBeInTheDocument()
+
+    await user.click(container.querySelector('[data-instant-toggle]')!)
+    expect(screen.queryByText('atomes')).not.toBeInTheDocument()
+  })
+
+  it('folds a folder clicked by NAME only once the rename window has passed', async () => {
     const user = userEvent.setup()
     const node: FileTreeNode = {
       type: 'folder',
@@ -296,13 +315,43 @@ describe('FileTreeRow', () => {
     }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
 
-    expect(screen.queryByText('atomes')).not.toBeInTheDocument()
-
     await user.click(screen.getByRole('button', { name: /chimie/i }))
-    expect(screen.getByText('atomes')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: /chimie/i }))
+    // The NAME is where the rename double-click lands, so its fold waits: a
+    // second click inside the window must still get to be a rename instead.
     expect(screen.queryByText('atomes')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('atomes')).toBeInTheDocument())
+  })
+
+  it('renames on a double-click of the name without folding or unfolding the folder', async () => {
+    // Neither of the two clicks, nor the fold the first one scheduled, may leave
+    // a trace: otherwise the folder flips open and shut underneath the field
+    // that just opened.
+    const user = userEvent.setup()
+    const toggleExpanded = vi.spyOn(useWorkspaceStore.getState(), 'toggleExpanded')
+    const node: FileTreeNode = {
+      type: 'folder',
+      name: 'chimie',
+      path: '/cours/chimie',
+      children: [{ type: 'mindmap', name: 'atomes.json', path: '/cours/chimie/atomes.json' }],
+    }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.dblClick(screen.getByRole('button', { name: /chimie/i }))
+
+    expect(screen.getByRole('textbox', { name: /renommer chimie/i })).toBeInTheDocument()
+    await new Promise(resolve => setTimeout(resolve, RENAME_CLICK_GRACE_MS + 50))
+    expect(toggleExpanded).not.toHaveBeenCalled()
+    toggleExpanded.mockRestore()
+  })
+
+  it('never opens the rename field on a double-click of the chevron', async () => {
+    const user = userEvent.setup()
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    const { container } = render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.dblClick(container.querySelector('[data-instant-toggle]')!)
+
+    expect(screen.queryByRole('textbox', { name: /renommer/i })).not.toBeInTheDocument()
   })
 
   it('renames a mind map file via double-click, with no menu involved', async () => {
@@ -315,7 +364,7 @@ describe('FileTreeRow', () => {
     await user.dblClick(screen.getByRole('button', { name: 'chapitre1' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
-    await user.type(input, 'chapitre1-v2.json{Enter}')
+    await user.type(input, 'chapitre1-v2{Enter}')
 
     expect(renamePath).toHaveBeenCalledWith('/cours/chapitre1.json', '/cours/chapitre1-v2.json')
   })
@@ -335,12 +384,13 @@ describe('FileTreeRow', () => {
     expect(renamePath).not.toHaveBeenCalled()
     // Appended at the caret: `user.type` clicks the field first, which collapses
     // the pre-selection the rename starts with (pinned by the test below).
-    expect(screen.getByRole('textbox', { name: /renommer chapitre1.json/i })).toHaveValue('chapitre1.jsondraft-en-cours')
+    expect(screen.getByRole('textbox', { name: /renommer chapitre1.json/i })).toHaveValue('chapitre1draft-en-cours')
   })
 
-  it('pre-selects the file name but not its extension when a rename starts', async () => {
-    // Renaming a map is about the name the user gave it: a selection that also
-    // covered « .json » would delete the file's type on the first keystroke.
+  it('opens the rename field on the name alone, with no extension to break', async () => {
+    // Renaming a map is about the name the user gave it: the field never shows
+    // « .json ». The extension is put back on submit, so a rename cannot change
+    // the file's type, and the whole draft is pre-selected so typing replaces it.
     const user = userEvent.setup()
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
@@ -348,8 +398,34 @@ describe('FileTreeRow', () => {
     await user.dblClick(screen.getByRole('button', { name: 'chapitre1' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i }) as HTMLInputElement
 
+    expect(input).toHaveValue('chapitre1')
     expect(input.selectionStart).toBe(0)
     expect(input.selectionEnd).toBe('chapitre1'.length)
+  })
+
+  it('keeps the chevron and the folder icon in place while the name is being edited', async () => {
+    // The field stands in for the NAME slot, not for the whole line: the leading
+    // icons stay where they were, which is also what stops the text from
+    // shifting left when the field appears.
+    const user = userEvent.setup()
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    const { container } = render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.dblClick(screen.getByRole('button', { name: /chimie/i }))
+
+    expect(screen.getByRole('textbox', { name: /renommer chimie/i })).toBeInTheDocument()
+    expect(container.querySelector('.file-tree-row--editing [data-instant-toggle]')).toBeInTheDocument()
+  })
+
+  it('keeps the file icon while the name of a mind map is being edited', async () => {
+    const user = userEvent.setup()
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    const { container } = render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    await user.dblClick(screen.getByRole('button', { name: 'chapitre1' }))
+
+    expect(screen.getByRole('textbox', { name: /renommer chapitre1.json/i })).toBeInTheDocument()
+    expect(container.querySelector('.file-tree-row--editing svg')).toBeInTheDocument()
   })
 
   it('pre-selects the whole name of a folder, which has no extension', async () => {
@@ -400,7 +476,7 @@ describe('FileTreeRow', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
-    await user.type(input, 'chapitre1-v2.json{Enter}')
+    await user.type(input, 'chapitre1-v2{Enter}')
 
     expect(renamePath).toHaveBeenCalledWith('/cours/chapitre1.json', '/cours/chapitre1-v2.json')
   })
@@ -417,7 +493,7 @@ describe('FileTreeRow', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
-    await user.type(input, 'chapitre1-v2.json{Enter}')
+    await user.type(input, 'chapitre1-v2{Enter}')
 
     await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre1-v2.json'))
   })
@@ -469,7 +545,7 @@ describe('FileTreeRow', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Renommer' }))
     const input = screen.getByRole('textbox', { name: /renommer chapitre1.json/i })
     await user.clear(input)
-    await user.type(input, 'chapitre1-v2.json{Enter}')
+    await user.type(input, 'chapitre1-v2{Enter}')
 
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceError).toMatch(/fichier verrouillé/))
     expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/chapitre1.json')

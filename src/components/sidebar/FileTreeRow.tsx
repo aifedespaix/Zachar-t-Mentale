@@ -7,7 +7,7 @@ import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useTreeDragStore } from '../../state/useTreeDragStore'
 import { renamePath, deletePath, duplicatePath, freeSiblingPath } from '../../persistence/fileOps'
 import { countDescendants } from '../../persistence/fileTree'
-import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, withMindMapExtension, isInsideFolder } from '../../persistence/paths'
+import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, mindMapExtensionSuffix, withMindMapExtension, isInsideFolder } from '../../persistence/paths'
 import { loadMindMap, mindMapExists, setMindMapType } from '../../persistence/fileStore'
 import { beginTreeDrag, consumeSwallowedClick, isValidDropTarget } from './treeDrag'
 import { flattenFolders, isRowVisible, type FolderOption } from './treeFilter'
@@ -43,6 +43,23 @@ import { MapTypeBadge } from './MapTypeBadge'
  */
 function rowClassName(modifiers: Array<string | false | undefined>): string {
   return ['file-tree-row', ...modifiers.filter(Boolean)].join(' ')
+}
+
+/**
+ * How long a click on a folder's NAME waits before it folds/unfolds it.
+ *
+ * The name is what a double-click renames, and a browser only reports that
+ * double-click after the first click is long gone — the single click the row
+ * would otherwise act on cannot know a second one is coming. Waiting the window
+ * out is what lets a double-click rename WITHOUT the folder flipping open and
+ * shut underneath it. The chevron and the icon are not the rename target, so
+ * they are exempt and fold/unfold on the spot.
+ */
+export const RENAME_CLICK_GRACE_MS = 200
+
+/** Whether a click landed on the row's instant fold/unfold zone — the chevron and the icon. */
+function isInstantToggleTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[data-instant-toggle]') !== null
 }
 
 /**
@@ -154,7 +171,13 @@ export function FileTreeRow({
   const isDropTarget = useTreeDragStore(s => s.targetPath === node.path)
 
   const [renaming, setRenaming] = useState(false)
-  const [draftRenameName, setDraftRenameName] = useState(node.name)
+  /**
+   * What the field holds: the name the user gave, WITHOUT the extension. The
+   * extension is the app's business — it is put back on submit — so a rename
+   * can never change a file's type by accident.
+   */
+  const renameBaseName = node.type === 'mindmap' ? mindMapBaseName(node.name) : node.name
+  const [draftRenameName, setDraftRenameName] = useState(renameBaseName)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [exportCards, setExportCards] = useState<Card[] | null>(null)
   const [namingAction, setNamingAction] = useState<NamingAction | null>(null)
@@ -204,19 +227,20 @@ export function FileTreeRow({
    */
   const displayName = node.type === 'mindmap' && !showUnreadable ? mindMapBaseName(node.name) : node.name
 
-  /**
-   * How much of the file name a rename pre-selects: the name the user gave the
-   * map, never its extension.
-   *
-   * Opening a rename field with the name already selected is what makes typing
-   * replace it; a selection that ALSO covered « .zmap » would take the extension
-   * with the first keystroke, and a rename would silently change the file's
-   * type. The extension is the app's business, not the user's.
-   */
-  const renameSelectionLength =
-    node.type === 'mindmap' ? mindMapBaseName(node.name).length : node.name.length
-
   const renameInputRef = useRef<HTMLInputElement>(null)
+  /**
+   * A fold/unfold waiting out the double-click window. A ref, not state: it
+   * changes nothing on screen, and a re-render per click just to hold a timer
+   * id would be pure waste.
+   */
+  const pendingToggleRef = useRef<number | null>(null)
+
+  /** Drops the fold/unfold a first click scheduled, so a second click can rename instead. */
+  function cancelPendingToggle() {
+    if (pendingToggleRef.current === null) return
+    window.clearTimeout(pendingToggleRef.current)
+    pendingToggleRef.current = null
+  }
 
   /**
    * Where « Déplacer vers… » may send this row. Exactly the destinations the
@@ -237,11 +261,17 @@ export function FileTreeRow({
 
   // Applied in an effect rather than at mount: the field has to exist and be
   // focused before a selection range sticks, and `autoFocus` only focuses it
-  // during the commit — this runs right after that.
+  // during the commit — this runs right after that. The WHOLE draft is
+  // selected: it holds only the name, never the extension, so typing replaces
+  // the name and leaves the file's type alone.
   useEffect(() => {
     if (!renaming) return
-    renameInputRef.current?.setSelectionRange(0, renameSelectionLength)
-  }, [renaming, renameSelectionLength])
+    const input = renameInputRef.current
+    input?.setSelectionRange(0, input.value.length)
+  }, [renaming])
+
+  // A pending fold/unfold must never outlive the row that scheduled it.
+  useEffect(() => cancelPendingToggle, [])
 
   /**
    * Entering rename mode from a menu item, not a double-click, needs a tick
@@ -254,21 +284,29 @@ export function FileTreeRow({
    * handling of pending timers to observe the rename input after the deferred call.
    */
   function startRenaming() {
+    cancelPendingToggle()
     renamingViaMenuRef.current = true
     setTimeout(() => setRenaming(true), 0)
   }
 
+  /**
+   * Commits the rename. The field only ever held the NAME, so the extension the
+   * file already carries is put back here — untouched, including a legacy
+   * `.json`: renaming must never turn one file type into another.
+   */
   async function submitRename() {
-    const name = draftRenameName.trim()
+    const baseName = draftRenameName.trim()
     setRenaming(false)
-    if (!name || name === node.name) return
+    if (!baseName) return
     const parentPath = parentDirOf(node.path)
     const separator = separatorOf(node.path)
-    const newPath = `${parentPath}${separator}${name}`
+    const newName = node.type === 'mindmap' ? `${baseName}${mindMapExtensionSuffix(node.name)}` : baseName
+    if (newName === node.name) return
+    const newPath = `${parentPath}${separator}${newName}`
     try {
       await renamePath(node.path, newPath)
     } catch (error) {
-      setWorkspaceError(`Impossible de renommer « ${node.name} » en « ${name} » : ${describeError(error)}`)
+      setWorkspaceError(`Impossible de renommer « ${node.name} » en « ${newName} » : ${describeError(error)}`)
       return
     }
     // Same containment check `confirmDelete` uses: renaming a FOLDER moves
@@ -364,8 +402,43 @@ export function FileTreeRow({
     }
   }
 
+  /**
+   * The rename field, shared by both row kinds. It stands in for the NAME slot
+   * only — the chevron, the icons and the badges stay rendered around it — so
+   * the text keeps the row's indentation instead of jumping left when the field
+   * appears, and the file still shows which icon it is.
+   */
+  const renameField = (
+    <input
+      autoFocus
+      ref={renameInputRef}
+      className="file-tree-row__name-input"
+      aria-label={`Renommer ${node.name}`}
+      value={draftRenameName}
+      onChange={e => setDraftRenameName(e.target.value)}
+      onBlur={submitRename}
+      onKeyDown={e => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+        if (e.key === 'Escape') {
+          setDraftRenameName(renameBaseName)
+          setRenaming(false)
+        }
+      }}
+    />
+  )
+
   if (node.type === 'folder') {
     const isExpanded = expandedPaths.has(node.path) || forcedExpanded?.has(node.path) === true
+    // The chevron and the folder icon are ONE zone: they fold/unfold on the
+    // click itself, while a click on the name waits out the double-click
+    // window. Rendering them in both states is also what keeps the rename field
+    // starting exactly where the name starts.
+    const folderIcons = (
+      <span data-instant-toggle style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
+      </span>
+    )
     return (
       // The whole branch is a drop zone, not just the header: `dropTargetAt`
       // walks up to it, so dropping on any file means « dans ce dossier ».
@@ -374,22 +447,10 @@ export function FileTreeRow({
           <ContextMenuTrigger asChild disabled={renaming}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               {renaming ? (
-                <input
-                  autoFocus
-                  ref={renameInputRef}
-                  aria-label={`Renommer ${node.name}`}
-                  value={draftRenameName}
-                  onChange={e => setDraftRenameName(e.target.value)}
-                  onBlur={submitRename}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') e.currentTarget.blur()
-                    if (e.key === 'Escape') {
-                      setDraftRenameName(node.name)
-                      setRenaming(false)
-                    }
-                  }}
-                  style={{ ...indent, display: 'block', flex: 1 }}
-                />
+                <div className={rowClassName(['file-tree-row--editing'])} style={{ ...indent }}>
+                  {folderIcons}
+                  {renameField}
+                </div>
               ) : (
                 <button
                   type="button"
@@ -405,15 +466,38 @@ export function FileTreeRow({
                     if (isRoot) return
                     beginTreeDrag(event, { path: node.path, name: node.name, kind: 'folder' })
                   }}
-                  onClick={() => toggleExpanded(node.path)}
-                  onDoubleClick={() => {
-                    if (!isRoot) setRenaming(true)
+                  onClick={event => {
+                    // A drag ends with a pointerup the browser follows with a
+                    // click: without this, the folder that was just dropped on
+                    // itself would fold or unfold as well. A ROOT folder never
+                    // starts a drag (see onPointerDown), so it is never the
+                    // delivery of one — and consuming anyway would let a drag
+                    // that ended over empty space swallow its next click.
+                    if (!isRoot && consumeSwallowedClick()) return
+                    cancelPendingToggle()
+                    // The chevron and the icon fold/unfold on the spot; the NAME
+                    // is where the double-click that renames lands, so its
+                    // fold/unfold waits to see whether a second click follows.
+                    if (isRoot || isInstantToggleTarget(event.target)) {
+                      toggleExpanded(node.path)
+                      return
+                    }
+                    pendingToggleRef.current = window.setTimeout(() => {
+                      pendingToggleRef.current = null
+                      toggleExpanded(node.path)
+                    }, RENAME_CLICK_GRACE_MS)
+                  }}
+                  onDoubleClick={event => {
+                    // A root folder is workspace configuration, not content: it
+                    // cannot be renamed, so its clicks never wait.
+                    if (isRoot || isInstantToggleTarget(event.target)) return
+                    cancelPendingToggle()
+                    setRenaming(true)
                   }}
                   aria-expanded={isExpanded}
                   style={{ ...indent }}
                 >
-                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
+                  {folderIcons}
                   <span className="file-tree-row__name">{node.name}</span>
                 </button>
               )}
@@ -500,28 +584,45 @@ export function FileTreeRow({
 
   if (node.type === 'mindmap') {
     const isActive = node.path === currentFilePath
+    // Kept in both states, exactly like the folder row's chevron: the rename
+    // field stands in for the NAME, not for the whole line.
+    const mindMapIcon = isLocked ? (
+      // The app's own mark rather than a padlock: the row keeps saying which
+      // FILE it is (the logo), and the orange says who may edit it. The
+      // accessible name and the tooltip are deliberately unchanged — they are
+      // what tells WHOSE file it is, and a screen reader has no colour to read.
+      <span
+        className="file-tree-row__logo"
+        role="img"
+        aria-label={`Fichier de ${meta?.author}, lecture seule`}
+        title={`Fichier de ${meta?.author}, lecture seule`}
+      />
+    ) : formatValid ? (
+      <img src="/favicon.svg" width={16} height={16} alt="" />
+    ) : (
+      <FileJson size={16} />
+    )
+    const mindMapTrailing = (
+      <>
+        <MapTypeBadge type={meta?.type} />
+        {outOfSyncFolder && (
+          <CloudOff size={13} aria-label="Hors du dossier de synchronisation" style={{ opacity: 0.7, flexShrink: 0 }}>
+            <title>Hors du dossier de synchronisation : cette carte ne sera plus envoyée.</title>
+          </CloudOff>
+        )}
+      </>
+    )
     return (
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <ContextMenu>
           <ContextMenuTrigger asChild disabled={renaming}>
             <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
               {renaming ? (
-                <input
-                  autoFocus
-                  ref={renameInputRef}
-                  aria-label={`Renommer ${node.name}`}
-                  value={draftRenameName}
-                  onChange={e => setDraftRenameName(e.target.value)}
-                  onBlur={submitRename}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') e.currentTarget.blur()
-                    if (e.key === 'Escape') {
-                      setDraftRenameName(node.name)
-                      setRenaming(false)
-                    }
-                  }}
-                  style={{ ...indent, display: 'block', flex: 1 }}
-                />
+                <div className={rowClassName(['file-tree-row--editing'])} style={{ ...indent }}>
+                  {mindMapIcon}
+                  {renameField}
+                  {mindMapTrailing}
+                </div>
               ) : (
                 <button
                   type="button"
@@ -545,30 +646,9 @@ export function FileTreeRow({
                   }
                   style={{ ...indent }}
                 >
-                  {isLocked ? (
-                    // The app's own mark rather than a padlock: the row keeps
-                    // saying which FILE it is (the logo), and the orange says who
-                    // may edit it. The accessible name and the tooltip are
-                    // deliberately unchanged — they are what tells WHOSE file it
-                    // is, and a screen reader has no colour to read.
-                    <span
-                      className="file-tree-row__logo"
-                      role="img"
-                      aria-label={`Fichier de ${meta?.author}, lecture seule`}
-                      title={`Fichier de ${meta?.author}, lecture seule`}
-                    />
-                  ) : formatValid ? (
-                    <img src="/favicon.svg" width={16} height={16} alt="" />
-                  ) : (
-                    <FileJson size={16} />
-                  )}
+                  {mindMapIcon}
                   <span className="file-tree-row__name">{displayName}</span>
-                  <MapTypeBadge type={meta?.type} />
-                  {outOfSyncFolder && (
-                    <CloudOff size={13} aria-label="Hors du dossier de synchronisation" style={{ opacity: 0.7, flexShrink: 0 }}>
-                      <title>Hors du dossier de synchronisation : cette carte ne sera plus envoyée.</title>
-                    </CloudOff>
-                  )}
+                  {mindMapTrailing}
                 </button>
               )}
             </div>
