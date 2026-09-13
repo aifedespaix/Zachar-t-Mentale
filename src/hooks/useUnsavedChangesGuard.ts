@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { describeError } from '../state/useWorkspaceStore'
+import { useSyncStore } from '../state/useSyncStore'
 
 export interface UnsavedChangesPrompt {
   message: string
@@ -39,7 +40,13 @@ export function useUnsavedChangesGuard(
   const requestOpenFile = useCallback(
     (path: string) => {
       flush()
-        .then(() => setCurrentFile(path))
+        .then(() => {
+          setCurrentFile(path)
+          // Fire-and-forget: switching files must never wait on the network,
+          // and the file we just left is no longer "open in the canvas" —
+          // see `SyncParams.openFilePath` — so it is now safe to pull into.
+          void useSyncStore.getState().syncNow({ trigger: 'auto' })
+        })
         .catch((error: unknown) => {
           setPrompt({
             message: `La sauvegarde a échoué : ${describeError(error)}`,
@@ -105,6 +112,7 @@ export function useUnsavedChangesGuard(
             })
             return
           }
+          void useSyncStore.getState().syncNow({ trigger: 'auto' })
           await closeNow()
         })
         .then(fn => {
