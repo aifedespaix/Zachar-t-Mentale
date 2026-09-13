@@ -82,22 +82,44 @@ export function canEditContent(meta: MindMapMeta | null, user: SyncUser): boolea
 }
 ```
 
-Un seul point d'appel change en conséquence : `App.tsx:384`
+Trois points d'appel répètent aujourd'hui la même comparaison directe
+(`meta.author !== currentUser.username`) au lieu de passer par une règle
+partagée, et doivent donc tous les trois basculer sur `canEditContent` pour
+rester cohérents entre eux :
 
-```ts
-const isReadOnly = loadedMeta !== null && loadedMeta.author !== currentUser?.username
-```
+- `App.tsx:384`, le verrouillage de l'éditeur de carte :
 
-devient
+  ```ts
+  // avant
+  const isReadOnly = loadedMeta !== null && loadedMeta.author !== currentUser?.username
+  // après
+  const isReadOnly = currentUser !== null && !canEditContent(loadedMeta, currentUser)
+  ```
 
-```ts
-const isReadOnly = currentUser !== null && !canEditContent(loadedMeta, currentUser)
-```
+- `App.tsx:196`, le garde-fou de `handleDropImageOnCard` — déposer une image
+  sur une carte est aussi une écriture de contenu, et doit donc être permis
+  au prof exactement comme éditer le texte l'est désormais :
 
-(un utilisateur non connecté reste en lecture seule sur tout fichier publié,
-comme aujourd'hui — seule la condition d'écriture change). C'est le seul
-endroit de l'interface qui décide aujourd'hui du verrouillage de l'éditeur de
-carte ; `ReadOnlyMapDialog` / « faire ma copie » (`duplicateMap`) continue de
+  ```ts
+  // avant
+  if (meta !== null && meta.author !== useSyncStore.getState().currentUser?.username) return
+  // après
+  const user = useSyncStore.getState().currentUser
+  if (meta !== null && (user === null || !canEditContent(meta, user))) return
+  ```
+
+- `FileTreeRow.tsx:194`, l'icône cadenas de l'arbre de fichiers :
+
+  ```ts
+  // avant
+  const isLocked = meta !== null && meta.author !== currentUser?.username
+  // après
+  const isLocked = meta !== null && (currentUser === null || !canEditContent(meta, currentUser))
+  ```
+
+Dans les trois cas, un utilisateur non connecté reste en lecture seule sur
+tout fichier publié, comme aujourd'hui — seule la condition d'écriture
+change. `ReadOnlyMapDialog` / « faire ma copie » (`duplicateMap`) continue de
 s'afficher dans les mêmes conditions pour qui n'a ni l'un ni l'autre droit
 (ex. un élève ouvrant la carte d'un autre élève, ou celle du prof).
 
