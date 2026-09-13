@@ -80,25 +80,36 @@ describe('AppToolbar', () => {
     const user = userEvent.setup()
     renderToolbar()
 
-    const save = screen.getByRole('button', { name: 'Enregistrer maintenant' })
-    expect(save).toHaveAttribute('aria-keyshortcuts', 'Mod+S')
-    await user.hover(save)
+    const newMap = screen.getByRole('button', { name: 'Nouvelle carte mentale' })
+    expect(newMap).toHaveAttribute('aria-keyshortcuts', 'Mod+N')
+    await user.hover(newMap)
     // The tooltip is how a mouse-driven user discovers the keyboard.
-    expect(await screen.findByText('Ctrl + S')).toBeInTheDocument()
+    expect(await screen.findByText('Ctrl + N')).toBeInTheDocument()
   })
 
   it('writes the map immediately when asked to save', async () => {
     const user = userEvent.setup()
     const { props } = renderToolbar()
-    await user.click(screen.getByRole('button', { name: 'Enregistrer maintenant' }))
-    expect(props.flush).toHaveBeenCalled()
+    // Save left the toolbar when autosave made it redundant; it lives in the
+    // Fichier menu now, and still writes NOW rather than waiting for the debounce.
+    await user.click(screen.getByRole('button', { name: 'Fichier' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Enregistrer maintenant/ }))
+    await waitFor(() => expect(props.flush).toHaveBeenCalled())
   })
 
-  it('greys out everything that needs an open map when there is none', () => {
+  it('greys out everything that needs an open map when there is none', async () => {
+    const user = userEvent.setup()
     renderToolbar({ filePath: null })
-    expect(screen.getByRole('button', { name: 'Enregistrer maintenant' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Créer une carte volante' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Exporter la carte mentale…' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Lancer un quiz' })).toBeDisabled()
+
+    // Save is in the menu now, and unavailable for the same reason.
+    await user.click(screen.getByRole('button', { name: 'Fichier' }))
+    expect(await screen.findByRole('menuitem', { name: /Enregistrer maintenant/ })).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
   })
 
   it('locks and unlocks the map, saying which of the two the button now does', async () => {
