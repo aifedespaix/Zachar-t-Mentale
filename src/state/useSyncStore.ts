@@ -382,6 +382,13 @@ export function createSyncStore(): SyncStore {
             for (const moved of result.moved ?? []) {
               await logSyncEvent('debug', `déplacé « ${moved.from} » vers « ${moved.to} »`, { fileId: moved.fileId })
             }
+            // Une fusion ne transfère rien de plus qu'une réception, mais elle
+            // DÉPLACE des cartes : c'est le seul endroit qui dit lesquelles.
+            for (const merge of result.merged ?? []) {
+              await logSyncEvent('debug', `« ${merge.path} » : ${merge.floatedCount} carte(s) mise(s) de côté`, {
+                fileId: merge.fileId,
+              })
+            }
           }
           if (result.errors.length > 0) {
             // The per-file detail, which is what a bug report actually needs.

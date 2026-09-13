@@ -506,6 +506,32 @@ describe('useSyncStore', () => {
     expect(debugLines).toEqual(['envoyé « a.zmap »', 'reçu « sous/b.zmap »'])
   })
 
+  it('logs a merge s floated cards when the detailed journal is on', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'eleve1', role: 'eleve' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(sync).mockResolvedValue({
+      pushed: 0,
+      pulled: 1,
+      errors: [],
+      cancelled: false,
+      conflicts: [],
+      transferred: [],
+      merged: [{ fileId: 'file-2', path: 'b.zmap', floatedCount: 1 }],
+    })
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('eleve1', 'secret')
+    await store.getState().updateSettings({ verboseLog: true })
+
+    await store.getState().syncNow()
+
+    const debugLines = vi
+      .mocked(logSyncEvent)
+      .mock.calls.filter(call => call[0] === 'debug')
+      .map(call => call[1])
+    expect(debugLines).toEqual(['« b.zmap » : 1 carte(s) mise(s) de côté'])
+  })
+
   it('a background run leaves the failure on screen alone; a manual one starts clean', async () => {
     const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)

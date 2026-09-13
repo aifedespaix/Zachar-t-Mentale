@@ -18,6 +18,8 @@ export function syncResultLabel(result: SyncResult): string {
   // Une adoption de type n'est ni un envoi ni une réception : comme un
   // déplacement, elle doit se lire même quand les deux compteurs sont à zéro.
   if ((result.reclassified ?? 0) > 0) parts.push(`${result.reclassified ?? 0} reclassé(s)`)
+  const floated = (result.merged ?? []).reduce((sum, entry) => sum + entry.floatedCount, 0)
+  if (floated > 0) parts.push(`${floated} carte(s) mise(s) de côté`)
   if (result.conflicts.length > 0) parts.push(`${result.conflicts.length} conflit(s)`)
   if ((result.notices ?? []).length > 0) parts.push(`${(result.notices ?? []).length} remarque(s)`)
   if (result.errors.length > 0) parts.push(`${result.errors.length} erreur(s)`)

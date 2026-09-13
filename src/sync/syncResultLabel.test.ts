@@ -56,4 +56,9 @@ describe('syncResultLabel', () => {
       })
     ).toContain('2 reclassé(s)')
   })
+
+  it('mentionne les cartes mises de côté par une fusion', () => {
+    const merged = [{ fileId: 'f1', path: 'a.zmap', floatedCount: 2 }]
+    expect(syncResultLabel(result({ merged }))).toContain('2 carte(s) mise(s) de côté')
+  })
 })
