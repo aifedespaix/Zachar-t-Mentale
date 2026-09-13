@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { canClassify, canReorder } from './permissions'
+import { canClassify, canEditContent, canReorder } from './permissions'
 import type { MindMapMeta, SyncUser } from '../types/card'
 
 const AIFE: SyncUser = { username: 'aife', role: 'prof' }
@@ -51,5 +51,24 @@ describe('canClassify', () => {
 
   it('refuses an eleve the type of a map they do not own', () => {
     expect(canClassify(AIFE_MAP, ELEVE)).toBe(false)
+  })
+})
+
+describe('canEditContent', () => {
+  it('lets anyone edit a map with no sync identity — it belongs to nobody yet', () => {
+    expect(canEditContent(null, ELEVE)).toBe(true)
+  })
+
+  it('lets an author edit their own map', () => {
+    expect(canEditContent(ELEVE_MAP, ELEVE)).toBe(true)
+    expect(canEditContent(AIFE_MAP, AIFE)).toBe(true)
+  })
+
+  it('lets a prof correct an eleve s map — the eleve stays the author', () => {
+    expect(canEditContent(ELEVE_MAP, AIFE)).toBe(true)
+  })
+
+  it('refuses an eleve the content of a map they do not own', () => {
+    expect(canEditContent(AIFE_MAP, ELEVE)).toBe(false)
   })
 })

@@ -12,9 +12,10 @@ import type { MindMapMeta, SyncUser } from '../types/card'
  * A map with no `meta` belongs to nobody: it has never been published, has no
  * remote record, and rearranging it is a purely local act.
  *
- * Deliberately NOT about content: a prof rearranges an eleve's chapter without
- * ever gaining the right to edit it — that is what keeps "l'auteur est le seul
- * éditeur" standing.
+ * Deliberately NOT about content: rearranging is allowed even where editing
+ * content is not (an eleve's OWN unrelated files stay unreorderable to a
+ * classmate). Content itself now follows `canEditContent`, the same author-or-
+ * prof rule — see that function.
  */
 export function canReorder(meta: MindMapMeta | null, user: SyncUser): boolean {
   if (meta === null) return true
@@ -30,10 +31,24 @@ export function canReorder(meta: MindMapMeta | null, user: SyncUser): boolean {
  * que l'interface et la synchronisation doivent lire la MÊME définition — sans
  * quoi l'arborescence offrirait un geste que le sync refuserait.
  *
- * Le contenu, lui, n'est jamais concerné : un prof classe la carte d'un élève
- * sans gagner le droit d'en écrire le contenu.
+ * Le contenu suit désormais la même règle, mais via `canEditContent` — les
+ * deux fonctions restent séparées parce qu'elles décident de choses
+ * différentes (le type vit dans `meta`, un brouillon local n'en a pas).
  */
 export function canClassify(meta: MindMapMeta | null, user: SyncUser): boolean {
   if (meta === null) return false
+  return meta.author === user.username || user.role === 'prof'
+}
+
+/**
+ * Whether `user` may change the CONTENT of a map — its cards.
+ *
+ * Même règle que `canReorder`/`canClassify` (auteur ou prof), mais celle-ci
+ * décide du contenu lui-même : un prof peut corriger la carte d'un élève sans
+ * jamais en devenir l'auteur — `meta.author` ne change pas, l'élève reste
+ * propriétaire, seul son contenu diffère après correction.
+ */
+export function canEditContent(meta: MindMapMeta | null, user: SyncUser): boolean {
+  if (meta === null) return true
   return meta.author === user.username || user.role === 'prof'
 }
