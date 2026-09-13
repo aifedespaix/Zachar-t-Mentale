@@ -10,6 +10,7 @@ import type { FileTreeNode } from '../types/workspace'
 import type { MindMapMeta, SyncUser, UserRole } from '../types/card'
 import { serverStateOf, type SyncState, type SyncStateEntry } from '../persistence/syncState'
 import { canClassify, canEditContent, canReorder } from './permissions'
+import { mergeCards } from './cardMerge'
 import { mapTypeOf } from '../types/mapType'
 import { hashContent } from './contentHash'
 import { reconcilePath, seedLastSyncedPath } from './pathReconciliation'
@@ -119,11 +120,13 @@ export interface SyncResult {
   notices?: { fileId: string; message: string }[]
   /** Combien de cartes ont adopté le type décidé ailleurs. */
   reclassified?: number
+  /** Un pull qui a mis des cartes locales de côté au lieu de les perdre. */
+  merged?: { fileId: string; path: string; floatedCount: number }[]
 }
 
 /** Le résultat tel que `sync()` le construit : déplacements, notices et reclassements y sont toujours renseignés. */
 type SyncRunResult = SyncResult &
-  Required<Pick<SyncResult, 'relocated' | 'moved' | 'notices' | 'reclassified'>>
+  Required<Pick<SyncResult, 'relocated' | 'moved' | 'notices' | 'reclassified' | 'merged'>>
 
 export interface SyncParams {
   client: SyncClient
@@ -473,6 +476,7 @@ export async function sync({
     moved: [],
     notices: [],
     reclassified: 0,
+    merged: [],
   }
 
   const remoteRecords = await client.mindMaps.getFullList({ signal })
@@ -804,10 +808,19 @@ export async function sync({
       }
 
       await ensureLocalFolder(localPath)
+      // Toute carte locale absente de la version reçue devient volante au lieu
+      // d'être perdue — voir `mergeCards`. Rien à fusionner pour un premier
+      // pull (`localCards === null`, rien n'existait avant).
+      const localCards = await loadMindMap(localPath)
+      const { cards: mergedCards, floatedCount } =
+        localCards === null ? { cards, floatedCount: 0 } : mergeCards(localCards, cards)
+      if (floatedCount > 0) {
+        result.merged.push({ fileId: record.file_id, path: record.path, floatedCount })
+      }
       // Le champ `type` de l'enregistrement fait foi : la copie locale est
       // réécrite avec lui, sans toucher au reste du `meta`.
       const applied = meta === null ? null : { ...meta, type: mapTypeOf(record.type) }
-      const serialized = serializeMindMap(applied, cards)
+      const serialized = serializeMindMap(applied, mergedCards)
       await writeTextFile(localPath, serialized)
       // `referencedAssets` lit la chaîne ÉCRITE (`serialized`), jamais la chaîne
       // reçue : ce sont les mêmes références, mais une seule est le fichier réel.

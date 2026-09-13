@@ -808,6 +808,8 @@ describe('sync — pull', () => {
 
   it('writes a new local file for a record authored by someone else', async () => {
     vi.mocked(scanFolder).mockResolvedValue([])
+    // Rien à fusionner : le fichier local n'existe pas encore.
+    vi.mocked(loadMindMap).mockResolvedValue(null)
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([record]) } as any })
 
     const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
@@ -823,6 +825,7 @@ describe('sync — pull', () => {
 
   it('pulls a record the current user authored when someone else changed it (a prof correction)', async () => {
     vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(loadMindMap).mockResolvedValue(null)
     const own = { ...record, author: 'eleve1' }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([own]) } as any })
 
@@ -870,6 +873,7 @@ describe('sync — pull', () => {
       assets: { getFullList: vi.fn().mockResolvedValue([asset]), upload: vi.fn(), download } as any,
     })
     vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(loadMindMap).mockResolvedValue(null)
 
     await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
 
@@ -904,6 +908,47 @@ describe('sync — pull', () => {
     expect(result.errors).toEqual([
       { fileId: 'file-2', message: 'un fichier local existe déjà à cet emplacement et n’est pas ce fichier synchronisé' },
     ])
+  })
+
+  it('floats a local card the incoming correction no longer has, instead of deleting it', async () => {
+    const corrected = {
+      ...record,
+      author: 'eleve1',
+      content: JSON.stringify({
+        meta: { id: 'file-2', author: 'eleve1', role: 'eleve', lastModified: '2026-01-01T00:00:00.000Z' },
+        cards: [{ id: 'root', level: 1, title: 'Racine', parentId: null, order: 0 }],
+      }),
+    }
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(exists).mockImplementation(async path => path === '/cours/b.zmap')
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ id: 'file-2', author: 'eleve1', role: 'eleve', lastModified: 'x' })
+    vi.mocked(loadMindMap).mockResolvedValue([
+      { id: 'root', level: 1, title: 'Racine', parentId: null, order: 0 },
+      { id: 'extra', level: 2, title: 'Ajoutée par l’élève', parentId: 'root', order: 0 },
+    ])
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([corrected]) } as any })
+
+    const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
+
+    const [, written] = vi.mocked(writeTextFile).mock.calls[0]
+    const writtenCards = JSON.parse(written as string).cards
+    expect(writtenCards).toEqual([
+      { id: 'root', level: 1, title: 'Racine', parentId: null, order: 0 },
+      { id: 'extra', level: 2, title: 'Ajoutée par l’élève', parentId: null, order: 0, detached: true },
+    ])
+    expect(result.merged).toEqual([{ fileId: 'file-2', path: 'b.zmap', floatedCount: 1 }])
+  })
+
+  it('reports no merge when the incoming correction already has every local card', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(exists).mockImplementation(async path => path === '/cours/b.zmap')
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ id: 'file-2', author: 'prof', role: 'prof', lastModified: 'x' })
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([record]) } as any })
+
+    const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
+
+    expect(result.merged).toEqual([])
   })
 })
 
@@ -1077,6 +1122,7 @@ describe('sync — reconciliation des chemins', () => {
     vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'chapitre.zmap', path: '/cours/chapitre.zmap' }])
     vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
     vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(loadMindMap).mockResolvedValue([])
     const remote: RemoteMindMapRecord = {
       id: 'rec-1',
       file_id: 'file-1',
@@ -1307,6 +1353,7 @@ describe('sync — push par champ', () => {
   it('remembers the path and the content hash after a pull, so the next run compares like with like', async () => {
     vi.mocked(scanFolder).mockResolvedValue([])
     vi.mocked(exists).mockResolvedValue(false)
+    vi.mocked(loadMindMap).mockResolvedValue(null)
     const content = JSON.stringify({ cards: [] })
     const client = fakeClient({
       mindMaps: {
@@ -1473,6 +1520,7 @@ describe('sync — classification', () => {
 
   it('re-applies the record s type to the file it pulls, and remembers it as the agreement', async () => {
     vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(loadMindMap).mockResolvedValue(null)
     const embedded = JSON.stringify({
       meta: { id: 'file-7', author: 'prof', role: 'prof', lastModified: '2026-01-01T00:00:00.000Z', type: 'default' },
       cards: [],
