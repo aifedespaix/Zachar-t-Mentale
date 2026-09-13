@@ -344,6 +344,7 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
 
         <CommandButton command="card.addFloating" icon={PictureInPicture2} />
         <CommandButton command="file.export" icon={Download} />
+        <CommandButton command="file.reveal" icon={FolderSearch} />
         <CommandButton command="app.quiz" icon={GraduationCap} className="toolbar-quiz--rainbow" />
 
         <span className="toolbar-separator" aria-hidden />

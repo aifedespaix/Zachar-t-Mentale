@@ -8,10 +8,11 @@ import {
   type ReactNode,
 } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { CloudSync, Eye, EyeOff, FolderPlus, FoldVertical, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, X } from 'lucide-react'
+import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { CloudSync, Eye, EyeOff, FolderPlus, FolderSearch, FoldVertical, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, ClipboardCopy, X } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
-import { ContextMenu, ContextMenuTrigger, ContextMenuContent } from '../ui/context-menu'
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '../ui/context-menu'
 import { CommandButton } from '../commands/CommandButton'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useSyncStore } from '../../state/useSyncStore'
@@ -284,6 +285,19 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
     const next = !showUnreadable
     setShowUnreadable(next)
     saveShowUnreadableFiles(next)
+  }
+
+  /** Opens the OS file explorer on the first configured folder — see `firstRoot` above. */
+  function handleRevealFirstRoot() {
+    if (firstRoot === undefined) return
+    void revealItemInDir(firstRoot.path).catch(error =>
+      setWorkspaceError(`Impossible d’ouvrir l’explorateur : ${describeError(error)}`)
+    )
+  }
+
+  function handleCopyFirstRootPath() {
+    if (firstRoot === undefined) return
+    void navigator.clipboard?.writeText(firstRoot.path).catch(() => {})
   }
 
   function handleRemoveRoot(path: string) {
@@ -768,7 +782,15 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
           </div>
         </ContextMenuTrigger>
         {firstRoot !== undefined && (
-          <ContextMenuContent>{folderCreation.menuItems}</ContextMenuContent>
+          <ContextMenuContent>
+            {folderCreation.menuItems}
+            <ContextMenuItem onSelect={handleRevealFirstRoot}>
+              <FolderSearch size={14} /> Afficher dans l’explorateur
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={handleCopyFirstRootPath}>
+              <ClipboardCopy size={14} /> Copier le chemin
+            </ContextMenuItem>
+          </ContextMenuContent>
         )}
       </ContextMenu>
     </TooltipProvider>

@@ -1,6 +1,7 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useEffect, useRef, useState } from 'react'
-import { Folder, FolderOpen, FolderInput, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, CloudUpload, CloudOff, Check, Tag } from 'lucide-react'
+import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { Folder, FolderOpen, FolderInput, FolderSearch, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, ClipboardCopy, CloudUpload, CloudOff, Check, Tag } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
@@ -70,7 +71,7 @@ function isInstantToggleTarget(target: EventTarget | null): boolean {
  * destinations discoverable on a long tree, where the folder you want may be
  * scrolled out of sight and therefore impossible to drag onto.
  */
-function MoveToSubmenu({
+export function MoveToSubmenu({
   destinations,
   onSelect,
 }: {
@@ -332,6 +333,18 @@ export function FileTreeRow({
     await refreshFolder(parentPath)
   }
 
+  /** Opens the OS file explorer with this row's file or folder selected. */
+  function revealInExplorer() {
+    void revealItemInDir(node.path).catch(error =>
+      setWorkspaceError(`Impossible d’ouvrir l’explorateur : ${describeError(error)}`)
+    )
+  }
+
+  /** Best-effort: the system clipboard needs a secure context and a user gesture. */
+  function copyPath() {
+    void navigator.clipboard?.writeText(node.path).catch(() => {})
+  }
+
   async function openExport() {
     let raw: Card[] | null
     try {
@@ -520,6 +533,12 @@ export function FileTreeRow({
             {!isRoot && moveDestinations.length > 0 && (
               <MoveToSubmenu destinations={moveDestinations} onSelect={moveTo} />
             )}
+            <ContextMenuItem onSelect={revealInExplorer}>
+              <FolderSearch size={14} /> Afficher dans l’explorateur
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={copyPath}>
+              <ClipboardCopy size={14} /> Copier le chemin
+            </ContextMenuItem>
             {!isRoot && (
               <>
                 <ContextMenuSeparator />
@@ -675,6 +694,12 @@ export function FileTreeRow({
             {moveDestinations.length > 0 && (
               <MoveToSubmenu destinations={moveDestinations} onSelect={moveTo} />
             )}
+            <ContextMenuItem onSelect={revealInExplorer}>
+              <FolderSearch size={14} /> Afficher dans l’explorateur
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={copyPath}>
+              <ClipboardCopy size={14} /> Copier le chemin
+            </ContextMenuItem>
             <ContextMenuItem onSelect={openExport}>
               <Download size={14} /> Exporter
             </ContextMenuItem>

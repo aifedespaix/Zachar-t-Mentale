@@ -88,6 +88,15 @@ interface WorkspaceState {
    */
   collapseAllFolders: () => void
   setCurrentFile: (path: string | null) => void
+  /** Drops one entry from the empty-state's « ouverts récemment » list — not a filesystem delete. */
+  removeRecentFile: (path: string) => void
+  /**
+   * Follows a rename done from the empty-state's history list, which has no
+   * open file for `setCurrentFile` to already be tracking. Renaming from the
+   * TREE goes through `setCurrentFile`/`moveNode` instead, which cover this
+   * same list as a side effect of moving the open (or dragged) file.
+   */
+  renameRecentFile: (oldPath: string, newPath: string) => void
   setWorkspaceError: (message: string | null) => void
 }
 
@@ -309,6 +318,28 @@ export function createWorkspaceStore(): WorkspaceStore {
         const recentFiles = path === null ? state.recentFiles : withRecentFile(state.recentFiles, path, new Date().toISOString())
         saveSessionState({ currentFilePath: path, expandedPaths: [...state.expandedPaths], recentFiles })
         return { currentFilePath: path, recentFiles }
+      }),
+    removeRecentFile: path =>
+      set(state => {
+        const recentFiles = state.recentFiles.filter(entry => entry.path !== path)
+        saveSessionState({
+          currentFilePath: state.currentFilePath,
+          expandedPaths: [...state.expandedPaths],
+          recentFiles,
+        })
+        return { recentFiles }
+      }),
+    renameRecentFile: (oldPath, newPath) =>
+      set(state => {
+        const recentFiles = state.recentFiles.map(entry =>
+          entry.path === oldPath ? { ...entry, path: newPath } : entry
+        )
+        saveSessionState({
+          currentFilePath: state.currentFilePath,
+          expandedPaths: [...state.expandedPaths],
+          recentFiles,
+        })
+        return { recentFiles }
       }),
     setWorkspaceError: message => set({ workspaceError: message }),
   }))

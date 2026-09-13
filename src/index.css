@@ -1053,7 +1053,8 @@
   color: inherit;
   cursor: pointer;
 }
-.recent-files__row:hover {
+.recent-files__row:hover,
+.recent-files__row[data-state="open"] {
   background: color-mix(in oklch, var(--foreground), transparent 93%);
 }
 .recent-files__row:focus-visible {
