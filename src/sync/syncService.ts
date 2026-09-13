@@ -762,9 +762,18 @@ export async function sync({
     if (result.cancelled) break
   }
 
-  /** Everything the pull pass does for ONE remote record. */
+  /**
+   * Everything the pull pass does for ONE remote record.
+   *
+   * No author guard here on purpose: `canEditContent` (see `planPush`) lets a
+   * prof push a correction under the ELÈVE's own `author`, so authorship can
+   * no longer stand in for "nobody else could have changed this". The check
+   * right below already answers the right question — has the SERVER moved
+   * since I last saw it — using the pre-push snapshot `remoteRecords` was
+   * built from at the top of `sync()`, which is why a file I just pushed
+   * myself, in this very run, is already caught by it.
+   */
   async function pullOne(record: RemoteMindMapRecord): Promise<void> {
-    if (record.author === currentUser) return
     const known = entries[record.file_id]
     if (known && known.lastSyncedUpdated >= record.updated) return
 

@@ -302,8 +302,10 @@ describe('surveySyncFolder', () => {
       entries: { b: { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'x' } },
     })
 
-    // 'a' never pushed; 'b' unchanged; 'c' is not ours; 'neuve' has no identity.
-    expect(survey.pending).toEqual(['/cours/a.zmap'])
+    // 'a' never pushed; 'b' unchanged; 'c' is not this prof's, but a prof may
+    // correct any content (canEditContent), so a sync would now send it;
+    // 'neuve' has no identity.
+    expect(survey.pending).toEqual(['/cours/a.zmap', '/cours/c.zmap'])
     expect(survey.localOnly).toEqual(['/cours/neuve.zmap'])
   })
 
@@ -437,7 +439,7 @@ describe('sync — push', () => {
     expect(result.pushed).toBe(0)
   })
 
-  it('never pushes a file authored by someone else, or one never synced (meta: null)', async () => {
+  it('never pushes a file authored by someone else when I am not a prof, or one never synced (meta: null)', async () => {
     vi.mocked(scanFolder).mockResolvedValue([
       { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
       { type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' },
@@ -447,7 +449,9 @@ describe('sync — push', () => {
     )
     const client = fakeClient()
 
-    const result = await runSync({ client, state: emptySyncState() })
+    // Un élève : « auteur ou prof » lui refuse le contenu d'autrui. (Pour un
+    // prof, ce même fichier est une correction à pousser — voir planPush.)
+    const result = await runSync({ client, state: emptySyncState(), currentUser: 'eleve1', currentRole: 'eleve' })
 
     expect(client.mindMaps.create).not.toHaveBeenCalled()
     expect(result.pushed).toBe(0)
@@ -581,7 +585,8 @@ describe('sync — journal des transferts', () => {
     vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, author: 'quelqu-un-dautre' })
     const client = fakeClient()
 
-    const result = await runSync({ client, state: emptySyncState() })
+    // Un élève ne peut pas écrire le contenu d'autrui : le fichier reste sauté.
+    const result = await runSync({ client, state: emptySyncState(), currentUser: 'eleve1', currentRole: 'eleve' })
 
     expect(result.transferred).toEqual([])
   })
@@ -816,12 +821,24 @@ describe('sync — pull', () => {
     expect(result.pulled).toBe(1)
   })
 
-  it('never pulls a record authored by the current user', async () => {
+  it('pulls a record the current user authored when someone else changed it (a prof correction)', async () => {
     vi.mocked(scanFolder).mockResolvedValue([])
     const own = { ...record, author: 'eleve1' }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([own]) } as any })
 
     const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state: emptySyncState() })
+
+    expect(writeTextFile).toHaveBeenCalledTimes(1)
+    expect(result.pulled).toBe(1)
+  })
+
+  it('does not re-pull a record the current user authored when nothing changed since last sync', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const own = { ...record, author: 'eleve1' }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([own]) } as any })
+    const state = memory({ 'file-2': { lastSyncedModified: 'x', lastSyncedUpdated: own.updated } })
+
+    const result = await sync({ client, currentUser: 'eleve1', currentRole: 'eleve', serverUrl: 'https://pb.test', syncFolderPath: '/cours', state })
 
     expect(writeTextFile).not.toHaveBeenCalled()
     expect(result.pulled).toBe(0)
@@ -995,9 +1012,12 @@ describe('sync — reconciliation des chemins', () => {
     }
     const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
 
+    // lastSyncedUpdated est à jour : la passe de pull saute l'enregistrement,
+    // ce test ne juge que la réconciliation de chemin (le garde d'auteur n'est
+    // plus là pour le faire à sa place — voir pullOne).
     const result = await runSync({
       client,
-      state: memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0', lastSyncedPath: 'a.zmap' } }),
+      state: memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u1', lastSyncedPath: 'a.zmap' } }),
     })
 
     expect(rename).not.toHaveBeenCalled()
@@ -1025,12 +1045,17 @@ describe('sync — reconciliation des chemins', () => {
         mindMaps: {
           getFullList: vi.fn().mockResolvedValue([
             { id: 'rec-1', file_id: 'file-1', author: 'aife', path: unsafePath, content: '[]', updated: 'u1' },
-            { id: 'rec-2', file_id: 'file-2', author: 'aife', path: 'b.zmap', content: '[]', updated: 'u1' },
+            // La réponse du mock `update` porte cette date : l'entrée de cache
+            // écrite par le push doit rester >= à elle, sinon la passe de pull
+            // (sans garde d'auteur) relirait ce fichier aussitôt après l'avoir poussé.
+            { id: 'rec-2', file_id: 'file-2', author: 'aife', path: 'b.zmap', content: '[]', updated: '2026-01-02 00:00:00.000Z' },
           ]),
         } as any,
       })
+      // Les deux enregistrements sont à jour dans le cache : seule la
+      // réconciliation de chemin s'exprime ici, la passe de pull les saute.
       const state = memory({
-        'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0', lastSyncedPath: 'a.zmap' },
+        'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u1', lastSyncedPath: 'a.zmap' },
         'file-2': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u9', lastSyncedPath: 'b.zmap' },
       })
 
@@ -1423,10 +1448,12 @@ describe('sync — classification', () => {
         ]),
       } as any,
     })
+    // Le cache a déjà vu u2 : la passe de pull saute l'enregistrement et seul
+    // le reclassement doit s'exprimer — sans réécrire le contenu.
     const state = memory({
       'file-1': {
         lastSyncedModified: AIFE.lastModified,
-        lastSyncedUpdated: 'u1',
+        lastSyncedUpdated: 'u2',
         lastSyncedPath: 'a.zmap',
         lastSyncedContentHash: await hashContent('[]'),
         lastSyncedType: 'default',
