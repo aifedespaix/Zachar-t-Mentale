@@ -106,7 +106,13 @@ export function QcmDialog({
             ) : (
               <Network size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             )}
-            {hintNode ? <div style={{ minWidth: 0 }}>{hintNode}</div> : <span>{hint ?? noHintNote}</span>}
+            {/* One scroll box for both the plain hint and the rich `hintNode`,
+                so a whole card definition or a table scrolls inside the box
+                instead of growing the dialog past the viewport. The icon stays
+                outside it and pins to the top. */}
+            <div className="qcm-hint-scroll" style={{ minWidth: 0 }}>
+              {hintNode ?? <span>{hint ?? noHintNote}</span>}
+            </div>
           </div>
         )}
 
@@ -119,6 +125,8 @@ export function QcmDialog({
               <button
                 key={option}
                 type="button"
+                className="qcm-option"
+                data-qcm-letter={LETTERS[index]}
                 disabled={chosen !== null}
                 onClick={() => handleChoose(option)}
                 style={{
@@ -128,31 +136,42 @@ export function QcmDialog({
                   textAlign: 'left',
                   padding: '12px 14px',
                   borderRadius: 10,
-                  border: `2px solid ${revealCorrect ? '#16a34a' : revealWrong ? '#dc2626' : 'var(--border)'}`,
-                  background: 'var(--background)',
+                  // The idle border/tint come from `.qcm-option` (one colour per
+                  // letter); an answered option overrides them inline, since the
+                  // green/red verdict is the only colour that outranks the letter.
+                  ...(revealCorrect
+                    ? { borderColor: '#16a34a', background: 'color-mix(in oklch, #16a34a, transparent 90%)' }
+                    : revealWrong
+                      ? { borderColor: '#dc2626', background: 'color-mix(in oklch, #dc2626, transparent 90%)' }
+                      : {}),
                   opacity: chosen !== null && !revealCorrect && !revealWrong ? 0.55 : 1,
                   cursor: chosen === null ? 'pointer' : 'default',
                 }}
               >
                 <span
+                  className="qcm-option__badge"
                   style={{
                     flexShrink: 0,
                     width: 28,
                     height: 28,
                     borderRadius: 8,
-                    border: `2px solid ${revealCorrect ? '#16a34a' : 'var(--border)'}`,
-                    background: revealCorrect ? '#16a34a' : 'var(--muted)',
-                    color: revealCorrect ? '#fff' : 'inherit',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontWeight: 700,
                     fontSize: 13,
+                    ...(revealCorrect
+                      ? { background: '#16a34a', borderColor: '#16a34a', color: '#fff' }
+                      : revealWrong
+                        ? { background: '#dc2626', borderColor: '#dc2626', color: '#fff' }
+                        : {}),
                   }}
                 >
                   {revealCorrect ? <Check size={16} /> : revealWrong ? <X size={16} /> : LETTERS[index]}
                 </span>
-                <span style={{ minWidth: 0, overflowX: 'auto' }}>{renderOption ? renderOption(option) : option}</span>
+                <span className="qcm-option__content" style={{ minWidth: 0 }}>
+                  {renderOption ? renderOption(option) : option}
+                </span>
               </button>
             )
           })}

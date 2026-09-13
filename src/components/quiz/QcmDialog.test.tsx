@@ -171,3 +171,37 @@ describe('rich option rendering', () => {
     expect(screen.getByText('20/100 × 425')).toBeInTheDocument()
   })
 })
+
+describe('readable long content and per-letter colour', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  const base = {
+    open: true,
+    heading: 'T',
+    correctOption: 'Bonne',
+    distractors: ['Fausse A', 'Fausse B', 'Fausse C'],
+    onAnswer: () => {},
+    onCancel: () => {},
+  }
+
+  it('wraps a plain-text description in the scrollable box, so a long one cannot grow the dialog past its cap', () => {
+    render(<QcmDialog {...base} hint="Une définition interminable" />)
+
+    expect(screen.getByText(/définition interminable/i).closest('.qcm-hint-scroll')).not.toBeNull()
+  })
+
+  it('wraps a richly-rendered description in the same scrollable box', () => {
+    render(<QcmDialog {...base} hintNode={<span data-testid="rich-hint">TABLEAU</span>} />)
+
+    expect(screen.getByTestId('rich-hint').closest('.qcm-hint-scroll')).not.toBeNull()
+  })
+
+  it('tags every option with its own letter, in reading order, through the stylable class', () => {
+    render(<QcmDialog {...base} />)
+
+    const buttons = screen.getAllByRole('button').filter(button => button.classList.contains('qcm-option'))
+    expect(buttons).toHaveLength(4)
+    expect(buttons.map(button => button.getAttribute('data-qcm-letter'))).toEqual(['A', 'B', 'C', 'D'])
+  })
+})
