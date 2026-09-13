@@ -280,6 +280,56 @@ describe('the language keyboard help', () => {
 
     expect(screen.getByRole('button', { name: /choisir une langue/i })).toBeDisabled()
   })
+
+  it('shows both signs on the button, and no longer offers the closing one alone', async () => {
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'text', text: '' }])
+
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+
+    expect(screen.getByRole('button', { name: /point d’interrogation inversé/i })).toHaveTextContent('¿ ?')
+    expect(screen.queryByRole('button', { name: /guillemet fermant/i })).not.toBeInTheDocument()
+  })
+
+  it('writes the closing sign itself, and leaves the caret between the two', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: '' }])
+
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
+
+    expect((latest()![0] as { text: string }).text).toBe('¿?')
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    expect(field.selectionStart).toBe(1)
+  })
+
+  it('surrounds the selected text instead of writing over it', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'Cómo estás' }])
+
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    field.focus()
+    field.setSelectionRange(0, 10)
+
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
+
+    expect((latest()![0] as { text: string }).text).toBe('¿Cómo estás?')
+  })
+
+  it('spaces the guillemets inside, unlike the inverted signs', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: '' }])
+
+    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: /guillemet ouvrant/i }))
+
+    expect((latest()![0] as { text: string }).text).toBe('«  »')
+  })
 })
 
 describe('inserting an image', () => {

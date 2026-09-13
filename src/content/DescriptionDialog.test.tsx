@@ -86,8 +86,9 @@ describe('DescriptionDialog', () => {
     await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
 
     // Appended at the caret the dialog opened on (the end of the text), not
-    // replacing it: the palette never took focus out of the field.
-    expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Como estas¿' }])
+    // replacing it: the palette never took focus out of the field. The inverted
+    // sign brings its closing partner, so the sentence is closed already.
+    expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Como estas¿?' }])
   })
 
   it('saves the edited blocks and closes', async () => {

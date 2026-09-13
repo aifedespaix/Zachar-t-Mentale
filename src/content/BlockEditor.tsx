@@ -5,7 +5,7 @@ import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle } from './MathFieldEditor'
 import { MathPalette } from './MathPalette'
 import { LanguageHelpButton, LanguageHelpPanel } from './LanguageHelpPalette'
-import type { LanguageId } from './languageHelp'
+import { insertCharacter, type LanguageId, type SpecialCharacter } from './languageHelp'
 
 /**
  * Editing modes the selector offers. `image` is deliberately absent: an image
@@ -230,13 +230,15 @@ export function BlockEditor({
   const languageTargetIndex = active?.kind === 'text' ? activeIndex : firstTextIndex
 
   /**
-   * Inserts a fragment at the caret of the block being written.
+   * Inserts a palette character at the caret of the block being written.
    *
    * A field that is not the focused element has no caret to respect — that is
-   * the keyboard path, where focus is on the palette button — so the fragment
-   * goes to the end of the text: degraded, never a lost click.
+   * the keyboard path, where focus is on the palette button — so the character
+   * goes to the end of the text: degraded, never a lost click. What the
+   * character writes (its closing partner, the padding, where the caret lands)
+   * is the character set's business; see `insertCharacter`.
    */
-  function insertText(text: string) {
+  function insertText(character: SpecialCharacter) {
     const index = languageTargetIndex
     if (index < 0) return
     const block = blocksRef.current[index]
@@ -247,9 +249,11 @@ export function BlockEditor({
     const start = caret === null ? block.text.length : caret.selectionStart ?? block.text.length
     const end = caret === null ? start : caret.selectionEnd ?? start
 
-    const next = block.text.slice(0, start) + text + block.text.slice(end)
-    onChange(blocksRef.current.map((existing, i) => (i === index ? { kind: 'text', text: next } : existing)))
-    pendingCaret.current = { index, position: start + text.length }
+    const insertion = insertCharacter(block.text, start, end, character)
+    onChange(
+      blocksRef.current.map((existing, i) => (i === index ? { kind: 'text', text: insertion.text } : existing))
+    )
+    pendingCaret.current = { index, position: insertion.caret }
     setActiveIndex(index)
   }
 

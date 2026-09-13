@@ -1,6 +1,6 @@
 import { useId } from 'react'
 import { Languages } from 'lucide-react'
-import { LANGUAGES, languageHelp, type LanguageId } from './languageHelp'
+import { LANGUAGES, languageHelp, type LanguageId, type SpecialCharacter } from './languageHelp'
 
 /** Small enough to sit inside a toolbar button without enlarging it. */
 const FLAG_WIDTH = 18
@@ -110,7 +110,18 @@ export interface LanguageHelpPanelProps {
   language: LanguageId | null
   onChooseLanguage: (id: LanguageId) => void
   /** Inserts at the caret of the text block being written. */
-  onInsert: (text: string) => void
+  onInsert: (character: SpecialCharacter) => void
+}
+
+/**
+ * What the button shows: the closing sign the click brings along, so the
+ * palette reads as the text it writes — [¿ ?], [« »] — rather than a lone ¿
+ * whose partner has to be found among the other buttons.
+ */
+function faceOf(character: SpecialCharacter): string {
+  return character.closesWith === undefined
+    ? character.char
+    : `${character.char} ${character.closesWith}`
 }
 
 /**
@@ -145,6 +156,11 @@ export function LanguageHelpPanel({ language, onChooseLanguage, onInsert }: Lang
               type="button"
               aria-label={`Langue : ${entry.label}`}
               aria-pressed={active}
+              // Keeps the caret — and any selection — in the text being
+              // written. The character clicked next is inserted AT that caret,
+              // and choosing a language is a step of writing a sentence, not a
+              // reason to lose the place in it.
+              onMouseDown={event => event.preventDefault()}
               onClick={() => onChooseLanguage(entry.id)}
               style={{
                 display: 'flex',
@@ -195,7 +211,7 @@ export function LanguageHelpPanel({ language, onChooseLanguage, onInsert }: Lang
                   // left to `onClick` so the keyboard (Enter/Space, which never
                   // fire a mousedown) reaches every character too.
                   onMouseDown={event => event.preventDefault()}
-                  onClick={() => onInsert(character.char)}
+                  onClick={() => onInsert(character)}
                   style={{
                     minWidth: 28,
                     height: 28,
@@ -209,7 +225,7 @@ export function LanguageHelpPanel({ language, onChooseLanguage, onInsert }: Lang
                     color: 'inherit',
                   }}
                 >
-                  {character.char}
+                  {faceOf(character)}
                 </button>
               ))}
             </div>

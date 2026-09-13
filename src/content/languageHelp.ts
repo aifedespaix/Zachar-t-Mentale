@@ -19,6 +19,19 @@ export interface SpecialCharacter {
    * app — the pupil is French, it is the language being LEARNED that changes.
    */
   label: string
+  /**
+   * The sign that closes this one, written in the same click: the pair lands
+   * the way parentheses do, caret in the middle, and a selection is surrounded
+   * rather than overwritten. Absent for a sign that stands alone — an
+   * apostrophe has no partner to close it.
+   */
+  closesWith?: string
+  /**
+   * Whether the pair is padded with a space on the inside. True for the French
+   * guillemets (« texte »), false for the inverted signs, which hug their
+   * sentence (¿texto?).
+   */
+  spaced?: boolean
 }
 
 /** Characters grouped under a heading, so a palette stays scannable. */
@@ -47,9 +60,8 @@ export const LANGUAGES: LanguageHelp[] = [
         name: 'Apostrophe et guillemets',
         characters: [
           { char: '’', label: 'Apostrophe anglaise (don’t)' },
-          { char: '‘', label: 'Guillemet simple ouvrant' },
-          { char: '“', label: 'Guillemet double ouvrant' },
-          { char: '”', label: 'Guillemet double fermant' },
+          { char: '‘', label: 'Guillemet simple ouvrant', closesWith: '’' },
+          { char: '“', label: 'Guillemet double ouvrant', closesWith: '”' },
         ],
       },
       {
@@ -81,10 +93,9 @@ export const LANGUAGES: LanguageHelp[] = [
       {
         name: 'Ponctuation inversée',
         characters: [
-          { char: '¿', label: 'Point d’interrogation inversé' },
-          { char: '¡', label: 'Point d’exclamation inversé' },
-          { char: '«', label: 'Guillemet ouvrant' },
-          { char: '»', label: 'Guillemet fermant' },
+          { char: '¿', label: 'Point d’interrogation inversé', closesWith: '?' },
+          { char: '¡', label: 'Point d’exclamation inversé', closesWith: '!' },
+          { char: '«', label: 'Guillemet ouvrant', closesWith: '»', spaced: true },
         ],
       },
       {
@@ -103,6 +114,47 @@ export const LANGUAGES: LanguageHelp[] = [
     ],
   },
 ]
+
+/** The text a palette click writes over a field, and where the caret lands. */
+export interface Insertion {
+  text: string
+  caret: number
+}
+
+/**
+ * Writes one palette character over the span `[start, end)` of `text`.
+ *
+ * A paired sign behaves like a parenthesis: it is written together with its
+ * closing partner, and the caret goes BETWEEN the two, so the sentence is
+ * typed inside them and never has to be closed by hand. A selection is
+ * surrounded instead of replaced — it is text the user already has, and the
+ * whole point of selecting it was to keep it.
+ *
+ * `spaced` decides, per pair, whether the inside is padded. A spaced pair
+ * around nothing is `«  »` with the caret between the two spaces, so what is
+ * typed next lands inside them: the double space only exists while empty.
+ */
+export function insertCharacter(
+  text: string,
+  start: number,
+  end: number,
+  character: SpecialCharacter
+): Insertion {
+  const before = text.slice(0, start)
+  const after = text.slice(end)
+
+  if (character.closesWith === undefined) {
+    return { text: before + character.char + after, caret: start + character.char.length }
+  }
+
+  const selected = text.slice(start, end)
+  const pad = character.spaced === true ? ' ' : ''
+  const inserted = character.char + pad + selected + pad + character.closesWith
+  const caret =
+    selected === '' ? start + character.char.length + pad.length : start + inserted.length
+
+  return { text: before + inserted + after, caret }
+}
 
 /** The help set of one language. `id` is a closed union, so this always resolves. */
 export function languageHelp(id: LanguageId): LanguageHelp {
