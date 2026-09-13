@@ -143,14 +143,24 @@ describe('planPush', () => {
     })
   })
 
-  it('never sends the CONTENT of a map we do not author, however new it looks', () => {
+  it('refuses an eleve the content of a map they do not own', () => {
+    const scan = planPush({
+      meta: { ...AIFE, author: 'aife', lastModified: '2027-01-01T00:00:00.000Z' },
+      relPath: 'a.zmap',
+      currentUser: ELEVE_USER,
+      entry: known,
+    })
+    expect(scan.content).toBe(false)
+  })
+
+  it('lets a prof push the CONTENT of an eleve s map — a correction', () => {
     const scan = planPush({
       meta: { ...AIFE, author: 'eleve1', lastModified: '2027-01-01T00:00:00.000Z' },
       relPath: 'a.zmap',
       currentUser: AIFE_USER,
       entry: known,
     })
-    expect(scan.content).toBe(false)
+    expect(scan.content).toBe(true)
   })
 
   it('lets a prof push the PATH of an eleve s map — that is how a class folder follows', () => {

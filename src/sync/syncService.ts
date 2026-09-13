@@ -9,7 +9,7 @@ import { fileNameOf, isSameFilePath, parentDirOf, separatorOf } from '../persist
 import type { FileTreeNode } from '../types/workspace'
 import type { MindMapMeta, SyncUser, UserRole } from '../types/card'
 import { serverStateOf, type SyncState, type SyncStateEntry } from '../persistence/syncState'
-import { canClassify, canReorder } from './permissions'
+import { canClassify, canEditContent, canReorder } from './permissions'
 import { mapTypeOf } from '../types/mapType'
 import { hashContent } from './contentHash'
 import { reconcilePath, seedLastSyncedPath } from './pathReconciliation'
@@ -177,9 +177,11 @@ export interface PushPlan {
  * Les corriger demanderait une requête réseau de plus au compteur, que la spec
  * refuse — ces deux écarts d'un run ne la justifient pas.
  *
- * Le contenu n'appartient qu'à son auteur. Le chemin suit `canReorder` : son
- * auteur, ou un prof. Le type suit `canClassify` — la même règle, mais bornée
- * par ce que `lastSyncedType` permet de comparer.
+ * Le contenu suit `canEditContent` — son auteur, ou un prof, exactement comme
+ * `canReorder` pour le chemin et `canClassify` pour le type : un prof peut
+ * corriger le contenu d'un élève sans jamais en devenir l'auteur. Le chemin
+ * suit `canReorder`. Le type suit `canClassify` — bornée par ce que
+ * `lastSyncedType` permet de comparer.
  *
  * `lastSyncedPath` ABSENT veut dire « inconnu », pas « différent » : une entrée
  * migrée depuis la v1 n'en a pas, et la lire comme un déplacement ferait
@@ -195,7 +197,7 @@ export function planPush(params: {
 }): PushPlan {
   const { meta, relPath, currentUser, entry } = params
   const content =
-    meta.author === currentUser.username && (entry === undefined || entry.lastSyncedModified < meta.lastModified)
+    canEditContent(meta, currentUser) && (entry === undefined || entry.lastSyncedModified < meta.lastModified)
   // Entrée absente : l'enregistrement n'existe pas encore, et le `create` qui
   // s'ensuit porte le chemin de toute façon. Demander `path: true` ici n'y
   // changerait rien — ce drapeau ne décide que d'un `update({ path })`, et il
