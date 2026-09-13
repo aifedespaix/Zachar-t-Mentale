@@ -136,6 +136,13 @@ export interface SyncParams {
   syncFolderPath: string
   state: SyncState
   /**
+   * Le chemin ABSOLU du fichier actuellement chargé dans le canevas, s'il y en
+   * a un. Un pull ne l'écrase jamais, quel que soit `lastSyncedUpdated` — le
+   * réécrire sous une édition en cours romprait la garantie qu'une correction
+   * ne fait jamais perdre le travail en train de se faire.
+   */
+  openFilePath?: string
+  /**
    * Checked between two files, and handed to PocketBase so a slow request can be
    * cut short as well. An aborted run returns normally, with `cancelled: true`.
    */
@@ -462,6 +469,7 @@ export async function sync({
   serverUrl,
   syncFolderPath,
   state,
+  openFilePath,
   signal,
   onProgress,
 }: SyncParams): Promise<SyncResult> {
@@ -789,6 +797,10 @@ export async function sync({
     try {
       const { meta, cards } = deserializeMindMap(record.content)
       const localPath = await join(syncFolderPath, record.path)
+      // Le fichier ouvert dans le canevas n'est JAMAIS réécrit par un pull, même
+      // si le serveur a bougé : une correction ne doit pas écraser une édition
+      // en cours. Il sera relu au prochain sync, une fois refermé.
+      if (isSameFilePath(localPath, openFilePath ?? '')) return
 
       // A locally-created file can already sit at the path a remote record
       // resolves to — most dangerously, one that has never been synced

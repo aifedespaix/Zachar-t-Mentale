@@ -20,6 +20,7 @@ import { surveySyncFolder, sync } from '../sync/syncService'
 import { logSyncEvent } from '../persistence/syncLog'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { createSyncStore, type SyncStore } from './useSyncStore'
+import { useWorkspaceStore } from './useWorkspaceStore'
 
 function fakePocketBase(authWithPassword: (username: string, password: string) => Promise<{ record: { username: string; role: string } }>) {
   let record: { username: string; role: string } | null = null
@@ -530,6 +531,27 @@ describe('useSyncStore', () => {
       .mock.calls.filter(call => call[0] === 'debug')
       .map(call => call[1])
     expect(debugLines).toEqual(['« b.zmap » : 1 carte(s) mise(s) de côté'])
+  })
+
+  it('passes the file currently open in the canvas so the pull cannot clobber it', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(sync).mockResolvedValue({ pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [], transferred: [] })
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+    useWorkspaceStore.setState({ currentFilePath: '/cours/ouvert.zmap' })
+
+    await store.getState().syncNow()
+
+    expect(sync).toHaveBeenCalledWith(expect.objectContaining({ openFilePath: '/cours/ouvert.zmap' }))
+  })
+
+  it('syncNow({trigger:"auto"}) stays silent when nothing is configured', async () => {
+    await store.getState().syncNow({ trigger: 'auto' })
+
+    expect(store.getState().error).toBeNull()
+    expect(sync).not.toHaveBeenCalled()
   })
 
   it('a background run leaves the failure on screen alone; a manual one starts clean', async () => {

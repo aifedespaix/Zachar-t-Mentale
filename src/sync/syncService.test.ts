@@ -950,6 +950,43 @@ describe('sync — pull', () => {
 
     expect(result.merged).toEqual([])
   })
+
+  it('never pulls into the file currently open in the canvas', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(loadMindMap).mockResolvedValue(null)
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([record]) } as any })
+
+    const result = await sync({
+      client,
+      currentUser: 'eleve1',
+      currentRole: 'eleve',
+      serverUrl: 'https://pb.test',
+      syncFolderPath: '/cours',
+      state: emptySyncState(),
+      openFilePath: '/cours/b.zmap',
+    })
+
+    expect(writeTextFile).not.toHaveBeenCalled()
+    expect(result.pulled).toBe(0)
+  })
+
+  it('pulls normally when the open file is a different one', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(loadMindMap).mockResolvedValue(null)
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([record]) } as any })
+
+    const result = await sync({
+      client,
+      currentUser: 'eleve1',
+      currentRole: 'eleve',
+      serverUrl: 'https://pb.test',
+      syncFolderPath: '/cours',
+      state: emptySyncState(),
+      openFilePath: '/cours/autre.zmap',
+    })
+
+    expect(result.pulled).toBe(1)
+  })
 })
 
 describe('sync — reconciliation des chemins', () => {

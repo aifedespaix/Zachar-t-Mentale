@@ -10,6 +10,7 @@ import { logSyncEvent } from '../persistence/syncLog'
 import { createSyncClient } from '../sync/pocketBaseAdapter'
 import { surveySyncFolder, sync, type SyncResult } from '../sync/syncService'
 import { syncResultLabel } from '../sync/syncResultLabel'
+import { useWorkspaceStore } from './useWorkspaceStore'
 
 /** Who asked for a run: only a background one is allowed to stay quiet about a failure. */
 export type SyncTrigger = 'manual' | 'auto'
@@ -325,7 +326,12 @@ export function createSyncStore(): SyncStore {
         const { serverUrl, syncFolderPath, currentUser } = get()
         if (syncFolderPath === null || currentUser === null) {
           const message = 'Connectez-vous et choisissez un dossier de synchronisation avant de synchroniser.'
-          reportFailure(message, trigger)
+          // Un déclenchement MANUEL (le bouton) doit dire pourquoi rien ne se
+          // passe. Un déclenchement AUTOMATIQUE ne doit pas afficher de bannière
+          // pour un compte qui n'utilise simplement pas la synchro — c'est le
+          // cas normal d'un appel qui, désormais, part aussi à la fermeture
+          // d'un fichier, que la synchro soit configurée ou non.
+          if (trigger === 'manual') reportFailure(message, trigger)
           // Logged rather than dropped: "I clicked and nothing happened" is the
           // report this line answers.
           await logSyncEvent('info', `synchronisation ignorée : ${message}`)
@@ -355,6 +361,7 @@ export function createSyncStore(): SyncStore {
               serverUrl,
               syncFolderPath,
               state,
+              openFilePath: useWorkspaceStore.getState().currentFilePath ?? undefined,
               signal: controller.signal,
               onProgress: (done, total) => set({ progress: { done, total } }),
             })
