@@ -18,11 +18,11 @@ import {
   PanelLeftClose,
   PanelRightClose,
   PenLine,
+  PictureInPicture2,
   Redo2,
   RefreshCw,
   Save,
   Settings,
-  Sparkles,
   Sun,
   Trash2,
   Undo2,
@@ -330,13 +330,19 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
 
         <span className="toolbar-separator" aria-hidden />
 
-        <CommandButton command="file.new" icon={FilePlus} />
+        <CommandButton command="file.close" icon={X} />
+        <CommandButton
+          command="file.new"
+          icon={FilePlus}
+          variant={hasFile ? 'outline' : 'default'}
+          className={hasFile ? undefined : 'toolbar-new--invite'}
+        />
         <CommandButton command="edit.undo" icon={Undo2} />
         <CommandButton command="edit.redo" icon={Redo2} />
 
         <span className="toolbar-separator" aria-hidden />
 
-        <CommandButton command="card.addFloating" icon={Sparkles} />
+        <CommandButton command="card.addFloating" icon={PictureInPicture2} />
         <CommandButton command="file.export" icon={Download} />
         <CommandButton command="app.quiz" icon={GraduationCap} className="toolbar-quiz--rainbow" />
 

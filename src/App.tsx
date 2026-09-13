@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MindMapCanvas } from './components/MindMapCanvas'
 import { CanvasErrorBoundary } from './components/CanvasErrorBoundary'
 import { CorruptedMapDialog } from './components/CorruptedMapDialog'
@@ -30,6 +30,10 @@ import { mimeForPath } from './content/pickImage'
 import { contentOf } from './content/blocks'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { AppToolbar } from './components/toolbar/AppToolbar'
+import { BootScreen } from './components/BootScreen'
+import { AnimatedLogo } from './components/AnimatedLogo'
+import { RecentFilesList } from './components/RecentFilesList'
+import { collectMindMapPaths } from './persistence/fileTree'
 import { useAppearanceSettingsStore } from './state/useAppearanceSettingsStore'
 import { useShortcutSettingsStore } from './state/useShortcutSettingsStore'
 import { useCardSelectionStore } from './state/useCardSelectionStore'
@@ -55,6 +59,14 @@ interface PendingRepair {
 const MAX_REPAIR_ATTEMPTS = 100
 
 /**
+ * The boot screen's floor: on a fast disk `init` can resolve almost
+ * instantly, which would turn the animation into an unreadable flash. This
+ * keeps it on screen long enough to actually register, whatever the real
+ * load time was.
+ */
+const BOOT_SCREEN_MIN_DURATION_MS = 1500
+
+/**
  * The first « [Nom] (Réparée).zmap » that does not exist yet. A repair must
  * never overwrite anything — neither the corrupt original nor an earlier
  * repaired copy the user may have already worked in.
@@ -73,6 +85,15 @@ function App() {
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setCurrentFile = useWorkspaceStore(s => s.setCurrentFile)
   const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
+  const workspaceInitializing = useWorkspaceStore(s => s.initializing)
+  const recentFiles = useWorkspaceStore(s => s.recentFiles)
+  const rootFolders = useWorkspaceStore(s => s.rootFolders)
+  // A file gone from every scanned tree — moved or deleted outside the app —
+  // must not leave a dead row on the empty-state screen.
+  const openableRecentFiles = useMemo(() => {
+    const existing = collectMindMapPaths(rootFolders.flatMap(f => f.tree))
+    return recentFiles.filter(file => existing.has(file.path))
+  }, [recentFiles, rootFolders])
   const quizActive = useQuizStore(s => s.active)
   const [saveFailed, setSaveFailed] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -210,6 +231,13 @@ function App() {
     useShortcutSettingsStore.getState().init()
     useSyncStore.getState().init()
   }, [])
+
+  const [bootFloorElapsed, setBootFloorElapsed] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setBootFloorElapsed(true), BOOT_SCREEN_MIN_DURATION_MS)
+    return () => clearTimeout(timer)
+  }, [])
+  const showBootScreen = workspaceInitializing || !bootFloorElapsed
 
   /**
    * Open fiches belong to the map that is open, not to the application.
@@ -371,6 +399,7 @@ function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
+      {showBootScreen && <BootScreen />}
       {/*
         The file tree is gone for the duration of a quiz. Leaving it there let
         the user switch mind maps mid-quiz — which silently answers nothing,
@@ -481,12 +510,42 @@ function App() {
               </CanvasErrorBoundary>
             </QuizFrame>
           ) : currentFilePath ? (
-            <div style={{ padding: 24, color: 'var(--muted-foreground)' }}>
-              Ouverture de {currentFileName}…
+            <div
+              style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 20,
+                padding: 24,
+                textAlign: 'center',
+              }}
+            >
+              <AnimatedLogo mode="draw-fade" size={120} />
+              <p style={{ margin: 0, maxWidth: 380, color: 'var(--muted-foreground)', fontSize: 14, lineHeight: 1.5 }}>
+                Ouverture de {currentFileName}…
+              </p>
             </div>
           ) : (
-            <div style={{ padding: 24, color: 'var(--muted-foreground)' }}>
-              Aucun fichier ouvert. Sélectionnez ou créez une carte mentale dans la barre latérale.
+            <div
+              style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 20,
+                padding: 24,
+                textAlign: 'center',
+              }}
+            >
+              <AnimatedLogo mode="draw-pulse" size={openableRecentFiles.length > 0 ? 120 : 160} />
+              <p style={{ margin: 0, maxWidth: 380, color: 'var(--muted-foreground)', fontSize: 14, lineHeight: 1.5 }}>
+                Sélectionnez ou créez une carte mentale dans la barre latérale, ou glissez-déposez un fichier ici pour
+                l’ouvrir.
+              </p>
+              <RecentFilesList files={openableRecentFiles} onOpen={requestOpenFile} />
             </div>
           )}
           {forkPromptOpen && isReadOnly && loadedPath && loadedMeta && (

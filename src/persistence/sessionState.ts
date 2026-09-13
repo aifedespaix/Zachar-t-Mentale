@@ -1,11 +1,19 @@
 const STORAGE_KEY = 'zachart-mentale:session'
 
+export interface RecentFile {
+  path: string
+  /** ISO timestamp — the format `formatRelativeTime` already reads. */
+  openedAt: string
+}
+
 export interface SessionState {
   currentFilePath: string | null
   expandedPaths: string[]
+  /** Most recently opened first, capped at 10. See `useWorkspaceStore.setCurrentFile`. */
+  recentFiles: RecentFile[]
 }
 
-const EMPTY_SESSION: SessionState = { currentFilePath: null, expandedPaths: [] }
+const EMPTY_SESSION: SessionState = { currentFilePath: null, expandedPaths: [], recentFiles: [] }
 
 /**
  * The last open file and expanded sidebar folders, kept in `localStorage` so
@@ -21,6 +29,7 @@ export function loadSessionState(): SessionState {
     return {
       currentFilePath: parsed.currentFilePath ?? null,
       expandedPaths: parsed.expandedPaths ?? [],
+      recentFiles: parsed.recentFiles ?? [],
     }
   } catch {
     return EMPTY_SESSION

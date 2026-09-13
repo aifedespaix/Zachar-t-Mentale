@@ -16,7 +16,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
-  Sparkles,
+  PictureInPicture2,
   Undo2,
   Redo2,
   Download,
@@ -852,7 +852,7 @@ function MindMapCanvasInner() {
           keyboard would refuse it — a locked map, an empty clipboard.
         */}
         <ContextMenuContent>
-          <CommandMenuItem command="card.addFloating" icon={Sparkles} />
+          <CommandMenuItem command="card.addFloating" icon={PictureInPicture2} />
           <CommandMenuItem command="edit.paste" icon={ClipboardPaste} />
           <ContextMenuSeparator />
           <CommandMenuItem command="edit.undo" icon={Undo2} />

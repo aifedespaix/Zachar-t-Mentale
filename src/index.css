@@ -823,12 +823,11 @@
 }
 
 /*
- * The quiz button, made to stand out from its neighbours: a spinning rainbow
- * ring for a border (the gradient-border trick — a transparent border painted
- * by two background layers, one clipped to the padding box for the button's
- * own fill, one to the border box for the gradient) and the cap icon itself
- * cycling through hue via a filter, since `currentColor` can't paint a stroke
- * with more than one colour on its own.
+ * The quiz button, made to stand out from its neighbours: a rainbow ring for
+ * a border (the gradient-border trick — a transparent border painted by two
+ * background layers, one clipped to the padding box for the button's own
+ * fill, one to the border box for the gradient). The cap icon itself stays
+ * the button's normal colour — only the ring carries the rainbow.
  */
 .toolbar-quiz--rainbow[data-variant='outline'] {
   border: 2px solid transparent;
@@ -841,20 +840,252 @@
   background-image: linear-gradient(var(--muted), var(--muted)),
     conic-gradient(from 0deg, #ff3b3b, #ff9d3b, #ffe33b, #3bff6a, #3bd4ff, #7a3bff, #ff3bd4, #ff3b3b);
 }
-.toolbar-quiz--rainbow svg {
-  color: #ff3b3b;
-  animation: toolbar-quiz-hue 4s linear infinite;
+
+/*
+ * The "new mind map" button, invited to be clicked when there is nothing
+ * else on screen to look at: solid fill instead of an outline, plus a very
+ * low-amplitude idle bounce so it reads as inviting rather than urgent.
+ */
+.toolbar-new--invite {
+  animation: toolbar-new-bounce 2.4s ease-in-out infinite;
 }
 
-@keyframes toolbar-quiz-hue {
-  to {
-    filter: hue-rotate(360deg);
-  }
+@keyframes toolbar-new-bounce {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toolbar-quiz--rainbow svg {
+  .toolbar-new--invite {
     animation: none;
-    color: color-mix(in oklch, #ff3b3b, #7a3bff 50%);
   }
+}
+
+/*
+ * The app mark, animated by sliding each dot in from wherever the previous
+ * one landed — red, then orange from red's spot, then blue from orange's,
+ * then yellow from blue's — matching the order drawn in `favicon.svg`.
+ *
+ * Two terminal states, chosen by the parent through a modifier class:
+ * `--draw-fade` holds the finished mark, fades the whole thing out, and
+ * loops the whole sequence — reads as "working on it". `--draw-pulse` draws
+ * once and settles into a gentle synchronised breathing, never resetting —
+ * reads as "waiting", used on the empty-state screen.
+ */
+.animated-logo-dot,
+.animated-logo-seg {
+  opacity: 0;
+}
+.animated-logo-seg {
+  stroke: #64748b;
+  stroke-width: 12;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  stroke-dasharray: 80;
+  stroke-dashoffset: 80;
+}
+.animated-logo-dot {
+  transform-origin: center;
+}
+
+@keyframes animated-logo-pop-red {
+  0%   { opacity: 0; transform: scale(0.3); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes animated-logo-slide-orange {
+  0%   { opacity: 0; transform: translate(-56px, 0) scale(0.6); }
+  100% { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+@keyframes animated-logo-slide-blue {
+  0%   { opacity: 0; transform: translate(56px, -56px) scale(0.6); }
+  100% { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+@keyframes animated-logo-slide-yellow {
+  0%   { opacity: 0; transform: translate(-56px, 0) scale(0.6); }
+  100% { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+@keyframes animated-logo-draw-seg {
+  to { stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes animated-logo-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.08); }
+}
+
+/* draw-pulse: draw once (forwards), then breathe forever, no reset */
+.animated-logo--draw-pulse .animated-logo-dot--red {
+  animation:
+    animated-logo-pop-red 0.3s ease-out 0s forwards,
+    animated-logo-pulse 2.2s ease-in-out 1.35s infinite;
+}
+.animated-logo--draw-pulse .animated-logo-dot--orange {
+  animation:
+    animated-logo-slide-orange 0.35s ease-out 0.3s forwards,
+    animated-logo-pulse 2.2s ease-in-out 1.5s infinite;
+}
+.animated-logo--draw-pulse .animated-logo-dot--blue {
+  animation:
+    animated-logo-slide-blue 0.35s ease-out 0.65s forwards,
+    animated-logo-pulse 2.2s ease-in-out 1.65s infinite;
+}
+.animated-logo--draw-pulse .animated-logo-dot--yellow {
+  animation:
+    animated-logo-slide-yellow 0.35s ease-out 1s forwards,
+    animated-logo-pulse 2.2s ease-in-out 1.8s infinite;
+}
+.animated-logo--draw-pulse .animated-logo-seg--1 { animation: animated-logo-draw-seg 0.35s ease-out 0.3s forwards; }
+.animated-logo--draw-pulse .animated-logo-seg--2 { animation: animated-logo-draw-seg 0.35s ease-out 0.65s forwards; }
+.animated-logo--draw-pulse .animated-logo-seg--3 { animation: animated-logo-draw-seg 0.35s ease-out 1s forwards; }
+
+/*
+ * Faded at rest on the empty-state screen, so the mark reads as a watermark
+ * waiting for a file rather than a fully-opaque piece of UI competing with
+ * the "select or drop a file" text underneath it.
+ */
+.animated-logo--draw-pulse {
+  opacity: 0.55;
+}
+
+/* draw-fade: draw, hold, fade the whole mark out together, loop from zero */
+@keyframes animated-logo-cycle-red {
+  0%        { opacity: 0; transform: scale(0.3); }
+  8.3%      { opacity: 1; transform: scale(1); }
+  61%       { opacity: 1; transform: scale(1); }
+  72%, 100% { opacity: 0; transform: scale(1); }
+}
+@keyframes animated-logo-cycle-orange {
+  0%, 8.3%  { opacity: 0; transform: translate(-56px, 0) scale(0.6); }
+  18%       { opacity: 1; transform: translate(0, 0) scale(1); }
+  61%       { opacity: 1; transform: translate(0, 0) scale(1); }
+  72%, 100% { opacity: 0; transform: translate(0, 0) scale(1); }
+}
+@keyframes animated-logo-cycle-blue {
+  0%, 18%   { opacity: 0; transform: translate(56px, -56px) scale(0.6); }
+  27.8%     { opacity: 1; transform: translate(0, 0) scale(1); }
+  61%       { opacity: 1; transform: translate(0, 0) scale(1); }
+  72%, 100% { opacity: 0; transform: translate(0, 0) scale(1); }
+}
+@keyframes animated-logo-cycle-yellow {
+  0%, 27.8% { opacity: 0; transform: translate(-56px, 0) scale(0.6); }
+  37.5%     { opacity: 1; transform: translate(0, 0) scale(1); }
+  61%       { opacity: 1; transform: translate(0, 0) scale(1); }
+  72%, 100% { opacity: 0; transform: translate(0, 0) scale(1); }
+}
+@keyframes animated-logo-cycle-seg-1 {
+  0%, 8.3%  { opacity: 0; stroke-dashoffset: 80; }
+  18%       { opacity: 1; stroke-dashoffset: 0; }
+  61%       { opacity: 1; stroke-dashoffset: 0; }
+  72%, 100% { opacity: 0; stroke-dashoffset: 0; }
+}
+@keyframes animated-logo-cycle-seg-2 {
+  0%, 18%   { opacity: 0; stroke-dashoffset: 80; }
+  27.8%     { opacity: 1; stroke-dashoffset: 0; }
+  61%       { opacity: 1; stroke-dashoffset: 0; }
+  72%, 100% { opacity: 0; stroke-dashoffset: 0; }
+}
+@keyframes animated-logo-cycle-seg-3 {
+  0%, 27.8% { opacity: 0; stroke-dashoffset: 80; }
+  37.5%     { opacity: 1; stroke-dashoffset: 0; }
+  61%       { opacity: 1; stroke-dashoffset: 0; }
+  72%, 100% { opacity: 0; stroke-dashoffset: 0; }
+}
+.animated-logo--draw-fade .animated-logo-dot--red    { animation: animated-logo-cycle-red 3.6s ease-out infinite; }
+.animated-logo--draw-fade .animated-logo-dot--orange { animation: animated-logo-cycle-orange 3.6s ease-out infinite; }
+.animated-logo--draw-fade .animated-logo-dot--blue   { animation: animated-logo-cycle-blue 3.6s ease-out infinite; }
+.animated-logo--draw-fade .animated-logo-dot--yellow { animation: animated-logo-cycle-yellow 3.6s ease-out infinite; }
+.animated-logo--draw-fade .animated-logo-seg--1 { animation: animated-logo-cycle-seg-1 3.6s ease-out infinite; }
+.animated-logo--draw-fade .animated-logo-seg--2 { animation: animated-logo-cycle-seg-2 3.6s ease-out infinite; }
+.animated-logo--draw-fade .animated-logo-seg--3 { animation: animated-logo-cycle-seg-3 3.6s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animated-logo-dot,
+  .animated-logo-seg {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+    stroke-dashoffset: 0;
+  }
+}
+
+/*
+ * The "reopen a recent map" list on the empty-state screen. Rows borrow the
+ * file tree's own hover/radius language (`.file-tree-row`) so the shortcut
+ * reads as part of the same app rather than a bolted-on widget, but stay a
+ * separate class: this list has no indentation, drag-and-drop, or renaming to
+ * account for.
+ */
+.recent-files {
+  width: 100%;
+  max-width: 380px;
+  text-align: left;
+}
+.recent-files__title {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+.recent-files__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* Its own scroll, not the whole screen's: past this height the list scrolls
+     internally instead of pushing the app's main area into a page scroll. */
+  max-height: 280px;
+  overflow-y: auto;
+}
+.recent-files__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.recent-files__row:hover {
+  background: color-mix(in oklch, var(--foreground), transparent 93%);
+}
+.recent-files__row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.recent-files__icon {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.recent-files__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+.recent-files__name {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-files__folder {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-files__time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
 }

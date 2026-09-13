@@ -32,3 +32,18 @@ export function countDescendants(node: FileTreeNode): number {
   if (node.type !== 'folder') return 0
   return node.children.reduce((total, child) => total + 1 + countDescendants(child), 0)
 }
+
+/**
+ * Every mind map path currently visible across the given trees. Used to weed
+ * dead entries out of the "recently opened" list — a file moved or deleted
+ * outside the app must not leave a row nobody can click.
+ */
+export function collectMindMapPaths(nodes: FileTreeNode[]): Set<string> {
+  const paths = new Set<string>()
+  const visit = (node: FileTreeNode) => {
+    if (node.type === 'mindmap') paths.add(node.path)
+    else if (node.type === 'folder') node.children.forEach(visit)
+  }
+  nodes.forEach(visit)
+  return paths
+}

@@ -2,14 +2,43 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type { FileTreeNode, RootFolder } from '../types/workspace'
 import { loadWorkspaceConfig, saveWorkspaceConfig } from '../persistence/workspaceConfig'
 import { scanFolder } from '../persistence/fileTree'
-import { loadSessionState, saveSessionState } from '../persistence/sessionState'
+import { loadSessionState, saveSessionState, type RecentFile } from '../persistence/sessionState'
 import { movePath } from '../persistence/fileOps'
 import { fileNameOf, parentDirOf, separatorOf } from '../persistence/paths'
+
+/** How many recently-opened files the empty-state screen offers to reopen. */
+const RECENT_FILES_LIMIT = 10
+
+/**
+ * `path` moved to the front of `list` (removing any earlier occurrence first,
+ * so it never appears twice), capped at `RECENT_FILES_LIMIT`.
+ *
+ * Order is tracked structurally — position in the array — rather than by
+ * comparing `openedAt` timestamps: two opens close enough together can land
+ * on the same millisecond, and a timestamp sort would then leave their order
+ * to chance instead of to the order they actually happened in.
+ */
+function withRecentFile(list: RecentFile[], path: string, openedAt: string): RecentFile[] {
+  return [{ path, openedAt }, ...list.filter(entry => entry.path !== path)].slice(0, RECENT_FILES_LIMIT)
+}
+
+/**
+ * `newer` first, then whatever of `older` isn't already in `newer`, capped at
+ * `RECENT_FILES_LIMIT`. Used only by `init`, to fold the list saved from a
+ * previous run into whatever the user already opened in the brief window
+ * before that load resolved — which, having happened just now, outranks it.
+ */
+function mergeRecentFiles(newer: RecentFile[], older: RecentFile[]): RecentFile[] {
+  const seen = new Set(newer.map(entry => entry.path))
+  return [...newer, ...older.filter(entry => !seen.has(entry.path))].slice(0, RECENT_FILES_LIMIT)
+}
 
 interface WorkspaceState {
   rootFolders: RootFolder[]
   expandedPaths: Set<string>
   currentFilePath: string | null
+  /** Newest-first, capped at `RECENT_FILES_LIMIT`. See `mergeRecentFiles`. */
+  recentFiles: RecentFile[]
   /**
    * Last workspace/filesystem failure, in plain French, for the sidebar to
    * show. `null` means "nothing went wrong that the user still needs to see".
@@ -27,6 +56,12 @@ interface WorkspaceState {
    */
   fileMetaRevision: number
   bumpFileMetaRevision: () => void
+  /**
+   * True until `init` settles, success or failure. The boot screen reads
+   * this to know when the workspace itself — not just its first paint — is
+   * actually ready.
+   */
+  initializing: boolean
   init: () => Promise<void>
   addRootFolder: (path: string) => Promise<void>
   removeRootFolder: (path: string) => Promise<void>
@@ -102,42 +137,49 @@ export function createWorkspaceStore(): WorkspaceStore {
     rootFolders: [],
     expandedPaths: new Set(),
     currentFilePath: null,
+    recentFiles: [],
     workspaceError: null,
     fileMetaRevision: 0,
+    initializing: true,
     bumpFileMetaRevision: () => set(state => ({ fileMetaRevision: state.fileMetaRevision + 1 })),
     init: async () => {
-      let configuredPaths: string[]
       try {
-        configuredPaths = (await loadWorkspaceConfig()).rootFolders
-      } catch (error) {
-        set({ workspaceError: `Impossible de lire la configuration des dossiers : ${describeError(error)}` })
-        return
+        let configuredPaths: string[]
+        try {
+          configuredPaths = (await loadWorkspaceConfig()).rootFolders
+        } catch (error) {
+          set({ workspaceError: `Impossible de lire la configuration des dossiers : ${describeError(error)}` })
+          return
+        }
+        // `allSettled`, never `all`: one unreadable root folder must not take the
+        // others down with it. A rejected `all` used to leave `rootFolders`
+        // empty, and the next add/remove would then persist that empty list —
+        // silently erasing every other configured folder from workspace.json.
+        // A folder that fails to scan is KEPT here with an empty tree so its
+        // path survives into the next `saveWorkspaceConfig` payload.
+        const results = await Promise.allSettled(configuredPaths.map(path => scanFolder(path)))
+        const failed: string[] = []
+        const rootFolders = configuredPaths.map((path, index) => {
+          const result = results[index]
+          if (result.status === 'fulfilled') return { path, tree: result.value }
+          failed.push(path)
+          return { path, tree: [] }
+        })
+        // `state.currentFilePath` may already be set by the time this scan
+        // resolves — the user opened a file while init was still in flight.
+        // That choice wins; the session is only a fallback for a truly fresh
+        // start, never something that overrides what's already on screen.
+        const session = loadSessionState()
+        set(state => ({
+          rootFolders,
+          workspaceError: failed.length > 0 ? scanFailureMessage(failed) : null,
+          currentFilePath: state.currentFilePath ?? session.currentFilePath,
+          expandedPaths: new Set([...state.expandedPaths, ...session.expandedPaths]),
+          recentFiles: mergeRecentFiles(state.recentFiles, session.recentFiles),
+        }))
+      } finally {
+        set({ initializing: false })
       }
-      // `allSettled`, never `all`: one unreadable root folder must not take the
-      // others down with it. A rejected `all` used to leave `rootFolders`
-      // empty, and the next add/remove would then persist that empty list —
-      // silently erasing every other configured folder from workspace.json.
-      // A folder that fails to scan is KEPT here with an empty tree so its
-      // path survives into the next `saveWorkspaceConfig` payload.
-      const results = await Promise.allSettled(configuredPaths.map(path => scanFolder(path)))
-      const failed: string[] = []
-      const rootFolders = configuredPaths.map((path, index) => {
-        const result = results[index]
-        if (result.status === 'fulfilled') return { path, tree: result.value }
-        failed.push(path)
-        return { path, tree: [] }
-      })
-      // `state.currentFilePath` may already be set by the time this scan
-      // resolves — the user opened a file while init was still in flight.
-      // That choice wins; the session is only a fallback for a truly fresh
-      // start, never something that overrides what's already on screen.
-      const session = loadSessionState()
-      set(state => ({
-        rootFolders,
-        workspaceError: failed.length > 0 ? scanFailureMessage(failed) : null,
-        currentFilePath: state.currentFilePath ?? session.currentFilePath,
-        expandedPaths: new Set([...state.expandedPaths, ...session.expandedPaths]),
-      }))
     },
     addRootFolder: async path => {
       if (get().rootFolders.some(f => f.path === path)) return
@@ -227,8 +269,13 @@ export function createWorkspaceStore(): WorkspaceStore {
         // So the moved file is actually visible where it landed, rather than
         // dropped into a destination that happens to be collapsed.
         expandedPaths.add(destFolderPath)
-        saveSessionState({ currentFilePath, expandedPaths: [...expandedPaths] })
-        return { currentFilePath, expandedPaths }
+        // A recent entry follows its file for the same reason `currentFilePath`
+        // does: without this, moving a file out from under its own history
+        // silently drops it from the "recently opened" list instead of
+        // pointing at where it actually landed.
+        const recentFiles = state.recentFiles.map(entry => ({ ...entry, path: follow(entry.path) }))
+        saveSessionState({ currentFilePath, expandedPaths: [...expandedPaths], recentFiles })
+        return { currentFilePath, expandedPaths, recentFiles }
       })
       await get().refreshFolder(sourceParent)
       await get().refreshFolder(destFolderPath)
@@ -238,14 +285,14 @@ export function createWorkspaceStore(): WorkspaceStore {
       set(state => {
         const next = new Set(state.expandedPaths)
         for (const path of paths) next.add(path)
-        saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next] })
+        saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next], recentFiles: state.recentFiles })
         return { expandedPaths: next }
       }),
     collapseAllFolders: () =>
       set(state => {
         const rootPaths = new Set(state.rootFolders.map(f => f.path))
         const next = new Set([...state.expandedPaths].filter(path => rootPaths.has(path)))
-        saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next] })
+        saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next], recentFiles: state.recentFiles })
         return { expandedPaths: next }
       }),
     toggleExpanded: path =>
@@ -253,13 +300,15 @@ export function createWorkspaceStore(): WorkspaceStore {
         const next = new Set(state.expandedPaths)
         if (next.has(path)) next.delete(path)
         else next.add(path)
-        saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next] })
+        saveSessionState({ currentFilePath: state.currentFilePath, expandedPaths: [...next], recentFiles: state.recentFiles })
         return { expandedPaths: next }
       }),
     setCurrentFile: path =>
       set(state => {
-        saveSessionState({ currentFilePath: path, expandedPaths: [...state.expandedPaths] })
-        return { currentFilePath: path }
+        // `null` is a close, not a visit: nothing new to remember.
+        const recentFiles = path === null ? state.recentFiles : withRecentFile(state.recentFiles, path, new Date().toISOString())
+        saveSessionState({ currentFilePath: path, expandedPaths: [...state.expandedPaths], recentFiles })
+        return { currentFilePath: path, recentFiles }
       }),
     setWorkspaceError: message => set({ workspaceError: message }),
   }))

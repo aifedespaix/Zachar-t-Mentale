@@ -25,7 +25,7 @@ describe('useWorkspaceStore', () => {
     vi.mocked(movePath).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadSessionState)
       .mockReset()
-      .mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+      .mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
     vi.mocked(saveSessionState).mockReset()
   })
 
@@ -274,6 +274,7 @@ describe('useWorkspaceStore', () => {
     vi.mocked(loadSessionState).mockReturnValue({
       currentFilePath: '/cours/fractions.json',
       expandedPaths: ['/cours'],
+      recentFiles: [],
     })
     const store = createWorkspaceStore()
 
@@ -290,6 +291,7 @@ describe('useWorkspaceStore', () => {
     expect(saveSessionState).toHaveBeenLastCalledWith({
       currentFilePath: '/cours/chapitre1.json',
       expandedPaths: [],
+      recentFiles: [{ path: '/cours/chapitre1.json', openedAt: expect.any(String) }],
     })
   })
 
@@ -300,7 +302,37 @@ describe('useWorkspaceStore', () => {
     expect(saveSessionState).toHaveBeenLastCalledWith({
       currentFilePath: null,
       expandedPaths: ['/cours/chimie'],
+      recentFiles: [],
     })
+  })
+
+  it('setCurrentFile moves a re-opened file back to the front instead of duplicating it', () => {
+    const store = createWorkspaceStore()
+    store.getState().setCurrentFile('/cours/a.zmap')
+    store.getState().setCurrentFile('/cours/b.zmap')
+    store.getState().setCurrentFile('/cours/a.zmap')
+
+    expect(store.getState().recentFiles.map(f => f.path)).toEqual(['/cours/a.zmap', '/cours/b.zmap'])
+  })
+
+  it('setCurrentFile does not add anything to the recent list when closing a map', () => {
+    const store = createWorkspaceStore()
+    store.getState().setCurrentFile('/cours/a.zmap')
+    store.getState().setCurrentFile(null)
+
+    expect(store.getState().recentFiles.map(f => f.path)).toEqual(['/cours/a.zmap'])
+  })
+
+  it('setCurrentFile caps the recent list at 10 entries', () => {
+    const store = createWorkspaceStore()
+    for (let i = 0; i < 12; i += 1) store.getState().setCurrentFile(`/cours/c${i}.zmap`)
+
+    const paths = store.getState().recentFiles.map(f => f.path)
+    expect(paths).toHaveLength(10)
+    // Newest first, oldest two (c0, c1) pushed out.
+    expect(paths[0]).toBe('/cours/c11.zmap')
+    expect(paths).not.toContain('/cours/c0.zmap')
+    expect(paths).not.toContain('/cours/c1.zmap')
   })
 })
 

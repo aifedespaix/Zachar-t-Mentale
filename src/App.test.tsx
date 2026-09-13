@@ -110,7 +110,7 @@ describe('App sync bootstrap', () => {
   beforeEach(() => {
     resetStores()
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
-    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
   })
   afterEach(() => {
@@ -134,7 +134,7 @@ describe('App file switching', () => {
     vi.mocked(loadMindMap).mockReset()
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
-    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
   })
   afterEach(() => {
@@ -244,7 +244,7 @@ describe('App quiz wiring', () => {
     vi.mocked(loadMindMap).mockReset().mockResolvedValue(cardsA)
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
-    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
   })
   afterEach(() => vi.useRealTimers())
@@ -317,7 +317,7 @@ describe('App corrupted-map guard', () => {
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
-    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
   })
   afterEach(() => {
@@ -455,7 +455,7 @@ describe('App canvas mounting', () => {
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
-    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
   })
   afterEach(() => {
@@ -514,7 +514,7 @@ describe('App unsaved changes guard', () => {
         { type: 'mindmap', name: 'chapitre-a.json', path: PATH_A },
         { type: 'mindmap', name: 'chapitre-b.json', path: PATH_B },
       ])
-    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -574,7 +574,7 @@ describe('App update banner', () => {
     vi.mocked(loadMindMap).mockReset()
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
-    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
     vi.mocked(check).mockReset()
   })
@@ -806,7 +806,7 @@ describe('App — suite d’un déplacement fait par la synchronisation', () => 
     vi.mocked(loadMindMap).mockReset().mockResolvedValue(cardsA)
     vi.mocked(saveMindMap).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadWorkspaceConfig).mockReset().mockResolvedValue({ rootFolders: [] })
-    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [] })
+    vi.mocked(loadSessionState).mockReset().mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
     // The real `init` would re-read the settings and set `syncFolderPath` back
     // to null: beside the point here, and it would replay what each test just
