@@ -347,6 +347,16 @@
   --xy-minimap-node-stroke-color: transparent;
 }
 
+/* The selected card's ring, drawn via `nodeStrokeWidth` in SVG user units,
+   which the minimap then squashes by whatever factor fits the whole map into
+   200x130 — on a map with more than a couple of cards that factor shrinks the
+   ring to a sub-pixel hairline no one can see. `non-scaling-stroke` keeps the
+   stroke's width in screen pixels instead, so it reads as a border at any map
+   size. */
+.viewport-dock__minimap .react-flow__minimap-node {
+  vector-effect: non-scaling-stroke;
+}
+
 /*
  * Buttons and map both sit back until you reach for them: at 70 % they let the
  * cards underneath show through while staying legible at a glance, and each

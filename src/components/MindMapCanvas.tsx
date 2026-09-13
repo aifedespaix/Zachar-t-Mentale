@@ -48,7 +48,6 @@ import type { Card } from '../types/card'
 import { isRootCard } from '../types/card'
 import type { QuizQuestion, QuizResult } from '../types/quiz'
 import { computeLayout, type Position } from '../layout/columns'
-import { isFullyVisible } from '../layout/visibility'
 import { canMoveCardTo, overflowingCardCount, subtreeDepths } from '../state/cardsReducer'
 import { CardNode, CARD_WIDTH } from './CardNode'
 import { clampCardLevel, detachedColors, levelColor } from '../colors/levelColors'
@@ -340,7 +339,7 @@ function MindMapCanvasInner() {
   const quizResults = useQuizStore(s => s.results)
   const theme = useResolvedTheme()
   const levelAppearance = useAppearanceSettingsStore(s => s.levels)
-  const { setCenter, getZoom, flowToScreenPosition, screenToFlowPosition } = useReactFlow()
+  const { setCenter, getZoom, screenToFlowPosition } = useReactFlow()
   const storeApi = useStoreApi()
   const openFicheIds = useCardDetailStore(s => s.open)
   // Reactive read (the two existing uses below are imperative `.getState()`
@@ -377,22 +376,6 @@ function MindMapCanvasInner() {
       })
     },
     [layout, setCenter, getZoom]
-  )
-
-  /**
-   * Clicking a card in the minimap brings it to the middle of the viewport,
-   * through the same focusCard the keyboard navigation uses.
-   *
-   * A minimap is a map, not just a scrollbar: it shows WHERE things are, so the
-   * gesture it affords is "take me there". The zone caption is not a card and
-   * is ignored — it is furniture, not a destination.
-   */
-  const handleMinimapNodeClick = useCallback(
-    (_event: ReactMouseEvent, node: Node) => {
-      const card = node.data?.card as Card | undefined
-      if (card !== undefined) focusCard(card.id)
-    },
-    [focusCard]
   )
 
   /**
@@ -441,6 +424,23 @@ function MindMapCanvasInner() {
     [storeApi]
   )
 
+  /**
+   * Clicking a card in the minimap brings it to the middle of the viewport,
+   * through the same focusCard the keyboard navigation uses, and makes it the
+   * active selection — the same "take me there" gesture also means "and this
+   * is now the one I'm working with". The zone caption is not a card and is
+   * ignored — it is furniture, not a destination.
+   */
+  const handleMinimapNodeClick = useCallback(
+    (_event: ReactMouseEvent, node: Node) => {
+      const card = node.data?.card as Card | undefined
+      if (card === undefined) return
+      focusCard(card.id)
+      selectCard(card.id)
+    },
+    [focusCard, selectCard]
+  )
+
   // Read through a ref by the creation effect below, which must not re-run
   // (and re-centre the viewport) just because this callback was re-created.
   const selectCardRef = useRef(selectCard)
@@ -479,19 +479,12 @@ function MindMapCanvasInner() {
   }, [cards, layout, setCenter])
 
   /**
-   * Keeps the card whose fiche just opened in view.
-   *
-   * The fiche panel takes its width out of the flow pane, so a card near the
-   * right edge can end up BEHIND the panel that was opened to read it — the
-   * one failure that would make the whole panel feel hostile.
-   *
-   * Only when it is actually needed: `isFullyVisible` is checked against the
-   * pane as it is now (the panel has already been laid out by the time this
-   * effect runs), and the zoom is preserved, so this never re-frames a map the
-   * user had positioned deliberately. Same "compare against the previous set"
-   * shape as the newly-created-card effect above.
+   * Recentres on the card whose fiche just opened — clicking a card's
+   * description is asking to look at that card, so the viewport follows it
+   * there and back, the same way the minimap and keyboard navigation do.
+   * Zoom is preserved (`getZoom()`), only the pan moves. Same "compare
+   * against the previous set" shape as the newly-created-card effect above.
    */
-  const paneRef = useRef<HTMLDivElement>(null)
   const previousFicheIds = useRef(new Set<string>())
   useEffect(() => {
     const currentIds = new Set(openFicheIds.map(entry => entry.cardId))
@@ -500,25 +493,13 @@ function MindMapCanvasInner() {
     if (appeared === undefined) return
 
     const position = layout[appeared]
-    const pane = paneRef.current
-    if (position === undefined || pane === null) return
-
-    const topLeft = flowToScreenPosition({ x: position.x, y: position.y })
-    const bottomRight = flowToScreenPosition({
-      x: position.x + CARD_WIDTH,
-      y: position.y + NOMINAL_NODE_HEIGHT,
-    })
-    const card = { left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y }
-    const bounds = pane.getBoundingClientRect()
-    // The margin covers the sibling "+" buttons, which straddle the card's own
-    // border by ~14px and are just as unusable when clipped.
-    if (isFullyVisible(card, bounds, 24)) return
+    if (position === undefined) return
 
     setCenter(position.x + CARD_WIDTH / 2, position.y + NOMINAL_NODE_HEIGHT / 2, {
       zoom: getZoom(),
       duration: 300,
     })
-  }, [openFicheIds, layout, flowToScreenPosition, getZoom, setCenter])
+  }, [openFicheIds, layout, getZoom, setCenter])
 
   // React Flow owns the node array so a drag moves the card live under the
   // cursor (`onNodesChange` applies position changes during the gesture).
@@ -721,10 +702,6 @@ function MindMapCanvasInner() {
         <ContextMenuTrigger asChild>
           <div style={{ width: '100%', height: '100%' }}>
             <ReactFlow
-              // Measured rather than assumed: the flow pane's width changes when
-              // the fiche panel opens, and the recentring above compares against
-              // what it actually is at that moment.
-              ref={paneRef}
               nodes={nodes}
               edges={edges}
               onNodesChange={onNodesChange}
