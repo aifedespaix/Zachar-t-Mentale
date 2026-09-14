@@ -259,6 +259,21 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
       converties** : compétences identiques sur toutes les séquences (pas de
       connaissance propre à un chapitre) et références = juste des noms
       d'artistes + images (pas de bloc image dans le schéma)
+- [x] `histoire-geo` — **périmètre restreint à la 3e sur décision
+      utilisateur** ("tu injest que les cours de 3eme"), 4e/5e/6A hors
+      périmètre de ce sous-projet. Le seul chapitre 3e est `Histoire/Civils
+      et militaires pendant la Première Guerre mondiale/` (pas de dossier
+      Géographie pour la 3e). Sur les 6 fichiers `activité *.odt` :
+      activité 3 (guerre totale) et activité 4 (génocide arménien) déjà
+      couverts par le sous-projet 2 (`guerre-totale.zmap`,
+      `genocide-armenien.zmap` + leurs corrections). Les 4 autres n'ont
+      rien à ingérer : activité 1 et activité 2 sont quasi entièrement
+      des images (BD de Tardi), sans texte exploitable ; activité 5 est la
+      source de `rediger-un-developpement-construit.zmap`, déjà laissé tel
+      quel par décision du sous-projet 1 (travail en cours de l'élève) ;
+      activité 6 est un tableau vierge à remplir (révolutions de février/
+      octobre 1917), aucune réponse à convertir. **Rien de nouveau à
+      ingérer pour la 3e**, ce sous-point est donc terminé
 - [ ] Pour les exercices rencontrés en cours d'ingestion, appliquer la même
       logique que le sous-projet 2 (créer aussi une correction)
 
