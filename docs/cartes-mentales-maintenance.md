@@ -229,14 +229,14 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
         aife/prof, les 2 erreurs corrigées). Exercice 3 du même fichier
         (3 phrases) **non converti** : texte source trop confus/fautif pour
         être retranscrit fidèlement (voir point ci-dessous)
-  - [ ] **Contenu sauté, décision utilisateur "tu peux sauter tkt"** —
-        reste à trancher plus tard si besoin : les dossiers `Cours` de
-        `français/4e/Chapitre 1` et `Chapitre 2` contiennent en réalité les
-        notes/bilans de Zachary lui-même (fautes, et même un cas de contenu
-        de fichier inversé avec son nom : `adieu.odt` correspond au poème
-        "Je vis, je meurs" et vice versa), pas un vrai cours rédigé par un
-        prof. Les convertir fidèlement recopierait les fautes dans une carte
-        de révision. Fichiers concernés, non traités :
+  - [x] **Contenu sauté, décision utilisateur "tu peux sauter tkt"** — les
+        dossiers `Cours` de `français/4e/Chapitre 1` et `Chapitre 2`
+        contiennent en réalité les notes/bilans de Zachary lui-même (fautes,
+        et même un cas de contenu de fichier inversé avec son nom :
+        `adieu.odt` correspond au poème "Je vis, je meurs" et vice versa),
+        pas un vrai cours rédigé par un prof. Les convertir fidèlement
+        recopierait les fautes dans une carte de révision. Fichiers
+        concernés, non traités :
         `Chapitre 1/Cours/adieu 🤲.odt`, `Chapitre 1/Cours/je vis, 🤗 je
         meurs 💀.odt`, `Chapitre 1/Cours/ode a cassandre correction 🐄 🐐
         🐮 🐽 🐷.odt`, `Chapitre 1/Bilans/Bilan sur le début de la
@@ -246,6 +246,33 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
         ex. "que lui avait d'accordés mon père"). `Chapitre 2/Exercices/
         correction question le vestron ensorcelée.odt` vérifié aussi :
         vide/inexploitable (juste "1) 2) 3)")
+  - [x] Reste de `français/4e` passé en revue (le dossier contient bien plus
+        que Chapitre 1/2 : `Chapitre 1/Exercices`, `Chapitre 2/Cours`,
+        `Séquence 5/`, et une dizaine de fichiers directement sous `4e/`).
+        Même diagnostic que ci-dessus sur la quasi-totalité : ce sont des
+        réponses d'exercices de Zachary (analyse grammaticale — nature des
+        mots, fonction dans la phrase —, questions de compréhension sur des
+        textes au programme, antonymes, écriture créative, résumés de
+        lecture), donc hors périmètre de la skill ("les exercices sont de la
+        pratique, pas des connaissances de cours") et/ou trop fautifs pour
+        être recopiés fidèlement en carte de révision. Fichiers concernés,
+        non traités : `Chapitre 1/Exercices/Ecriture.odt`, `Chapitre
+        1/Exercices/exercice page 88-89 + la fiction pour interroger le
+        réel.odt`, `Chapitre 1/Exercices/resumé français.odt`,
+        `Chapitre 2/Cours/Rédaction + Cours.odt` (en réalité une correction
+        de questions + un exercice d'écriture, mal classé dans "Cours"),
+        `Chapitre 2/Cours/quand le réel vacile.odt` (une phrase, vide de
+        contenu), `Sans nom 2.odt`, `antonymes et ses amis.odt`, `controle
+        entrainement.odt`, `français.odt`, `grammaire.odt`, `ile au
+        esclavges.odt`, `journal.odt`, `la fin explication logique ou
+        surnaturelle.odt`, `le main 3ème partie.odt`, `le veston
+        ensorcelée.odt`. Seule exception : `Séquence 5/Theatre Individu et
+        société.odt` contenait 4 définitions de vocabulaire propres et non
+        fautives (esclave, maître, servante, valet) au milieu d'une fiche
+        d'analyse de mise en scène à trous (hors périmètre) — vocabulaire
+        extrait vers `.cartes-mentales/francais/vocabulaire-theatre.zmap`
+        (`cours`, aife/prof). **`français 4e` : terminé** — rien d'autre à
+        ingérer dans ce dossier.
 - [x] `arts-plastiques` (les 11 séquences `3-00` à `3-10`) : contenu source
       très pauvre en définitions (fiches d'évaluation + liste de vocabulaire
       brute, sans définitions, + compétences génériques du programme
