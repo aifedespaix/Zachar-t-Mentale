@@ -96,7 +96,7 @@ nom).
 
 ## Sous-projet 2 — Corrections des exercices existants
 
-**Statut** : ⬜ Pas commencé
+**Statut** : ✅ Terminé
 **Dépend de** : sous-projet 1 (pour les noms finaux ci-dessous)
 
 Aucun fichier de type `corrections` n'existe aujourd'hui dans
@@ -132,8 +132,16 @@ Aucun fichier de type `corrections` n'existe aujourd'hui dans
       chez l'élève (pronom présenté comme modifiant "le genre du verbe" au
       lieu de remplacer un nom ; déterminant réduit à "déterminer le genre").
       Correction = définitions propres et aplaties
-- [ ] `histoire-geo/guerre-totale.zmap`
-- [ ] `histoire-geo/genocide-armenien.zmap`
+- [x] `histoire-geo/guerre-totale.zmap` — 4 cartes source. Même problème
+      structurel que les fichiers `francais/mots-*` (contenu en `title`, pas
+      de `definition`) : restructuré en 4 dimensions de la guerre totale
+      (violence des combats, mobilisation économique, souffrances des
+      civils, propagande et censure) avec titre + définition propres
+- [x] `histoire-geo/genocide-armenien.zmap` — 10 cartes source. Contenu
+      déjà en Q/R correcte dans sa structure, mais très fautif et une
+      erreur factuelle corrigée (les Arméniens vivaient en majorité en
+      Anatolie orientale, pas « en Europe » comme écrit par l'élève) ; les
+      gendarmes reclassés comme auteurs du massacre, pas victimes
 
 Pour chacun : créer un fichier séparé `meta.type: "corrections"` dans le
 même dossier de chapitre (jamais dans le fichier de l'exo lui-même —
