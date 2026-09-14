@@ -158,7 +158,10 @@ tard si l'exo a bougé).
 
 ## Sous-projet 3 — Nettoyage + ingestion de `.cours/to-injest/`
 
-**Statut** : ⬜ Pas commencé
+**Statut** : 🟡 En cours — tri et ingestion terminés pour les matières en
+périmètre (`arts-plastiques`, `français 4e`, `histoire-geo` 3e) ;
+`histoire-geo` 4e/5e/6A reste hors périmètre sauf demande explicite de
+l'utilisateur (voir ci-dessous)
 
 `to-injest` contient des centaines de fichiers sur 4 matières
 (arts-plastiques, français 4e, histoire-geo 3e/4e/5e/6A) avec beaucoup de
@@ -206,16 +209,15 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
         **Décision de l'utilisateur : laissés tels quels, non exploitables
         et sans intérêt** (l'élève concerné est maintenant en 3e, le 6e ne
         sert plus) — pas de conversion prévue pour ces deux fichiers
-- [ ] Une fois le tri validé, ingestion matière par matière via la skill
+- [x] Une fois le tri validé, ingestion matière par matière via la skill
       `transformer-cours-en-carte-mentale`, chapitre par chapitre —
       **redéfinir le mapping niveau 2/3/4 pour chaque matière avant de
       commencer** (le mapping maths n'est pas réutilisable tel quel, voir la
-      section "Adaptation à d'autres matières" de la skill). **En cours**,
-      démarré par `français 4e` (contenu déjà exploitable, contrairement à
-      arts-plastiques dont le vocabulaire est sans définition — voir décision
-      juste en dessous). `histoire-geo` volontairement restreint à la 3e sur
-      demande utilisateur — **4e/5e/6A pas oubliés, juste hors périmètre
-      pour l'instant**, à reprendre si l'utilisateur le demande :
+      section "Adaptation à d'autres matières" de la skill). `français 4e`,
+      `arts-plastiques` et `histoire-geo` (restreint à la 3e sur demande
+      utilisateur) sont désormais tous traités — **4e/5e/6A d'histoire-geo
+      pas oubliés, juste hors périmètre pour l'instant**, à reprendre si
+      l'utilisateur le demande :
   - [x] `français/4e/Chapitre 1/Cours/Conjugaison du passé simple.odt` →
         `.cartes-mentales/francais/conjugaison-passe-simple.zmap` (`cours`,
         aife/prof). Tableau de conjugaison propre (Avoir, Être, Venir,
@@ -328,10 +330,10 @@ scan manuel, un passage automatique, autre).
 
 ## Sous-projet 5 — Politique de sync contenu vs déplacement (dev)
 
-**Statut** : ⬜ Pas commencé — nécessite un `/superpowers:brainstorming`
-dédié avant toute implémentation
+**Statut** : ✅ Terminé — déjà résolu par une fonctionnalité développée
+séparément, repérée en reprenant ce chantier plutôt que construite pour lui
 
-État actuel du code (vérifié) :
+État du code (vérifié) :
 
 - Déplacement/renommage de fichier : déjà finement géré par
   `src/sync/pathReconciliation.ts` (résolution premier-arrivé-gagne,
@@ -339,12 +341,14 @@ dédié avant toute implémentation
 - Carte présente localement et absente du distant (ou l'inverse) : déjà
   transformée en carte volante automatiquement par `src/sync/cardMerge.ts`,
   jamais perdue.
-- **Ce qui n'est pas géré** : une carte présente des deux côtés (même `id`)
-  dont le contenu diffère — la version distante écrase silencieusement la
-  locale, sans comparaison ni option (voir le commentaire explicite dans
-  `cardMerge.ts` : "jamais comparée champ à champ").
-
-Problème à trancher en brainstorming : faut-il pouvoir refuser la
-modification de contenu distante tout en acceptant déplacement/renommage,
-et/ou faut-il basculer la version locale écrasée en carte volante plutôt que
-de la perdre silencieusement ? Comparer les deux pistes avant de choisir.
+- Contenu modifié des deux côtés depuis la dernière synchro (même `id` de
+  fichier, contenus divergents) : couvert par `isConflict`
+  (`src/sync/syncService.ts`) + la boîte de résolution de
+  `src/sync/conflictResolution.ts`, voir
+  `docs/superpowers/specs/2026-09-14-resolution-de-conflits-design.md`. Le
+  contenu local est capturé dans le signalement AVANT tout écrasement, donc
+  rien n'est perdu même si le tirage suivant réécrit le fichier local : trois
+  choix ensuite — accepter le serveur, refuser et garder ma version (restaure
+  le contenu local capturé), créer une copie liée (les deux survivent).
+  Résout à l'échelle du fichier la question posée ici à l'échelle de la
+  carte — plus complet qu'une simple carte volante par carte.
