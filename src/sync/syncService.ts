@@ -71,9 +71,26 @@ export interface AssetsApi {
   download(record: RemoteAssetRecord, options?: RequestOptions): Promise<Uint8Array>
 }
 
+/** Un dossier VIDE décidé ailleurs — voir `dossiers` dans `infra/pocketbase-schema.mjs`. */
+export interface RemoteFolderRecord {
+  id: string
+  path: string
+}
+
+export interface FoldersApi {
+  getFullList(options?: RequestOptions): Promise<RemoteFolderRecord[]>
+}
+
 export interface SyncClient {
   mindMaps: MindMapsApi
   assets: AssetsApi
+  /**
+   * OPTIONNELLE, et elle doit le rester : la collection `dossiers` n'existe que
+   * sur un serveur auquel `setup-pocketbase.mjs` a été réappliqué. Un client
+   * qui ne la fournit pas — ou un serveur qui répond 404 — synchronise
+   * exactement comme avant, sans un dossier vide de moins ni une erreur de plus.
+   */
+  folders?: FoldersApi
 }
 
 /** A file both sides changed since the last sync — skipped, never resolved in silence. */
@@ -134,6 +151,8 @@ export interface SyncResult {
   reclassified?: number
   /** Un pull qui a mis des cartes locales de côté au lieu de les perdre. */
   merged?: { fileId: string; path: string; floatedCount: number }[]
+  /** Combien de dossiers vides décidés ailleurs ont été créés localement. */
+  foldersCreated?: number
 }
 
 /** Le résultat tel que `sync()` le construit : déplacements, notices et reclassements y sont toujours renseignés. */
@@ -895,5 +914,44 @@ export async function sync({
     report()
   }
 
+  // Les dossiers VIDES, en dernier — après que les fichiers ont créé les leurs.
+  //
+  // Un dossier peuplé n'a pas besoin de cette passe : `pullOne` crée déjà
+  // l'arborescence de chaque fichier qu'il écrit. Ne restent donc ici que les
+  // dossiers qu'AUCUN chemin n'implique — ceux qu'un prof a créés d'avance
+  // depuis l'interface d'administration, avant d'avoir quoi que ce soit à
+  // mettre dedans. Sans cette passe, ils n'atteindraient jamais l'élève.
+  if (!result.cancelled && !aborted()) {
+    result.foldersCreated = await pullEmptyFolders()
+  }
+
   return result
+
+  /**
+   * Crée localement les dossiers vides du serveur. Ne lève JAMAIS : la
+   * collection est facultative (404 sur un serveur pas encore réappliqué), et
+   * un rangement manquant ne doit pas faire échouer une synchronisation de
+   * contenu qui, elle, a réussi.
+   */
+  async function pullEmptyFolders(): Promise<number> {
+    if (client.folders === undefined) return 0
+    let created = 0
+    try {
+      const records = await client.folders.getFullList({ signal })
+      for (const record of records) {
+        if (aborted()) break
+        // `path` est une entrée distante non vérifiée, comme celui d'une carte :
+        // le même garde s'applique, sans quoi un `../..` créerait un dossier
+        // hors du dossier synchronisé.
+        if (!isSafeRelativePath(record.path)) continue
+        const absolute = await join(syncFolderPath, record.path)
+        if (await exists(absolute)) continue
+        await mkdir(absolute, { recursive: true })
+        created += 1
+      }
+    } catch {
+      // Silencieux par contrat — voir le commentaire ci-dessus.
+    }
+    return created
+  }
 }

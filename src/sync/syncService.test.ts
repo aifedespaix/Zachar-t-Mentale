@@ -59,6 +59,10 @@ function fakeClient(overrides: Partial<SyncClient> = {}): SyncClient {
       download: vi.fn(),
       ...overrides.assets,
     },
+    // `folders` reste ABSENTE si le test ne la fournit pas : c'est la forme
+    // qu'a un client parlant à un serveur pas encore réappliqué, et un double
+    // qui l'inventerait ne testerait plus ce cas-là.
+    ...(overrides.folders === undefined ? {} : { folders: overrides.folders }),
   }
 }
 
@@ -1655,3 +1659,63 @@ describe('sync — classification', () => {
   })
 })
 
+
+describe('sync — dossiers vides', () => {
+  beforeEach(() => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(readDir).mockResolvedValue([])
+  })
+
+  /** Un client dont la collection `dossiers` répond ce qu'on lui dit. */
+  function withFolders(paths: string[] | Error) {
+    return fakeClient({
+      folders: {
+        getFullList: vi.fn(() =>
+          paths instanceof Error
+            ? Promise.reject(paths)
+            : Promise.resolve(paths.map((path, index) => ({ id: `fold-${index}`, path })))
+        ),
+      },
+    } as any)
+  }
+
+  it('creates locally an empty folder that no path could ever imply', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    const result = await runSync({ client: withFolders(['Chapitre 5']) })
+
+    expect(mkdir).toHaveBeenCalledWith('/cours/Chapitre 5', { recursive: true })
+    expect(result.foldersCreated).toBe(1)
+  })
+
+  it('leaves alone a folder that is already there', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    const result = await runSync({ client: withFolders(['Chapitre 5']) })
+
+    expect(result.foldersCreated).toBe(0)
+  })
+
+  it('refuses a remote path that would escape the synced folder', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    const result = await runSync({ client: withFolders(['../ailleurs', 'Bon']) })
+
+    expect(mkdir).not.toHaveBeenCalledWith('/cours/../ailleurs', expect.anything())
+    expect(result.foldersCreated).toBe(1)
+  })
+
+  it('stays green when the server has no such collection: the sync did succeed', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    const notFound = Object.assign(new Error('404'), { status: 404 })
+    const result = await runSync({ client: withFolders(notFound) })
+
+    expect(result.errors).toEqual([])
+    expect(result.foldersCreated).toBe(0)
+  })
+
+  it('does nothing at all for a client that does not speak folders', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    const result = await runSync({ client: fakeClient() })
+
+    expect(result.foldersCreated).toBe(0)
+    expect(result.errors).toEqual([])
+  })
+})

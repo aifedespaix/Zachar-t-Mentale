@@ -1,5 +1,13 @@
 import type PocketBase from 'pocketbase'
-import type { AssetsApi, MindMapsApi, RemoteAssetRecord, RemoteMindMapRecord, SyncClient } from './syncService'
+import type {
+  AssetsApi,
+  FoldersApi,
+  MindMapsApi,
+  RemoteAssetRecord,
+  RemoteFolderRecord,
+  RemoteMindMapRecord,
+  SyncClient,
+} from './syncService'
 import type { OpenConflictRecord, ReportingClient } from './syncReporting'
 
 interface RawAssetRecord {
@@ -41,7 +49,14 @@ export function createSyncClient(pb: PocketBase): SyncClient {
     },
   }
 
-  return { mindMaps, assets }
+  // La collection des dossiers vides. Facultative côté serveur : `sync()`
+  // avale un 404 sans broncher, donc on la branche toujours et c'est le serveur
+  // qui décide s'il a quelque chose à dire.
+  const folders: FoldersApi = {
+    getFullList: options => pb.collection('dossiers').getFullList<RemoteFolderRecord>({ ...options, fields: 'id,path' }),
+  }
+
+  return { mindMaps, assets, folders }
 }
 
 /**
