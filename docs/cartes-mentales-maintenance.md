@@ -244,6 +244,21 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
         ex. "que lui avait d'accordés mon père"). `Chapitre 2/Exercices/
         correction question le vestron ensorcelée.odt` vérifié aussi :
         vide/inexploitable (juste "1) 2) 3)")
+- [x] `arts-plastiques` (les 11 séquences `3-00` à `3-10`) : contenu source
+      très pauvre en définitions (fiches d'évaluation + liste de vocabulaire
+      brute, sans définitions, + compétences génériques du programme
+      officiel répétées à l'identique sur les 11 séquences + références
+      d'œuvres en images). **Décision utilisateur : rédiger les définitions
+      du vocabulaire moi-même** (connaissance générale du champ lexical des
+      arts plastiques, pas extraite du document). Converti uniquement le
+      vocabulaire (seul contenu vraiment définitionnel et propre à chaque
+      séquence) → un fichier `cours` par séquence,
+      `.cartes-mentales/arts-plastiques/<NN>-<slug>/vocabulaire.zmap`
+      (numérotation reprise du support source, `-00-` à `-10-`), 11 fichiers,
+      aife/prof. Compétences du programme et références d'œuvres **non
+      converties** : compétences identiques sur toutes les séquences (pas de
+      connaissance propre à un chapitre) et références = juste des noms
+      d'artistes + images (pas de bloc image dans le schéma)
 - [ ] Pour les exercices rencontrés en cours d'ingestion, appliquer la même
       logique que le sous-projet 2 (créer aussi une correction)
 
