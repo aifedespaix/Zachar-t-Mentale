@@ -76,6 +76,16 @@ L'arborescence de `.cartes-mentales/` est : `<matière>/<chapitre>/<fichier>.zma
   contenu (`-cours`, `-exo`…) — ce type est `meta.type`, pas le nom de
   fichier. Un chapitre découpé en plusieurs fichiers (cf. « Si un chapitre est
   trop gros ») les regroupe tous dans le MÊME dossier de chapitre.
+  - **Exception : fichier `corrections` d'un exercice existant.** Un
+    `meta.type: "corrections"` (voir « Corriger le fichier d'un élève » plus
+    bas pour la distinction avec `corrigé`) partage forcément le sous-thème
+    de l'exercice qu'il corrige et doit coexister avec lui dans le même
+    dossier de chapitre — deux fichiers ne peuvent pas porter le même nom. Le
+    suffixe `-corrections` est alors la seule exception à la règle
+    ci-dessus : `influences.zmap` (exo) → `influences-corrections.zmap`.
+    N'utiliser ce suffixe que dans ce cas précis ; il reste interdit pour
+    tout autre type (`cours`, `prise de notes`, `default`…) puisque ceux-là
+    n'ont pas ce problème de collision de nom.
 - **Jamais de PDF ni de support brut sous `.cartes-mentales/`** : les sources
   restent dans `.cours/`. `.cartes-mentales/` ne contient que des `.zmap`
   (et leurs `.assets/` générés par l'app elle-même).

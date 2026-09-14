@@ -102,21 +102,23 @@ nom).
 Aucun fichier de type `corrections` n'existe aujourd'hui dans
 `.cartes-mentales/`. Exercices identifiés (type `exo`) à corriger :
 
-- [ ] `anglais/edward-hopper/hooper.zmap`
+- [ ] `anglais/edward-hopper/influences.zmap` (ex-"hooper.zmap")
 - [ ] `espagnol/ejercicios/hablamos espanol en el mundo.zmap`
 - [ ] `espagnol/vocabulario/dias-de-la-semana.zmap`
 - [ ] `espagnol/vocabulario/estaciones-del-ano.zmap`
 - [ ] `espagnol/vocabulario/meses-del-ano.zmap`
-- [ ] `français/classes-grammaticales.zmap` (ex-"les classes grammaticales
+- [ ] `francais/classes-grammaticales.zmap` (ex-"les classes grammaticales
       exercices")
-- [ ] `français/mots-invariables.zmap`
-- [ ] `français/mots-variables.zmap`
+- [ ] `francais/mots-invariables.zmap`
+- [ ] `francais/mots-variables.zmap`
 - [ ] `histoire-geo/guerre-totale.zmap`
 - [ ] `histoire-geo/genocide-armenien.zmap`
 
 Pour chacun : créer un fichier séparé `meta.type: "corrections"` dans le
 même dossier de chapitre (jamais dans le fichier de l'exo lui-même —
-`corrections` ≠ `corrigé`, voir la skill). Respecter les règles d'écriture
+`corrections` ≠ `corrigé`, voir la skill), nommé `<nom-exo>-corrections.zmap`
+(seule exception documentée à la règle "jamais de suffixe de type", voir
+la skill section « Où écrire le fichier »). Respecter les règles d'écriture
 "mode quiz" (titre/définition qui se déterminent l'un l'autre, mots-clés en
 gras, sœurs de longueur comparable). Tant que le sous-projet 4 n'existe pas,
 noter à la main dans ce fichier, en face de chaque item coché, le nombre de
