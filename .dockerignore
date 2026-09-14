@@ -1,0 +1,32 @@
+# Ce qui n'a rien à faire dans le contexte de construction — et surtout ce qui
+# ne doit JAMAIS en sortir. `.cours/` et `.cartes-mentales/` sont le contenu de
+# cours réel de l'utilisateur : déjà gitignorés, ils sont ici pour qu'un
+# `docker build` lancé depuis une copie de travail ne les embarque pas dans une
+# couche d'image.
+.cours/
+.cartes-mentales/
+
+.git/
+.github/
+.claude/
+.serena/
+.todo/
+.vscode/
+.worktrees/
+
+node_modules/
+admin/node_modules/
+admin/dist/
+dist/
+
+# Le backend Rust n'entre pas dans cette image, et sa cible pèse des gigaoctets.
+src-tauri/target/
+src-tauri/
+
+infra/backups/
+infra/.env
+
+graphify-out/
+docs/
+tools/
+*.log

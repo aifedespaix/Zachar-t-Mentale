@@ -72,9 +72,26 @@ export interface AssetsApi {
   download(record: RemoteAssetRecord, options?: RequestOptions): Promise<Uint8Array>
 }
 
+/** Un dossier VIDE décidé ailleurs — voir `dossiers` dans `infra/pocketbase-schema.mjs`. */
+export interface RemoteFolderRecord {
+  id: string
+  path: string
+}
+
+export interface FoldersApi {
+  getFullList(options?: RequestOptions): Promise<RemoteFolderRecord[]>
+}
+
 export interface SyncClient {
   mindMaps: MindMapsApi
   assets: AssetsApi
+  /**
+   * OPTIONNELLE, et elle doit le rester : la collection `dossiers` n'existe que
+   * sur un serveur auquel `setup-pocketbase.mjs` a été réappliqué. Un client
+   * qui ne la fournit pas — ou un serveur qui répond 404 — synchronise
+   * exactement comme avant, sans un dossier vide de moins ni une erreur de plus.
+   */
+  folders?: FoldersApi
 }
 
 /**
@@ -104,6 +121,19 @@ export interface SyncConflictDetail {
   /** Combien de cartes, par niveau, de chaque côté. */
   localCounts: CardCounts
   remoteCounts: CardCounts
+  /**
+   * La version LOCALE entière, sérialisée — celle qui n'a PAS été envoyée.
+   *
+   * `remoteContent` est déjà là, et `localPath` suffit à la boîte de dialogue
+   * locale, qui peut relire le fichier. Ce champ sert à l'ailleurs : sans lui,
+   * un conflit ne se tranche que devant CETTE machine, seul endroit où cette
+   * version existe. Le client la joint à son signalement pour que le prof
+   * arbitre à distance depuis l'interface d'administration (`syncReporting.ts`).
+   *
+   * Absent quand le fichier n'a pas pu être lu ou sérialisé : un conflit se
+   * signale TOUJOURS, même sans sa pièce jointe.
+   */
+  localContent?: string
 }
 
 /** A file both sides changed since the last sync — skipped, never resolved in silence. */
@@ -154,6 +184,8 @@ export interface SyncResult {
   reclassified?: number
   /** Un pull qui a mis des cartes locales de côté au lieu de les perdre. */
   merged?: { fileId: string; path: string; floatedCount: number }[]
+  /** Combien de dossiers vides décidés ailleurs ont été créés localement. */
+  foldersCreated?: number
 }
 
 /** Le résultat tel que `sync()` le construit : déplacements, notices et reclassements y sont toujours renseignés. */
@@ -504,13 +536,27 @@ function withoutCopyLink(meta: MindMapMeta): MindMapMeta {
  */
 async function conflictDetailOf(params: {
   localPath: string
+  meta: MindMapMeta
   remote: RemoteMindMapRecord
   remoteContentHash: string
 }): Promise<SyncConflictDetail> {
-  const { localPath, remote, remoteContentHash } = params
-  const localCounts = await loadMindMap(localPath)
-    .then(cards => (cards === null ? emptyCardCounts() : countCards(cards)))
-    .catch(() => emptyCardCounts())
+  const { localPath, meta, remote, remoteContentHash } = params
+  // UNE lecture du fichier local, qui sert aux deux : les comptes du comparatif
+  // et la copie sérialisée que le signalement emporte. Les séparer relirait le
+  // même fichier deux fois pour la même information.
+  const localCards = await loadMindMap(localPath).catch(() => null)
+  const localCounts = localCards === null ? emptyCardCounts() : countCards(localCards)
+  let localContent: string | undefined
+  try {
+    // `withoutCopyLink`, comme partout où du contenu part vers le serveur : ce
+    // champ-ci n'est pas une exception, il atterrit dans `sync_conflicts` et se
+    // relit depuis l'interface d'administration. Le lien de copie décrit un
+    // arrangement de fichiers propre à CETTE machine ; l'emporter ferait
+    // promettre à l'ailleurs une copie qui n'y existe pas.
+    if (localCards !== null) localContent = serializeMindMap(withoutCopyLink(meta), localCards)
+  } catch {
+    localContent = undefined
+  }
   let remoteCounts: CardCounts
   try {
     remoteCounts = countCards(deserializeMindMap(remote.content).cards)
@@ -524,6 +570,7 @@ async function conflictDetailOf(params: {
     remoteContentHash,
     localCounts,
     remoteCounts,
+    ...(localContent === undefined ? {} : { localContent }),
   }
 }
 
@@ -762,7 +809,7 @@ export async function sync({
         // Le comparatif est monté ICI parce que c'est le seul instant où les
         // deux versions sont sous la main : plus tard, il faudrait retélécharger
         // l'enregistrement pour pouvoir seulement compter ses cartes.
-        detail: await conflictDetailOf({ localPath: scan.path, remote, remoteContentHash }),
+        detail: await conflictDetailOf({ localPath: scan.path, meta, remote, remoteContentHash }),
       })
       return
     }
@@ -976,5 +1023,44 @@ export async function sync({
     report()
   }
 
+  // Les dossiers VIDES, en dernier — après que les fichiers ont créé les leurs.
+  //
+  // Un dossier peuplé n'a pas besoin de cette passe : `pullOne` crée déjà
+  // l'arborescence de chaque fichier qu'il écrit. Ne restent donc ici que les
+  // dossiers qu'AUCUN chemin n'implique — ceux qu'un prof a créés d'avance
+  // depuis l'interface d'administration, avant d'avoir quoi que ce soit à
+  // mettre dedans. Sans cette passe, ils n'atteindraient jamais l'élève.
+  if (!result.cancelled && !aborted()) {
+    result.foldersCreated = await pullEmptyFolders()
+  }
+
   return result
+
+  /**
+   * Crée localement les dossiers vides du serveur. Ne lève JAMAIS : la
+   * collection est facultative (404 sur un serveur pas encore réappliqué), et
+   * un rangement manquant ne doit pas faire échouer une synchronisation de
+   * contenu qui, elle, a réussi.
+   */
+  async function pullEmptyFolders(): Promise<number> {
+    if (client.folders === undefined) return 0
+    let created = 0
+    try {
+      const records = await client.folders.getFullList({ signal })
+      for (const record of records) {
+        if (aborted()) break
+        // `path` est une entrée distante non vérifiée, comme celui d'une carte :
+        // le même garde s'applique, sans quoi un `../..` créerait un dossier
+        // hors du dossier synchronisé.
+        if (!isSafeRelativePath(record.path)) continue
+        const absolute = await join(syncFolderPath, record.path)
+        if (await exists(absolute)) continue
+        await mkdir(absolute, { recursive: true })
+        created += 1
+      }
+    } catch {
+      // Silencieux par contrat — voir le commentaire ci-dessus.
+    }
+    return created
+  }
 }

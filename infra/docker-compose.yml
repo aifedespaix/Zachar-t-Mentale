@@ -1,10 +1,22 @@
 services:
   pocketbase:
-    # ÉPINGLÉ, jamais :latest — le script infra/setup-pocketbase.mjs parle l'API
-    # des collections de PocketBase >= 0.23, et le SDK JS embarqué dans l'app
+    # Construite plutôt que tirée telle quelle : l'image ajoute l'interface
+    # d'administration (`admin/`) dans le `/pb_public` de PocketBase, qui la
+    # sert alors à la racine du même domaine que l'API. Un seul conteneur, un
+    # seul port, aucune origine supplémentaire — voir infra/Dockerfile.
+    #
+    # L'image de BASE reste ÉPINGLÉE (ghcr.io/muchobien/pocketbase:0.40.3),
+    # jamais :latest — le script infra/setup-pocketbase.mjs parle l'API des
+    # collections de PocketBase >= 0.23, et le SDK JS embarqué dans l'app
     # (pocketbase@0.28) vise exactement cette série. Mettez à jour les deux
-    # ensemble : nouvelle image + vérification du script.
-    image: ghcr.io/muchobien/pocketbase:0.40.3
+    # ensemble : nouvelle image dans infra/Dockerfile + vérification du script.
+    #
+    # Le contexte est la RACINE du dépôt, pas `infra/` : la construction a
+    # besoin de `admin/` et de `src/` (l'admin importe le code pur de
+    # l'application de bureau).
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
     restart: unless-stopped
     environment:
       # L'image crée (ou met à jour) ce superutilisateur au démarrage via
@@ -32,6 +44,40 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # La migration du schéma, jouée à CHAQUE déploiement.
+  #
+  # Ce n'est pas un service : aucun port, aucun domaine, rien à router. Il
+  # attend que PocketBase se déclare sain, applique
+  # `infra/setup-pocketbase.mjs`, et s'arrête. Le script étant idempotent, un
+  # serveur déjà à jour ne bouge pas — il répond « Rien à faire » et sort en 0.
+  #
+  # Pourquoi un conteneur séparé : l'image PocketBase ne contient qu'un binaire
+  # Go sur une Alpine nue, sans runtime JavaScript. Y ajouter Bun pour exécuter
+  # le script une fois au démarrage alourdirait l'image qui tourne en
+  # permanence, pour un travail qui dure trois secondes.
+  #
+  # Si vous préférez maîtriser le moment de la migration, supprimez ce bloc :
+  # `bun run infra:apply` depuis votre poste fait exactement la même chose.
+  schema:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.schema
+    depends_on:
+      pocketbase:
+        # Pas « démarré » mais « sain » : le script échouerait sur une API qui
+        # n'accepte pas encore de connexion, et PocketBase met un instant à
+        # ouvrir la sienne au premier lancement (création de la base).
+        condition: service_healthy
+    # Un travail ponctuel : il s'arrête, et il ne doit pas être relancé en
+    # boucle pour autant.
+    restart: "no"
+    environment:
+      # Le nom du service sur le réseau interne du compose : la migration ne
+      # sort jamais sur Internet, et ne dépend donc ni du tunnel ni du domaine.
+      PB_URL: http://pocketbase:8090
+      PB_ADMIN_EMAIL: ${PB_ADMIN_EMAIL:?Renseignez PB_ADMIN_EMAIL dans infra/.env}
+      PB_ADMIN_PASSWORD: ${PB_ADMIN_PASSWORD:?Renseignez PB_ADMIN_PASSWORD dans infra/.env}
 
 volumes:
   pb_data:

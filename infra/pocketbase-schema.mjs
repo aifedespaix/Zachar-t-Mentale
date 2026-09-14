@@ -98,6 +98,26 @@ export const ASSET_RULES = {
 }
 
 /**
+ * The `created` / `updated` timestamps — which PocketBase >= 0.23 does NOT add
+ * on its own.
+ *
+ * They used to be implicit system columns; they are now ordinary `autodate`
+ * fields. The DASHBOARD still puts them on every collection it creates, which
+ * is why this was invisible for so long: a server set up by hand had them, and
+ * only a server bootstrapped by THIS script did not. Creating a collection
+ * through the API with an explicit `fields` array gets exactly those fields and
+ * nothing else.
+ *
+ * That is not cosmetic. `updated` is load-bearing for the sync: `isConflict`
+ * and the pull-side "have I already seen this revision?" check both read
+ * `remote.updated` (see `src/sync/syncService.ts`). Without the field the API
+ * simply omits it, every comparison comes out `undefined`, and the algorithm
+ * loses the only thing that tells it a record moved on the server.
+ */
+const CREATED_FIELD = { name: 'created', type: 'autodate', onCreate: true, onUpdate: false }
+const UPDATED_FIELD = { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+
+/**
  * `help` is written to the server so the dashboard explains each field to
  * whoever opens the collections later — the documentation travels with the
  * schema instead of living only in this repository.
@@ -128,6 +148,11 @@ export const MIND_MAP_FIELDS = [
     max: 64,
     help: 'Type de la carte (cours, exo, prise de notes, corrections, corrigé). Vide = non classée.',
   },
+  // `updated` est LU par la synchronisation à chaque passage : ce n'est pas une
+  // commodité d'affichage, c'est ce qui distingue « le serveur a bougé » de
+  // « je l'ai déjà vu ». Voir le commentaire de CREATED_FIELD.
+  CREATED_FIELD,
+  UPDATED_FIELD,
 ]
 
 export const ASSET_FIELDS = [
@@ -240,6 +265,30 @@ export function desiredCollections() {
       // accounts come from here, or from the dashboard.
       rules: { createRule: null },
     },
+    // L'espace du professeur. Ajouté APRÈS les trois collections ci-dessus, et
+    // séparément : un serveur qui ne les a pas encore synchronise exactement
+    // comme avant — il ne remonte simplement rien à l'interface d'admin.
+    {
+      name: FOLDERS_COLLECTION,
+      kind: 'base',
+      fields: FOLDER_FIELDS,
+      indexes: FOLDER_INDEXES,
+      rules: FOLDER_RULES,
+    },
+    {
+      name: SYNC_EVENTS_COLLECTION,
+      kind: 'base',
+      fields: SYNC_EVENT_FIELDS,
+      indexes: SYNC_EVENT_INDEXES,
+      rules: SYNC_EVENT_RULES,
+    },
+    {
+      name: SYNC_CONFLICTS_COLLECTION,
+      kind: 'base',
+      fields: SYNC_CONFLICT_FIELDS,
+      indexes: SYNC_CONFLICT_INDEXES,
+      rules: SYNC_CONFLICT_RULES,
+    },
   ]
 }
 
@@ -257,6 +306,10 @@ const OWNED_OPTIONS = [
   'values',
   'help',
   'autogeneratePattern',
+  // Propres aux champs `autodate` : sans eux, un `updated` qui ne se met plus à
+  // jour à l'écriture ressemblerait à un champ conforme.
+  'onCreate',
+  'onUpdate',
 ]
 
 function sameJson(a, b) {
@@ -424,4 +477,196 @@ export function planCollection(current, desired) {
 
   if (changes.length === 0) return { changes: [] }
   return { update: { fields, indexes, ...wanted }, changes }
+}
+
+// ---------------------------------------------------------------------------
+// L'espace du professeur : ce que l'interface d'administration lit et écrit.
+//
+// Ces trois collections n'existent QUE pour l'admin web (`admin/`) et pour ce
+// que les clients lui rapportent. L'application de bureau continue de
+// fonctionner sans elles : un serveur qui n'a pas encore été réappliqué ne
+// perd aucune fonction de synchronisation, il ne remonte simplement rien au
+// journal. C'est délibéré — le rapport est un effet de bord, jamais une
+// condition du sync.
+// ---------------------------------------------------------------------------
+
+export const FOLDERS_COLLECTION = 'dossiers'
+export const SYNC_EVENTS_COLLECTION = 'sync_events'
+export const SYNC_CONFLICTS_COLLECTION = 'sync_conflicts'
+
+/** « Ce compte est un prof », la seule élévation de privilège du modèle. */
+const IS_PROF = '@request.auth.role = "prof"'
+
+/**
+ * Un dossier VIDE, et rien d'autre.
+ *
+ * Un dossier peuplé n'a pas besoin d'exister ici : il est déjà impliqué par le
+ * `path` des cartes qu'il contient, et c'est cette dérivation qui reste la
+ * source de vérité de l'arborescence. Cette collection répond à la seule
+ * question que le `path` ne sait pas porter — « le prof a créé
+ * “Chapitre 5” avant d'avoir quoi que ce soit à mettre dedans » — pour que le
+ * dossier survive au rechargement de la page et descende chez l'élève.
+ */
+export const FOLDER_FIELDS = [
+  {
+    name: 'path',
+    type: 'text',
+    required: true,
+    min: 1,
+    max: 1024,
+    help: 'Chemin relatif du dossier depuis la racine du dossier synchronisé, sans séparateur final.',
+  },
+  {
+    name: 'created_by',
+    type: 'text',
+    required: false,
+    max: 255,
+    help: 'Pseudo du compte qui a créé le dossier. Informatif.',
+  },
+]
+
+export const FOLDER_INDEXES = ['CREATE UNIQUE INDEX `idx_dossiers_path` ON `dossiers` (`path`)']
+
+export const FOLDER_RULES = {
+  // Lecture publique, comme les cartes : un élève doit voir l'agencement que
+  // le prof a décidé, sinon un dossier créé au téléphone n'atteint personne.
+  listRule: '',
+  viewRule: '',
+  createRule: '@request.auth.id != ""',
+  // Réarranger, c'est la prérogative du prof — même règle que « déplacer la
+  // carte d'un élève », à ceci près qu'un dossier n'a pas d'auteur à consulter.
+  updateRule: IS_PROF,
+  deleteRule: IS_PROF,
+}
+
+/**
+ * Le journal de synchronisation, côté SERVEUR.
+ *
+ * L'application de bureau tient déjà un journal local (`sync-debug.log`), qui
+ * reste le plus détaillé — mais il est sur la machine de l'élève, c'est-à-dire
+ * exactement là où le prof n'est pas. Une ligne par exécution atterrit ici pour
+ * qu'il puisse répondre à « est-ce que ça passe chez lui ? » depuis son
+ * téléphone, sans rien installer.
+ */
+export const SYNC_EVENT_FIELDS = [
+  { name: 'username', type: 'text', required: true, min: 1, max: 255, help: 'Le compte qui a lancé la synchronisation.' },
+  { name: 'role', type: 'text', required: false, max: 32, help: 'Son rôle au moment de l’exécution (eleve/prof).' },
+  {
+    name: 'level',
+    type: 'select',
+    required: true,
+    maxSelect: 1,
+    values: ['info', 'warning', 'error'],
+    help: 'Gravité de l’exécution : error = au moins un fichier en échec, warning = conflits ou interruption.',
+  },
+  {
+    name: 'trigger',
+    type: 'select',
+    required: false,
+    maxSelect: 1,
+    values: ['manual', 'auto'],
+    help: 'Déclenchement manuel (bouton) ou automatique (minuterie, lancement).',
+  },
+  { name: 'summary', type: 'text', required: true, min: 1, max: 2000, help: 'La phrase que l’application a affichée à l’utilisateur.' },
+  { name: 'pushed', type: 'number', required: false, help: 'Fichiers envoyés.' },
+  { name: 'pulled', type: 'number', required: false, help: 'Fichiers reçus.' },
+  { name: 'conflicts', type: 'number', required: false, help: 'Fichiers en conflit détectés pendant l’exécution.' },
+  { name: 'failures', type: 'number', required: false, help: 'Fichiers en échec.' },
+  { name: 'cancelled', type: 'bool', required: false, help: 'L’exécution a été interrompue avant la fin de son parcours.' },
+  {
+    name: 'detail',
+    type: 'json',
+    required: false,
+    maxSize: 200_000,
+    help: 'Le détail brut : erreurs par fichier, transferts, déplacements. Ce que lit un diagnostic, pas un tableau de bord.',
+  },
+  {
+    name: 'device',
+    type: 'text',
+    required: false,
+    max: 255,
+    help: 'De quelle machine vient l’exécution, tel que le client se décrit. Informatif.',
+  },
+  // L'interface trie et date le journal là-dessus : sans ce champ, la liste
+  // arrive dans un ordre arbitraire et chaque ligne affiche « — ».
+  CREATED_FIELD,
+]
+
+export const SYNC_EVENT_INDEXES = ['CREATE INDEX `idx_sync_events_created` ON `sync_events` (`created`)']
+
+export const SYNC_EVENT_RULES = {
+  // Le journal est l'outil du prof : un élève n'a pas à lire l'activité des
+  // autres, et il a déjà le sien en local, plus complet.
+  listRule: IS_PROF,
+  viewRule: IS_PROF,
+  // Tout compte connecté RAPPORTE — sans quoi il n'y aurait rien à lire.
+  createRule: '@request.auth.id != ""',
+  // Un événement est un fait daté : il ne se corrige pas. Il se purge.
+  updateRule: null,
+  deleteRule: IS_PROF,
+}
+
+/**
+ * Un conflit, promu en enregistrement — avec la version locale perdante.
+ *
+ * `sync()` détecte les conflits et n'en résout aucun : les deux côtés portent
+ * du travail, et seul un humain tranche. Jusqu'ici cet humain devait être
+ * devant la machine de l'élève, parce que la version locale n'existait que là.
+ * `local_content` la met à portée du prof : il compare et arbitre depuis son
+ * téléphone, et l'élève n'a rien à faire.
+ *
+ * `file_id` n'est PAS unique : un même fichier peut entrer en conflit
+ * plusieurs fois, et l'historique des arbitrages est une information. C'est
+ * `status` qui distingue « à traiter » de « classé ».
+ */
+export const SYNC_CONFLICT_FIELDS = [
+  { name: 'file_id', type: 'text', required: true, min: 1, max: 255, help: 'meta.id du .zmap concerné — le lien vers l’enregistrement de cartes_mentales.' },
+  { name: 'path', type: 'text', required: true, min: 1, max: 1024, help: 'Chemin relatif du fichier au moment du conflit.' },
+  { name: 'username', type: 'text', required: true, min: 1, max: 255, help: 'Le compte dont la synchronisation a buté sur ce conflit.' },
+  { name: 'local_modified', type: 'text', required: false, max: 64, help: 'meta.lastModified de la version locale.' },
+  { name: 'remote_updated', type: 'text', required: false, max: 64, help: 'updated de l’enregistrement serveur au moment du conflit.' },
+  {
+    name: 'local_content',
+    type: 'text',
+    required: false,
+    min: 0,
+    max: TEXT_MAX,
+    help: 'La version LOCALE entière, sérialisée — celle qui n’a pas été envoyée. Un max à 0 la plafonnerait à 5000 caractères : ne pas y toucher.',
+  },
+  {
+    name: 'status',
+    type: 'select',
+    required: true,
+    maxSelect: 1,
+    values: ['open', 'resolved'],
+    help: 'open = personne n’a tranché. resolved = le prof a choisi une version.',
+  },
+  {
+    name: 'resolution',
+    type: 'select',
+    required: false,
+    maxSelect: 1,
+    values: ['kept-remote', 'took-local', 'dismissed', 'resolved-elsewhere'],
+    help: 'Ce qui a été décidé, une fois le conflit classé. « resolved-elsewhere » = plus de désaccord, tranché hors de cette interface.',
+  },
+  { name: 'resolved_by', type: 'text', required: false, max: 255, help: 'Le compte qui a tranché.' },
+  { name: 'resolved_at', type: 'text', required: false, max: 64, help: 'Quand, en ISO 8601.' },
+  CREATED_FIELD,
+  UPDATED_FIELD,
+]
+
+export const SYNC_CONFLICT_INDEXES = [
+  'CREATE INDEX `idx_sync_conflicts_status` ON `sync_conflicts` (`status`)',
+  'CREATE INDEX `idx_sync_conflicts_file_id` ON `sync_conflicts` (`file_id`)',
+]
+
+/** Le prof voit tout ; un élève ne voit et ne classe que ses propres conflits. */
+const OWN_CONFLICT_OR_PROF = `${IS_PROF} || @request.auth.username = username`
+
+export const SYNC_CONFLICT_RULES = {
+  listRule: OWN_CONFLICT_OR_PROF,
+  viewRule: OWN_CONFLICT_OR_PROF,
+  createRule: '@request.auth.id != ""',
+  updateRule: OWN_CONFLICT_OR_PROF,
+  deleteRule: OWN_CONFLICT_OR_PROF,
 }

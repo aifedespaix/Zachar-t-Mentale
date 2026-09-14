@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1
+
+# ---------------------------------------------------------------------------
+# La migration du schéma, jouée automatiquement à chaque déploiement.
+#
+# Ce conteneur n'est PAS un service : il démarre quand PocketBase est déclaré
+# sain, applique `infra/setup-pocketbase.mjs`, et s'arrête. Pas de port, pas de
+# domaine, pas de tunnel, rien à router — juste un travail ponctuel, le temps
+# d'une poignée de secondes.
+#
+# C'est le script EXISTANT qui tourne ici, celui qu'on lance à la main depuis un
+# poste, sans copie ni variante : il est idempotent par construction (il compare
+# ce que le serveur a à ce qu'il devrait avoir et n'écrit que la différence),
+# donc le rejouer à chaque déploiement ne coûte rien et ne peut rien casser. Sur
+# un serveur déjà à jour, il répond « Rien à faire » et sort.
+#
+# La version du SDK n'est PAS réécrite ici : elle vient du `bun.lock` de la
+# racine, comme celle de l'application. Épingler un numéro dans ce fichier
+# créerait un second endroit à tenir à jour, et donc un endroit qui dérive.
+# ---------------------------------------------------------------------------
+
+FROM oven/bun:1.3-alpine AS deps
+
+WORKDIR /app
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
+FROM oven/bun:1.3-alpine
+
+WORKDIR /app
+
+# Le SDK PocketBase, et lui seul. Il n'a aucune dépendance transitive, donc
+# c'est suffisant — et ça évite de traîner React et Tauri dans une image dont le
+# seul travail est de parler à une API REST.
+COPY --from=deps /app/node_modules/pocketbase ./node_modules/pocketbase
+
+# `infra/.env` et `infra/backups/` sont exclus par le .dockerignore de la racine :
+# les identifiants arrivent par l'environnement du conteneur, jamais dans une
+# couche d'image.
+COPY infra ./infra
+
+# Sans argument, le script lit PB_URL / PB_ADMIN_EMAIL / PB_ADMIN_PASSWORD dans
+# l'environnement — ce que le compose lui fournit.
+CMD ["bun", "run", "infra/setup-pocketbase.mjs"]

@@ -41,6 +41,7 @@ import {
   type RemoteAssetRecord,
 } from './syncService'
 import { hashContent } from './contentHash'
+import { serializeMindMap } from '../persistence/serialization'
 import { emptyCardCounts } from './cardCounts'
 import { emptySyncState, type SyncState, type SyncStateEntry } from '../persistence/syncState'
 import type { MindMapMeta, SyncUser } from '../types/card'
@@ -59,6 +60,10 @@ function fakeClient(overrides: Partial<SyncClient> = {}): SyncClient {
       download: vi.fn(),
       ...overrides.assets,
     },
+    // `folders` reste ABSENTE si le test ne la fournit pas : c'est la forme
+    // qu'a un client parlant à un serveur pas encore réappliqué, et un double
+    // qui l'inventerait ne testerait plus ce cas-là.
+    ...(overrides.folders === undefined ? {} : { folders: overrides.folders }),
   }
 }
 
@@ -742,6 +747,10 @@ describe('sync — conflits', () => {
           remoteContentHash: await hashContent('[]'),
           localCounts: emptyCardCounts(),
           remoteCounts: emptyCardCounts(),
+          // La version locale voyage avec le signalement : c'est la seule copie
+          // qui existe, et sans elle le conflit ne se tranche que devant cette
+          // machine (voir `syncReporting.ts`).
+          localContent: serializeMindMap({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z' }, []),
         },
       },
     ])
@@ -790,6 +799,10 @@ describe('sync — conflits', () => {
     expect(result.conflicts).toHaveLength(1)
     expect(result.conflicts[0]?.detail?.localCounts).toEqual(emptyCardCounts())
     expect(result.conflicts[0]?.detail?.remoteCounts).toEqual(emptyCardCounts())
+    // Illisible = pas de pièce jointe, mais le conflit est signalé quand même,
+    // et rien n'a été envoyé par-dessus.
+    expect(result.conflicts[0]?.detail?.localContent).toBeUndefined()
+    expect(client.mindMaps.update).not.toHaveBeenCalled()
   })
 
   it('is not a conflict when only we moved — that is an ordinary push', async () => {
@@ -1688,6 +1701,66 @@ describe('sync — classification', () => {
   })
 })
 
+describe('sync — dossiers vides', () => {
+  beforeEach(() => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(readDir).mockResolvedValue([])
+  })
+
+  /** Un client dont la collection `dossiers` répond ce qu'on lui dit. */
+  function withFolders(paths: string[] | Error) {
+    return fakeClient({
+      folders: {
+        getFullList: vi.fn(() =>
+          paths instanceof Error
+            ? Promise.reject(paths)
+            : Promise.resolve(paths.map((path, index) => ({ id: `fold-${index}`, path })))
+        ),
+      },
+    } as any)
+  }
+
+  it('creates locally an empty folder that no path could ever imply', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    const result = await runSync({ client: withFolders(['Chapitre 5']) })
+
+    expect(mkdir).toHaveBeenCalledWith('/cours/Chapitre 5', { recursive: true })
+    expect(result.foldersCreated).toBe(1)
+  })
+
+  it('leaves alone a folder that is already there', async () => {
+    vi.mocked(exists).mockResolvedValue(true)
+    const result = await runSync({ client: withFolders(['Chapitre 5']) })
+
+    expect(result.foldersCreated).toBe(0)
+  })
+
+  it('refuses a remote path that would escape the synced folder', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    const result = await runSync({ client: withFolders(['../ailleurs', 'Bon']) })
+
+    expect(mkdir).not.toHaveBeenCalledWith('/cours/../ailleurs', expect.anything())
+    expect(result.foldersCreated).toBe(1)
+  })
+
+  it('stays green when the server has no such collection: the sync did succeed', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    const notFound = Object.assign(new Error('404'), { status: 404 })
+    const result = await runSync({ client: withFolders(notFound) })
+
+    expect(result.errors).toEqual([])
+    expect(result.foldersCreated).toBe(0)
+  })
+
+  it('does nothing at all for a client that does not speak folders', async () => {
+    vi.mocked(exists).mockResolvedValue(false)
+    const result = await runSync({ client: fakeClient() })
+
+    expect(result.foldersCreated).toBe(0)
+    expect(result.errors).toEqual([])
+  })
+})
+
 /**
  * Le LIEN DE COPIE est un arrangement de fichiers LOCAL : il ne monte pas au
  * serveur, et un tirage ne l'efface pas. Ces deux tests tiennent les deux bouts
@@ -1733,5 +1806,39 @@ describe('sync — lien de copie', () => {
     expect(entry.lastSyncedContentHash).toBe(
       await hashContent(JSON.stringify({ meta: { ...AIFE, type: 'default' }, cards: [] }, null, 2))
     )
+  })
+})
+
+describe('sync — la version locale d’un conflit', () => {
+  /**
+   * Elle part vers le serveur (`sync_conflicts.local_content`, relu par
+   * l'interface d'administration), donc elle suit les mêmes règles que tout ce
+   * qui monte : le lien de copie est un arrangement de fichiers propre à CETTE
+   * machine, et l'emporter promettrait à l'ailleurs une copie qui n'y existe pas.
+   */
+  it('strips the copy link, like every other content that leaves the machine', async () => {
+    const LINK = { groupId: 'file-1', role: 'source' as const, baseName: 'a' }
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z', copyLink: LINK })
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const client = fakeClient({
+      mindMaps: {
+        getFullList: vi.fn().mockResolvedValue([
+          { id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: '[]', updated: '2026-02-01 10:00:00.000Z', type: '' },
+        ]),
+      } as any,
+    })
+
+    const result = await runSync({
+      client,
+      state: memory({ 'file-1': { lastSyncedModified: '2026-01-01T00:00:00.000Z', lastSyncedUpdated: '2026-01-01 00:00:00.000Z' } }),
+    })
+
+    const localContent = result.conflicts[0]?.detail?.localContent
+    expect(localContent).toBeDefined()
+    expect(JSON.parse(localContent!).meta.copyLink).toBeUndefined()
+    // Le reste du meta voyage intact : c'est bien la carte de cet élève.
+    expect(JSON.parse(localContent!).meta.id).toBe('file-1')
+    expect(JSON.parse(localContent!).meta.author).toBe('aife')
   })
 })

@@ -4,6 +4,18 @@ Une seule image, ARM64 compatible (Raspberry Pi), SQLite embarqué — pas de ba
 de données séparée. Toute la configuration des collections est **automatique** :
 il n'y a plus rien à créer à la main dans le tableau de bord.
 
+Depuis l'arrivée de l'espace professeur, **le même conteneur sert aussi
+l'interface web d'administration** (`admin/`) à la racine du domaine. PocketBase
+publie de lui-même le contenu de `--publicDir` (`/pb_public`) pour toute URL qui
+n'est ni `/api/…` ni `/_/…` : le Dockerfile y dépose le SPA construit, et il n'y
+a donc **ni second conteneur, ni second domaine, ni CORS à ouvrir**.
+
+| URL | Servie par |
+| --- | --- |
+| `https://cartes.mon-domaine.fr/` | l'interface professeur (`admin/`) |
+| `https://cartes.mon-domaine.fr/api/…` | l'API PocketBase — **inchangée**, l'application de bureau ne voit aucune différence |
+| `https://cartes.mon-domaine.fr/_/` | le tableau de bord PocketBase |
+
 ## 1. Renseigner les identifiants d'administration
 
 ```bash
@@ -24,6 +36,26 @@ Dans Dokploy, créez une application « Docker Compose » pointant sur
 Exposez le port `8090` derrière votre tunnel Cloudflare, sur le sous-domaine de
 votre choix (ex. `cartes.mon-domaine.fr`).
 
+> **Si votre déploiement existe déjà, il n'y a RIEN à reconfigurer côté
+> Dokploy ni côté tunnel.** Le service, son nom, son port `8090` et son volume
+> `pb_data` sont inchangés ; seule la façon de fabriquer l'image change. Le
+> domaine que vous avez déjà servira l'interface professeur en plus de l'API.
+>
+> Une seule chose est à vérifier dans Dokploy : que le service est bien
+> **construit depuis le dépôt** et non tiré d'un registre. Le compose déclare
+> désormais `build:` au lieu de `image:` — Dokploy le fait tout seul au premier
+> redéploiement, mais s'il avait mis l'image en cache, un « Redeploy » (ou
+> « Rebuild ») force la reconstruction.
+>
+> Le contexte de construction est la **racine du dépôt**, pas `infra/` : l'image
+> a besoin de `admin/` et de `src/`. C'est déjà ce que déclare le compose
+> (`context: ..`) ; rien à saisir.
+
+Le premier build est plus long que d'habitude (il installe les dépendances de
+`admin/` et compile le SPA, soit une poignée de secondes à quelques minutes
+selon la machine). Les suivants réutilisent la couche des dépendances tant que
+`admin/package.json` ne change pas.
+
 L'image crée le superutilisateur au premier démarrage (`superuser upsert`, donc
 idempotent au redémarrage) : **plus besoin de passer par `/_/`** pour
 l'administrateur, sauf si vous voulez y jeter un œil.
@@ -34,7 +66,33 @@ l'administrateur, sauf si vous voulez y jeter un œil.
 > monter de version : changez l'image, relancez le script (voir plus bas) ; s'il
 > se plaint, lisez son message avant de déployer.
 
-## 3. Configurer le serveur : une commande
+## 3. Configurer le serveur
+
+### Automatiquement, à chaque déploiement (par défaut)
+
+Le compose embarque un service `schema` : il attend que PocketBase se déclare
+sain, applique `infra/setup-pocketbase.mjs`, puis s'arrête. **Vous n'avez rien à
+lancer** — un `git push` suivi d'un déploiement Dokploy met la base au niveau du
+code qui vient d'être déployé.
+
+Ce n'est pas un service qui tourne : pas de port, pas de domaine, rien à router.
+Il vit trois secondes et sort. Le script étant idempotent, un serveur déjà à
+jour ne bouge pas (« Rien à faire »), et le rejouer à chaque déploiement ne
+coûte rien.
+
+```bash
+docker compose -f infra/docker-compose.yml logs schema   # ce qu'il a fait
+```
+
+> Si le service `schema` échoue, le déploiement est signalé en échec. C'est
+> voulu : une base en retard sur le code est exactement ce qu'on ne veut pas
+> laisser passer sans le savoir. Ses messages d'erreur sont ceux du script
+> (section 8).
+>
+> Pour reprendre la main, supprimez le bloc `schema` du compose : la commande
+> ci-dessous fait exactement la même chose, quand vous le décidez.
+
+### À la main, quand vous le voulez
 
 Depuis votre machine, dans le dépôt :
 
@@ -79,6 +137,40 @@ devrait avoir, et n'écrit que ce qui diffère. Relancée, elle répond
 >
 > Idempotent des deux côtés : un serveur déjà à jour ne bouge pas.
 
+> **Un serveur configuré AVANT l'espace professeur doit être réappliqué, lui
+> aussi — par la même commande.** Trois collections s'ajoutent (`dossiers`,
+> `sync_events`, `sync_conflicts`) ; aucune collection existante n'est modifiée,
+> et aucune règle ne change. Tant que le script n'a pas été relancé, la
+> synchronisation fonctionne **exactement comme avant** — c'est l'interface
+> d'administration qui reste partiellement muette : les onglets « Conflits » et
+> « Journal » affichent « collection absente du serveur », et un dossier vide
+> créé depuis le téléphone ne s'enregistre pas. Rien n'est perdu, rien n'est à
+> réparer : il suffit de lancer
+>
+> ```bash
+> bun run infra/setup-pocketbase.mjs --dry-run   # les trois créations annoncées
+> bun run infra/setup-pocketbase.mjs             # applique
+> ```
+
+> **Un serveur amorcé PAR CE SCRIPT avant cette version n'a ni `created` ni
+> `updated` sur `cartes_mentales`, et doit être réappliqué.** PocketBase ≥ 0.23
+> a cessé d'ajouter ces colonnes d'office : le tableau de bord les met encore
+> sur toute collection qu'il crée, mais une collection créée par l'API reçoit
+> exactement les champs demandés, et le script ne les demandait pas. Un serveur
+> configuré à la main dans `/_/` n'est donc PAS concerné ; un serveur monté de
+> zéro par le script l'est.
+>
+> L'effet est silencieux et sérieux : `updated` est ce que la synchronisation
+> lit pour distinguer « le serveur a bougé » de « je l'ai déjà vu »
+> (`isConflict`, et le contrôle de révision côté réception). Absent, l'API ne
+> le renvoie pas, chaque comparaison porte sur `undefined`, et l'algorithme perd
+> son seul repère. Le script ajoute les deux champs sans toucher aux données :
+>
+> ```bash
+> bun run infra/setup-pocketbase.mjs --dry-run   # « champ « updated » ajouté (autodate) »
+> bun run infra/setup-pocketbase.mjs             # applique
+> ```
+
 Ce qu'elle installe :
 
 | Collection       | Champs                                                              | Règles API                                                                   |
@@ -86,6 +178,25 @@ Ce qu'elle installe :
 | `cartes_mentales` | `file_id` (unique), `author`, `path`, `content`, `type`            | lecture publique ; création pour tout compte connecté ; modification et suppression par l'auteur, ou par un compte `prof` |
 | `assets`         | `hash` (unique), `extension`, `file` (≤ 10 Mio)                    | lecture publique ; création pour tout compte connecté ; jamais modifié        |
 | `users`          | ajoute `username` (unique, obligatoire) et `role` (`eleve`/`prof`)  | inscription publique fermée ; connexion par pseudo                            |
+| `dossiers`       | `path` (unique), `created_by`                                       | lecture publique ; création pour tout compte connecté ; renommage et suppression réservés aux `prof` |
+| `sync_events`    | `username`, `level`, `trigger`, `summary`, compteurs, `detail`      | lecture réservée aux `prof` ; écriture pour tout compte connecté ; jamais modifié |
+| `sync_conflicts` | `file_id`, `path`, `username`, `local_content`, `status`            | lecture et arbitrage par le `prof` ou par le compte concerné                   |
+
+Les trois dernières servent **l'espace professeur** (`admin/`), et elles sont
+**facultatives** : un serveur sur lequel le script n'a pas encore été relancé
+synchronise exactement comme avant. Les clients ne font qu'y déposer leur compte
+rendu, et l'échec de ce dépôt n'a jamais d'effet sur une synchronisation (voir
+`src/sync/syncReporting.ts`). Ce qui manque dans ce cas, c'est seulement ce que
+l'interface d'administration affiche : le journal reste vide et les conflits
+n'y remontent pas.
+
+- **`dossiers`** ne contient que les dossiers **vides**. Un dossier peuplé est
+  déjà impliqué par le `path` des cartes qu'il contient — c'est cette
+  dérivation qui reste la source de vérité de l'arborescence.
+- **`sync_conflicts`** porte `local_content` : la version locale **perdante**,
+  celle que `sync()` refuse d'écraser. Sans elle, un conflit ne se tranche que
+  devant la machine de l'élève, puisque c'est le seul endroit où cette version
+  existe.
 
 Les règles exactes de `cartes_mentales`, telles que le script les applique — **inchangées** (le champ `type` n'en ajoute ni n'en retire aucune) :
 
@@ -203,9 +314,16 @@ disparaître le champ `username` des collections par défaut.
 
 ## 8. Quand ça ne marche pas
 
-- **Journal de synchronisation** : chaque connexion et chaque synchronisation y
-  laisse une ligne (succès comme échec), dans le dossier de configuration de
-  l'application :
+- **Le journal, à distance d'abord** : ouvrez `https://…/` → onglet
+  « Journal ». Chaque synchronisation de chaque appareil y laisse une ligne, avec
+  ce qui est parti, ce qui est arrivé, et ce qui a échoué. C'est la façon la plus
+  rapide de répondre à « est-ce que ça passe, chez lui ? » sans toucher à sa
+  machine. Le journal local ci-dessous reste plus détaillé, et reste la
+  référence pour un vrai diagnostic.
+
+- **Journal de synchronisation (local, sur la machine concernée)** : chaque
+  connexion et chaque synchronisation y laisse une ligne (succès comme échec),
+  dans le dossier de configuration de l'application :
 
   | Système | Chemin |
   | --- | --- |
@@ -224,3 +342,21 @@ disparaître le champ `username` des collections par défaut.
 - **Vérifier un serveur déjà en service** : `bun run infra/setup-pocketbase.mjs`
   doit répondre « déjà à jour ». S'il propose des changements, lisez-les : c'est
   exactement ce qu'il appliquera.
+
+## 9. L'espace professeur
+
+L'interface web servie à la racine du domaine. Elle est décrite dans
+[`admin/README.md`](../admin/README.md) ; l'essentiel tient en trois points :
+
+- **On s'y connecte avec les comptes créés à l'étape 4**, et seuls les comptes
+  `prof` sont acceptés.
+- **Elle ne demande aucun déploiement séparé** : elle est dans l'image
+  PocketBase, construite par `infra/Dockerfile`.
+- **Elle a besoin des trois collections de l'étape 3** (`dossiers`,
+  `sync_events`, `sync_conflicts`). Si elle affiche « collection absente du
+  serveur », c'est que le script n'a pas encore été relancé sur ce serveur —
+  une commande, aucune perte de données.
+
+```bash
+bun run infra/setup-pocketbase.mjs --check   # 0 = le serveur a tout ce qu'il faut
+```

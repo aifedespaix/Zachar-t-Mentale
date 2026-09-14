@@ -7,7 +7,19 @@ vi.mock('../persistence/syncState', () => ({
   saveSyncState: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('../persistence/pocketbaseClient', () => ({ createPocketBaseClient: vi.fn() }))
-vi.mock('../sync/pocketBaseAdapter', () => ({ createSyncClient: vi.fn().mockReturnValue({}) }))
+vi.mock('../sync/pocketBaseAdapter', () => ({
+  createSyncClient: vi.fn().mockReturnValue({}),
+  // Le compte rendu au serveur passe par le MÊME module : l'omettre ici rendait
+  // `createReportingClient` indéfini, et la synchronisation échouait sur une
+  // ligne de journal — exactement ce que le point d'appel refuse désormais.
+  createReportingClient: vi.fn().mockReturnValue({
+    createEvent: vi.fn().mockResolvedValue({}),
+    listOpenConflicts: vi.fn().mockResolvedValue([]),
+    createConflict: vi.fn().mockResolvedValue({}),
+    updateConflict: vi.fn().mockResolvedValue({}),
+    closeConflict: vi.fn().mockResolvedValue({}),
+  }),
+}))
 vi.mock('../sync/syncService', () => ({ sync: vi.fn(), surveySyncFolder: vi.fn() }))
 vi.mock('../persistence/syncLog', () => ({ logSyncEvent: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('../persistence/syncStatus', () => ({ loadSyncStatus: vi.fn(), saveSyncStatus: vi.fn() }))

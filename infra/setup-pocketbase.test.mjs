@@ -18,6 +18,9 @@ import {
 import {
   ASSETS_COLLECTION,
   DEFAULT_BACKUP_CRON,
+  FOLDERS_COLLECTION,
+  SYNC_CONFLICTS_COLLECTION,
+  SYNC_EVENTS_COLLECTION,
   DEFAULT_BACKUP_KEEP,
   MIND_MAPS_COLLECTION,
   USERS_COLLECTION,
@@ -211,8 +214,26 @@ describe('export du schéma', () => {
     expect(first.collections.map(collection => collection.name)).toEqual([
       ASSETS_COLLECTION,
       MIND_MAPS_COLLECTION,
+      FOLDERS_COLLECTION,
+      SYNC_CONFLICTS_COLLECTION,
+      SYNC_EVENTS_COLLECTION,
       USERS_COLLECTION,
-    ])
+    ].sort())
+  })
+
+  it('varies ONLY by `exportedAt` between two exports of the same server', () => {
+    // L'invariant sur lequel s'appuie la comparaison de la CI. Il vaut d'être
+    // écrit : le workflow comparait les deux documents ENTIERS, donc il
+    // échouait toujours — `exportedAt` vaut « maintenant » à chaque appel, et
+    // le comparer revenait à vérifier que l'horloge avance.
+    const wanted = desiredCollections().map(entry => ({ ...entry, type: 'base', fields: [], indexes: [] }))
+    const first = exportDocument(wanted, '2026-09-10T20:00:00.000Z')
+    const second = exportDocument(wanted, '2026-09-10T20:00:01.000Z')
+
+    expect(first).not.toEqual(second)
+    const { exportedAt: _first, ...firstConfiguration } = first
+    const { exportedAt: _second, ...secondConfiguration } = second
+    expect(firstConfiguration).toEqual(secondConfiguration)
   })
 
   it('leaves out collections that are none of this script\'s business', () => {
@@ -374,10 +395,56 @@ describe('planCollection', () => {
     const desired = desiredCollections().find(entry => entry.name === MIND_MAPS_COLLECTION)
     const plan = planCollection(undefined, desired)
     expect(plan.create).toMatchObject({ name: MIND_MAPS_COLLECTION, type: 'base' })
-    expect(plan.create.fields.map(field => field.name)).toEqual(['file_id', 'author', 'path', 'content', 'type'])
+    // `created`/`updated` sont DEMANDÉS explicitement : PocketBase >= 0.23 ne
+    // les ajoute plus tout seul à une collection créée par l'API, et `updated`
+    // est ce que la synchronisation lit pour savoir si le serveur a bougé.
+    expect(plan.create.fields.map(field => field.name)).toEqual([
+      'file_id',
+      'author',
+      'path',
+      'content',
+      'type',
+      'created',
+      'updated',
+    ])
     expect(plan.create.updateRule).toBe('@request.auth.username = author || @request.auth.role = "prof"')
     expect(plan.create.deleteRule).toBe('@request.auth.username = author || @request.auth.role = "prof"')
     expect(plan.changes).toEqual(['collection « cartes_mentales » créée'])
+  })
+
+  it('makes `updated` an autodate that follows every write — the sync reads nothing else', () => {
+    // Sans ce champ, l'API omet `updated`, `isConflict` compare des `undefined`
+    // et la synchronisation perd le seul signal qui dit « le serveur a bougé ».
+    const desired = desiredCollections().find(entry => entry.name === MIND_MAPS_COLLECTION)
+    const updated = desired.fields.find(field => field.name === 'updated')
+
+    expect(updated).toMatchObject({ type: 'autodate', onCreate: true, onUpdate: true })
+    // `created` se pose une fois et ne bouge plus : c'est ce qui les distingue.
+    expect(desired.fields.find(field => field.name === 'created')).toMatchObject({
+      type: 'autodate',
+      onCreate: true,
+      onUpdate: false,
+    })
+  })
+
+  it('reports an `updated` that stopped following writes, instead of calling it conform', () => {
+    // Le cas qui compte : le champ EXISTE mais n'est plus mis à jour. Sans
+    // `onCreate`/`onUpdate` dans les options comparées, ce serveur passerait
+    // pour conforme tout en cassant la synchronisation en silence.
+    const desired = desiredCollections().find(entry => entry.name === MIND_MAPS_COLLECTION)
+    const current = {
+      id: 'id-1',
+      name: MIND_MAPS_COLLECTION,
+      fields: desired.fields.map(field =>
+        field.name === 'updated' ? { ...field, id: 'f-updated', onUpdate: false } : { ...field, id: `f-${field.name}` }
+      ),
+      indexes: desired.indexes,
+      ...desired.rules,
+    }
+
+    expect(planCollection(current, desired).changes).toEqual([
+      expect.stringContaining('champ « updated » : onUpdate false → true'),
+    ])
   })
 
   it('is a no-op against a collection it already configured — the idempotence the script promises', () => {
@@ -425,12 +492,17 @@ describe('runSetup', () => {
     const report = await runSetup(client, config, silent)
 
     expect(client.auth).toHaveBeenCalled()
-    expect(client.createCollection).toHaveBeenCalledTimes(2)
+    // Tout ce que le script possède sauf `users`, qui EXISTE déjà sur un
+    // PocketBase vierge et n'est donc jamais créée, seulement complétée.
+    expect(client.createCollection).toHaveBeenCalledTimes(5)
     expect(client.updateCollection).toHaveBeenCalledTimes(1) // users only
     expect(report.collections.map(entry => [entry.name, entry.status])).toEqual([
       [MIND_MAPS_COLLECTION, 'created'],
       [ASSETS_COLLECTION, 'created'],
       [USERS_COLLECTION, 'updated'],
+      [FOLDERS_COLLECTION, 'created'],
+      [SYNC_EVENTS_COLLECTION, 'created'],
+      [SYNC_CONFLICTS_COLLECTION, 'created'],
     ])
   })
 
