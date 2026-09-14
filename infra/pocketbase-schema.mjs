@@ -126,7 +126,7 @@ export const MIND_MAP_FIELDS = [
     type: 'text',
     required: false,
     max: 64,
-    help: 'Type de la carte (cours, exo, prise de notes, corrections). Vide = non classée.',
+    help: 'Type de la carte (cours, exo, prise de notes, corrections, corrigé). Vide = non classée.',
   },
 ]
 
