@@ -51,10 +51,10 @@ arborescence ; autant qu'elle soit propre avant.
 
 Dossiers matière à renommer :
 
-- [ ] `Français/` → `francais/` (décider une seule convention accent/pas
-      d'accent et l'appliquer partout, y compris pour ce qui sera ingéré
-      depuis `to-injest`)
-- [ ] `Histoire-Geo/` → `histoire-geo/`
+- [x] `Français/` → `francais/` (convention retenue : sans accent, cohérente
+      avec `anglais/`, `espagnol/`, `mathematiques/`, `physique-chimie/` — à
+      appliquer aussi pour ce qui sera ingéré depuis `to-injest`)
+- [x] `Histoire-Geo/` → `histoire-geo/`
 
 Fichiers à renommer (kebab-case, sans suffixe de type) :
 
