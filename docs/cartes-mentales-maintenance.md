@@ -117,10 +117,21 @@ Aucun fichier de type `corrections` n'existe aujourd'hui dans
       contenu déjà exact, correction = version prof identique
 - [x] `espagnol/vocabulario/meses-del-ano.zmap` — 12 cartes source, contenu
       déjà exact, correction = version prof identique
-- [ ] `francais/classes-grammaticales.zmap` (ex-"les classes grammaticales
-      exercices")
-- [ ] `francais/mots-invariables.zmap`
-- [ ] `francais/mots-variables.zmap`
+- [x] `francais/classes-grammaticales.zmap` — 2 cartes source (exercice 1
+      seulement, 2 phrases). Erreur corrigée : "l'" dans "je l'ai vu"
+      classé à tort comme déterminant par l'élève, c'est un pronom
+      personnel COD ; réponse manquante pour "grande" (adjectif qualificatif)
+      complétée
+- [x] `francais/mots-invariables.zmap` — 5 classes, 16 cartes source.
+      Restructuré : le contenu était écrit en `title` de cartes filles au
+      lieu de `definition` (aucune carte n'avait de `definition`), en plus
+      d'être très fautif. Correction = une définition propre par classe
+      grammaticale, structure aplatie (plus de niveaux 3/4 redondants)
+- [x] `francais/mots-variables.zmap` — 5 classes, 16 cartes source. Même
+      problème de structure que ci-dessus, avec en plus deux erreurs de fond
+      chez l'élève (pronom présenté comme modifiant "le genre du verbe" au
+      lieu de remplacer un nom ; déterminant réduit à "déterminer le genre").
+      Correction = définitions propres et aplaties
 - [ ] `histoire-geo/guerre-totale.zmap`
 - [ ] `histoire-geo/genocide-armenien.zmap`
 
