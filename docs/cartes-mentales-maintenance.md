@@ -210,7 +210,40 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
       `transformer-cours-en-carte-mentale`, chapitre par chapitre —
       **redéfinir le mapping niveau 2/3/4 pour chaque matière avant de
       commencer** (le mapping maths n'est pas réutilisable tel quel, voir la
-      section "Adaptation à d'autres matières" de la skill)
+      section "Adaptation à d'autres matières" de la skill). **En cours**,
+      démarré par `français 4e` (contenu déjà exploitable, contrairement à
+      arts-plastiques dont le vocabulaire est sans définition — voir décision
+      juste en dessous) :
+  - [x] `français/4e/Chapitre 1/Cours/Conjugaison du passé simple.odt` →
+        `.cartes-mentales/francais/conjugaison-passe-simple.zmap` (`cours`,
+        aife/prof). Tableau de conjugaison propre (Avoir, Être, Venir,
+        Pouvoir), converti tel quel en cartes `kind: media`
+  - [x] `français/4e/Chapitre 2/Exercices/Conjugaison participe passé.odt`
+        (exercice 1 p 332, 15 couples infinitif/participe) →
+        `.cartes-mentales/francais/conjugaison-participe-passe.zmap` (`exo`,
+        zachary/eleve, erreurs d'origine conservées : "craindt" pour
+        craindre, "résoulu" pour résoudre) +
+        `conjugaison-participe-passe-corrections.zmap` (`corrections`,
+        aife/prof, les 2 erreurs corrigées). Exercice 3 du même fichier
+        (3 phrases) **non converti** : texte source trop confus/fautif pour
+        être retranscrit fidèlement (voir point ci-dessous)
+  - [ ] **Contenu sauté, décision utilisateur "tu peux sauter tkt"** —
+        reste à trancher plus tard si besoin : les dossiers `Cours` de
+        `français/4e/Chapitre 1` et `Chapitre 2` contiennent en réalité les
+        notes/bilans de Zachary lui-même (fautes, et même un cas de contenu
+        de fichier inversé avec son nom : `adieu.odt` correspond au poème
+        "Je vis, je meurs" et vice versa), pas un vrai cours rédigé par un
+        prof. Les convertir fidèlement recopierait les fautes dans une carte
+        de révision. Fichiers concernés, non traités :
+        `Chapitre 1/Cours/adieu 🤲.odt`, `Chapitre 1/Cours/je vis, 🤗 je
+        meurs 💀.odt`, `Chapitre 1/Cours/ode a cassandre correction 🐄 🐐
+        🐮 🐽 🐷.odt`, `Chapitre 1/Bilans/Bilan sur le début de la
+        nouvelle.odt` (Maupassant, même problème), et la 3e partie
+        ("exercice 3 p 332") de `Chapitre 2/Exercices/Conjugaison participe
+        passé.odt` (phrases elles-mêmes fautives/ambiguës,
+        ex. "que lui avait d'accordés mon père"). `Chapitre 2/Exercices/
+        correction question le vestron ensorcelée.odt` vérifié aussi :
+        vide/inexploitable (juste "1) 2) 3)")
 - [ ] Pour les exercices rencontrés en cours d'ingestion, appliquer la même
       logique que le sous-projet 2 (créer aussi une correction)
 
