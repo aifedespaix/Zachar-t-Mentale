@@ -152,7 +152,10 @@ export function buildConflictPayload(conflict: SyncConflict, username: string): 
     username,
     local_modified: conflict.localModified,
     remote_updated: conflict.remoteUpdated,
-    local_content: conflict.localContent ?? '',
+    // `detail` porte tout ce qu'une résolution demande, la version locale
+    // comprise — c'est `sync()` qui la monte, au seul instant où les deux
+    // versions sont sous la main.
+    local_content: conflict.detail?.localContent ?? '',
     status: 'open',
   }
 }
@@ -173,6 +176,8 @@ export interface ReportingClient {
   listOpenConflicts(username: string): Promise<OpenConflictRecord[]>
   createConflict(data: SyncConflictPayload): Promise<unknown>
   updateConflict(id: string, data: SyncConflictPayload): Promise<unknown>
+  /** Classe un conflit que cette exécution n'a plus rencontré. */
+  closeConflict(id: string, resolution: string, by: string): Promise<unknown>
 }
 
 export interface ReportOutcome {
@@ -182,9 +187,14 @@ export interface ReportOutcome {
   opened: number
   /** Conflits déjà ouverts, simplement rafraîchis. */
   refreshed: number
+  /** Conflits classés d'office parce qu'ils n'existent plus. */
+  closed: number
   /** Ce qui n'est pas passé, en clair — pour le journal local, jamais pour l'utilisateur. */
   failures: string[]
 }
+
+/** Comment un conflit disparu est classé — « plus de désaccord », pas « j'ai choisi ». */
+export const RESOLVED_ELSEWHERE = 'resolved-elsewhere'
 
 /**
  * Pousse le rapport d'une exécution. Ne lève JAMAIS — voir l'en-tête du module.
@@ -201,7 +211,7 @@ export async function reportSyncRun(
   result: SyncResult,
   context: ReportContext
 ): Promise<ReportOutcome> {
-  const outcome: ReportOutcome = { event: false, opened: 0, refreshed: 0, failures: [] }
+  const outcome: ReportOutcome = { event: false, opened: 0, refreshed: 0, closed: 0, failures: [] }
 
   try {
     await client.createEvent(buildSyncEvent(result, context))
@@ -210,8 +220,8 @@ export async function reportSyncRun(
     outcome.failures.push(`journal : ${describe(error)}`)
   }
 
-  if (result.conflicts.length === 0) return outcome
-
+  // On consulte les conflits ouverts MÊME quand cette exécution n'en signale
+  // aucun : c'est justement le cas où il y a quelque chose à classer.
   let openByFileId = new Map<string, string>()
   try {
     const open = await client.listOpenConflicts(context.username)
@@ -238,7 +248,41 @@ export async function reportSyncRun(
     }
   }
 
+  await closeVanished()
+
   return outcome
+
+  /**
+   * Classe les conflits ouverts que cette exécution n'a PLUS rencontrés.
+   *
+   * Un conflit tranché ailleurs — dans la boîte de dialogue de l'application,
+   * ou simplement parce que l'élève a recopié la bonne version — cesse d'être
+   * signalé, mais son enregistrement, lui, resterait `open` pour toujours. La
+   * liste du prof accumulerait alors des fantômes, et deviendrait illisible
+   * exactement là où elle doit être fiable.
+   *
+   * Cette passe ne demande pas COMMENT il a été résolu : elle constate qu'il
+   * n'y a plus de désaccord, ce que la synchronisation qui vient de tourner est
+   * la mieux placée pour savoir. D'où `resolved-elsewhere`, qui ne prétend pas
+   * qu'une décision a été prise ici.
+   *
+   * Une exécution INTERROMPUE ne classe rien : elle n'a pas parcouru tout le
+   * dossier, donc « ce fichier n'est plus en conflit » y voudrait seulement
+   * dire « je ne suis pas allé voir ».
+   */
+  async function closeVanished(): Promise<void> {
+    if (result.cancelled) return
+    const stillConflicted = new Set(result.conflicts.map(entry => entry.fileId))
+    for (const [fileId, recordId] of openByFileId) {
+      if (stillConflicted.has(fileId)) continue
+      try {
+        await client.closeConflict(recordId, RESOLVED_ELSEWHERE, context.username)
+        outcome.closed += 1
+      } catch (error) {
+        outcome.failures.push(`classement du conflit « ${fileId} » : ${describe(error)}`)
+      }
+    }
+  }
 }
 
 function describe(error: unknown): string {

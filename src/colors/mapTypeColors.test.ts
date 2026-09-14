@@ -20,8 +20,8 @@ describe('mapTypeColors', () => {
     }
   })
 
-  it('covers exactly the four classified types — default has no colour', () => {
-    expect(Object.keys(mapTypeColors)).toEqual(['cours', 'exo', 'prise de notes', 'corrections'])
+  it('covers exactly the five classified types — default has no colour', () => {
+    expect(Object.keys(mapTypeColors)).toEqual(['cours', 'exo', 'prise de notes', 'corrections', 'corrigé'])
   })
 
   it('reads « prise de notes » as achromatic: the draft has no colour of its own', () => {
@@ -37,7 +37,7 @@ describe('mapTypeColors', () => {
   })
 
   it('returns the exact palette for every classified type, per theme', () => {
-    for (const type of ['cours', 'exo', 'prise de notes', 'corrections'] as const) {
+    for (const type of ['cours', 'exo', 'prise de notes', 'corrections', 'corrigé'] as const) {
       expect(mapTypeColor(type, 'light')).toBe(mapTypeColors[type].light)
       expect(mapTypeColor(type, 'dark')).toBe(mapTypeColors[type].dark)
     }
@@ -70,8 +70,8 @@ describe('mapTypeColors', () => {
     expect(mapTypeColor('default', 'dark')).toBeNull()
   })
 
-  it('keeps the four known types on their own palette, never the neutral fallback', () => {
-    for (const type of ['cours', 'exo', 'prise de notes', 'corrections'] as const) {
+  it('keeps the five known types on their own palette, never the neutral fallback', () => {
+    for (const type of ['cours', 'exo', 'prise de notes', 'corrections', 'corrigé'] as const) {
       expect(mapTypeColor(type, 'light')).toBe(mapTypeColors[type].light)
       expect(mapTypeColor(type, 'dark')).toBe(mapTypeColors[type].dark)
       expect(mapTypeColor(type, 'light')).not.toBe(neutralMapTypeColors.light)

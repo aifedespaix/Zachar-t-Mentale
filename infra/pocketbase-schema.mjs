@@ -146,7 +146,7 @@ export const MIND_MAP_FIELDS = [
     type: 'text',
     required: false,
     max: 64,
-    help: 'Type de la carte (cours, exo, prise de notes, corrections). Vide = non classée.',
+    help: 'Type de la carte (cours, exo, prise de notes, corrections, corrigé). Vide = non classée.',
   },
   // `updated` est LU par la synchronisation à chaque passage : ce n'est pas une
   // commodité d'affichage, c'est ce qui distingue « le serveur a bougé » de
@@ -646,8 +646,8 @@ export const SYNC_CONFLICT_FIELDS = [
     type: 'select',
     required: false,
     maxSelect: 1,
-    values: ['kept-remote', 'took-local', 'dismissed'],
-    help: 'Ce qui a été décidé, une fois le conflit classé.',
+    values: ['kept-remote', 'took-local', 'dismissed', 'resolved-elsewhere'],
+    help: 'Ce qui a été décidé, une fois le conflit classé. « resolved-elsewhere » = plus de désaccord, tranché hors de cette interface.',
   },
   { name: 'resolved_by', type: 'text', required: false, max: 255, help: 'Le compte qui a tranché.' },
   { name: 'resolved_at', type: 'text', required: false, max: 64, help: 'Quand, en ISO 8601.' },

@@ -10,6 +10,7 @@ import {
   type ReportingClient,
 } from './syncReporting'
 import type { SyncConflict, SyncResult } from './syncService'
+import { emptyCardCounts } from './cardCounts'
 
 function result(overrides: Partial<SyncResult> = {}): SyncResult {
   return {
@@ -23,13 +24,26 @@ function result(overrides: Partial<SyncResult> = {}): SyncResult {
   }
 }
 
+/** Le `detail` que `sync()` renseigne toujours, réduit à ce que le rapport y lit. */
+function detail(localContent: string | undefined): SyncConflict['detail'] {
+  return {
+    localPath: '/cours/Maths/Chapitre 1.zmap',
+    remotePath: 'Maths/Chapitre 1.zmap',
+    remoteContent: '[]',
+    remoteContentHash: 'abc',
+    localCounts: emptyCardCounts(),
+    remoteCounts: emptyCardCounts(),
+    ...(localContent === undefined ? {} : { localContent }),
+  }
+}
+
 function conflict(overrides: Partial<SyncConflict> = {}): SyncConflict {
   return {
     fileId: 'file-1',
     path: 'Maths/Chapitre 1.zmap',
     localModified: '2026-09-10T10:00:00.000Z',
     remoteUpdated: '2026-09-10T11:00:00.000Z',
-    localContent: '{"meta":{},"cards":[]}',
+    detail: detail('{"meta":{},"cards":[]}'),
     ...overrides,
   }
 }
@@ -48,6 +62,7 @@ function fakeClient(overrides: Partial<ReportingClient> = {}): ReportingClient {
     listOpenConflicts: vi.fn(async () => []),
     createConflict: vi.fn(async () => ({})),
     updateConflict: vi.fn(async () => ({})),
+    closeConflict: vi.fn(async () => ({})),
     ...overrides,
   }
 }
@@ -147,9 +162,17 @@ describe('buildConflictPayload', () => {
   })
 
   it('still reports a conflict whose local file could not be read', () => {
-    const payload = buildConflictPayload(conflict({ localContent: undefined }), 'eleve1')
+    const payload = buildConflictPayload(conflict({ detail: detail(undefined) }), 'eleve1')
     expect(payload.local_content).toBe('')
     expect(payload.status).toBe('open')
+  })
+
+  it('still reports a conflict that carries no detail at all', () => {
+    // `sync()` le renseigne toujours, mais le champ est optionnel dans le type :
+    // un conflit sans détail ne doit pas faire exploser le rapport.
+    const payload = buildConflictPayload(conflict({ detail: undefined }), 'eleve1')
+    expect(payload.local_content).toBe('')
+    expect(payload.file_id).toBe('file-1')
   })
 })
 
@@ -221,9 +244,60 @@ describe('reportSyncRun', () => {
     expect(outcome.failures).toEqual(['conflit « Maths/Chapitre 1.zmap » : refusé'])
   })
 
-  it('does not go looking for open conflicts when there are none to report', async () => {
+  it('looks at the open conflicts even on a run that reports none — that is when there is something to close', async () => {
     const client = fakeClient()
     await reportSyncRun(client, result({ pushed: 4 }), context)
-    expect(client.listOpenConflicts).not.toHaveBeenCalled()
+    expect(client.listOpenConflicts).toHaveBeenCalledWith('eleve1')
+  })
+
+  it('closes a conflict this run no longer sees — someone settled it on the device', async () => {
+    // La boîte de dialogue de l'application sait résoudre un conflit toute
+    // seule. Sans cette passe, son enregistrement resterait « à trancher » pour
+    // toujours, et la liste du prof accumulerait des fantômes.
+    const client = fakeClient({
+      listOpenConflicts: vi.fn(async () => [{ id: 'rec-1', file_id: 'file-1' }]),
+    })
+    const outcome = await reportSyncRun(client, result({ pushed: 1 }), context)
+
+    expect(client.closeConflict).toHaveBeenCalledWith('rec-1', 'resolved-elsewhere', 'eleve1')
+    expect(outcome.closed).toBe(1)
+  })
+
+  it('leaves a conflict this run still reports wide open', async () => {
+    const client = fakeClient({
+      listOpenConflicts: vi.fn(async () => [{ id: 'rec-1', file_id: 'file-1' }]),
+    })
+    const outcome = await reportSyncRun(client, result({ conflicts: [conflict()] }), context)
+
+    expect(client.closeConflict).not.toHaveBeenCalled()
+    expect(outcome).toMatchObject({ refreshed: 1, closed: 0 })
+  })
+
+  it('closes nothing on an interrupted run, which never finished looking', async () => {
+    // « Ce fichier n'est plus en conflit » y voudrait seulement dire « je ne
+    // suis pas allé voir ».
+    const client = fakeClient({
+      listOpenConflicts: vi.fn(async () => [{ id: 'rec-1', file_id: 'file-1' }]),
+    })
+    const outcome = await reportSyncRun(client, result({ cancelled: true }), context)
+
+    expect(client.closeConflict).not.toHaveBeenCalled()
+    expect(outcome.closed).toBe(0)
+  })
+
+  it('keeps closing the others when one refuses', async () => {
+    const closeConflict = vi.fn().mockRejectedValueOnce(new Error('refusé')).mockResolvedValueOnce({})
+    const client = fakeClient({
+      listOpenConflicts: vi.fn(async () => [
+        { id: 'rec-1', file_id: 'file-1' },
+        { id: 'rec-2', file_id: 'file-2' },
+      ]),
+      closeConflict,
+    })
+    const outcome = await reportSyncRun(client, result({ pushed: 1 }), context)
+
+    expect(closeConflict).toHaveBeenCalledTimes(2)
+    expect(outcome.closed).toBe(1)
+    expect(outcome.failures).toEqual(['classement du conflit « file-1 » : refusé'])
   })
 })

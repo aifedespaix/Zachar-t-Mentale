@@ -42,6 +42,7 @@ import {
 } from './syncService'
 import { hashContent } from './contentHash'
 import { serializeMindMap } from '../persistence/serialization'
+import { emptyCardCounts } from './cardCounts'
 import { emptySyncState, type SyncState, type SyncStateEntry } from '../persistence/syncState'
 import type { MindMapMeta, SyncUser } from '../types/card'
 
@@ -739,27 +740,68 @@ describe('sync — conflits', () => {
         path: 'a.zmap',
         localModified: '2026-02-01T00:00:00.000Z',
         remoteUpdated: '2026-02-01 10:00:00.000Z',
-        // La version locale voyage avec le signalement : c'est la seule copie
-        // qui existe, et sans elle le conflit ne se tranche que devant cette
-        // machine (voir `syncReporting.ts`).
-        localContent: serializeMindMap({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z' }, []),
+        detail: {
+          localPath: '/cours/a.zmap',
+          remotePath: 'a.zmap',
+          remoteContent: '[]',
+          remoteContentHash: await hashContent('[]'),
+          localCounts: emptyCardCounts(),
+          remoteCounts: emptyCardCounts(),
+          // La version locale voyage avec le signalement : c'est la seule copie
+          // qui existe, et sans elle le conflit ne se tranche que devant cette
+          // machine (voir `syncReporting.ts`).
+          localContent: serializeMindMap({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z' }, []),
+        },
       },
     ])
   })
 
-  it('still reports the conflict when the losing local version cannot be read', async () => {
-    localFile('2026-02-01T00:00:00.000Z')
-    // Le fichier est bien là pour le scan, mais sa lecture échoue au moment de
-    // joindre la pièce : un conflit sans pièce jointe reste un conflit.
+  it('carries the comparison a resolution needs: both sides counted, card by card', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z' })
+    vi.mocked(loadMindMap).mockResolvedValue([
+      { id: 'root', level: 1, title: 'Racine', parentId: null, order: 0 },
+      { id: 'a', level: 2, title: 'A', parentId: 'root', order: 0 },
+    ])
+    const remoteContent = JSON.stringify([{ id: 'root', level: 1, title: 'Racine serveur', parentId: null, order: 0 }])
+    const client = fakeClient({
+      mindMaps: {
+        getFullList: vi
+          .fn()
+          .mockResolvedValue([{ ...remoteFile('2026-02-01 10:00:00.000Z'), content: remoteContent }]),
+      } as any,
+    })
+
+    const result = await runSync({ client, state: memory({ ...CACHED }) })
+
+    const detail = result.conflicts[0]?.detail
+    expect(detail?.remotePath).toBe('a.zmap')
+    expect(detail?.localPath).toBe('/cours/a.zmap')
+    expect(detail?.remoteContent).toBe(remoteContent)
+    expect(detail?.localCounts).toEqual({ total: 2, byLevel: { 1: 1, 2: 1, 3: 0, 4: 0 }, detached: 0 })
+    expect(detail?.remoteCounts).toEqual({ total: 1, byLevel: { 1: 1, 2: 0, 3: 0, 4: 0 }, detached: 0 })
+  })
+
+  it('never lets an unreadable side turn a reported conflict into a failed sync', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z' })
     vi.mocked(loadMindMap).mockRejectedValue(new Error('disque illisible'))
     const client = fakeClient({
-      mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
+      mindMaps: {
+        getFullList: vi
+          .fn()
+          .mockResolvedValue([{ ...remoteFile('2026-02-01 10:00:00.000Z'), content: 'pas du JSON' }]),
+      } as any,
     })
 
     const result = await runSync({ client, state: memory({ ...CACHED }) })
 
     expect(result.conflicts).toHaveLength(1)
-    expect(result.conflicts[0].localContent).toBeUndefined()
+    expect(result.conflicts[0]?.detail?.localCounts).toEqual(emptyCardCounts())
+    expect(result.conflicts[0]?.detail?.remoteCounts).toEqual(emptyCardCounts())
+    // Illisible = pas de pièce jointe, mais le conflit est signalé quand même,
+    // et rien n'a été envoyé par-dessus.
+    expect(result.conflicts[0]?.detail?.localContent).toBeUndefined()
     expect(client.mindMaps.update).not.toHaveBeenCalled()
   })
 
@@ -1659,7 +1701,6 @@ describe('sync — classification', () => {
   })
 })
 
-
 describe('sync — dossiers vides', () => {
   beforeEach(() => {
     vi.mocked(scanFolder).mockResolvedValue([])
@@ -1717,5 +1758,87 @@ describe('sync — dossiers vides', () => {
 
     expect(result.foldersCreated).toBe(0)
     expect(result.errors).toEqual([])
+  })
+})
+
+/**
+ * Le LIEN DE COPIE est un arrangement de fichiers LOCAL : il ne monte pas au
+ * serveur, et un tirage ne l'efface pas. Ces deux tests tiennent les deux bouts
+ * — sans le premier, une autre machine hériterait d'un badge promettant une
+ * copie qu'elle n'a pas ; sans le second, le premier tirage venu délierait une
+ * copie que l'utilisateur a expressément demandée.
+ */
+describe('sync — lien de copie', () => {
+  const LINK = { groupId: 'file-1', role: 'source' as const, baseName: 'a' }
+
+  it('never sends the copy link to the server', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, copyLink: LINK })
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const create = vi.fn().mockResolvedValue({ id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: '[]', updated: 'u1', type: 'default' })
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([]), create } as any })
+
+    await runSync({ client, state: memory() })
+
+    const sent = create.mock.calls[0]?.[0] as { content: string }
+    expect(JSON.parse(sent.content).meta.copyLink).toBeUndefined()
+    expect(JSON.parse(sent.content).meta.id).toBe('file-1')
+  })
+
+  it('keeps the local copy link on a file it pulls, and compares hashes without it', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, copyLink: LINK })
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const remoteContent = JSON.stringify({ meta: AIFE, cards: [] })
+    const record = { id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: remoteContent, updated: 'u2', type: 'default' }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([record]) } as any })
+    const state = memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u1' } })
+
+    const result = await runSync({ client, state })
+
+    expect(result.pulled).toBe(1)
+    const written = JSON.parse(vi.mocked(writeTextFile).mock.calls[0]?.[1] as string)
+    expect(written.meta.copyLink).toEqual(LINK)
+    // L'empreinte retenue est celle du fichier SANS son lien : c'est elle que
+    // le prochain `isConflict` comparera au contenu distant, qui n'en a pas.
+    const entry = state.servers['https://pb.test'].entries['file-1']
+    expect(entry.lastSyncedContentHash).toBe(
+      await hashContent(JSON.stringify({ meta: { ...AIFE, type: 'default' }, cards: [] }, null, 2))
+    )
+  })
+})
+
+describe('sync — la version locale d’un conflit', () => {
+  /**
+   * Elle part vers le serveur (`sync_conflicts.local_content`, relu par
+   * l'interface d'administration), donc elle suit les mêmes règles que tout ce
+   * qui monte : le lien de copie est un arrangement de fichiers propre à CETTE
+   * machine, et l'emporter promettrait à l'ailleurs une copie qui n'y existe pas.
+   */
+  it('strips the copy link, like every other content that leaves the machine', async () => {
+    const LINK = { groupId: 'file-1', role: 'source' as const, baseName: 'a' }
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z', copyLink: LINK })
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const client = fakeClient({
+      mindMaps: {
+        getFullList: vi.fn().mockResolvedValue([
+          { id: 'rec-1', file_id: 'file-1', author: 'aife', path: 'a.zmap', content: '[]', updated: '2026-02-01 10:00:00.000Z', type: '' },
+        ]),
+      } as any,
+    })
+
+    const result = await runSync({
+      client,
+      state: memory({ 'file-1': { lastSyncedModified: '2026-01-01T00:00:00.000Z', lastSyncedUpdated: '2026-01-01 00:00:00.000Z' } }),
+    })
+
+    const localContent = result.conflicts[0]?.detail?.localContent
+    expect(localContent).toBeDefined()
+    expect(JSON.parse(localContent!).meta.copyLink).toBeUndefined()
+    // Le reste du meta voyage intact : c'est bien la carte de cet élève.
+    expect(JSON.parse(localContent!).meta.id).toBe('file-1')
+    expect(JSON.parse(localContent!).meta.author).toBe('aife')
   })
 })

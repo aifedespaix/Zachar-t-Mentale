@@ -1,5 +1,6 @@
 import type { CardBlock } from './cardBlock'
 import type { MapType } from './mapType'
+import type { CopyLink } from '../sync/copyLink'
 
 export type CardLevel = 1 | 2 | 3 | 4
 
@@ -27,6 +28,12 @@ export interface MindMapMeta {
    * avant ce champ restent lisibles tels quels, sans migration.
    */
   type?: MapType
+  /**
+   * Le lien qui attache cette carte à la copie née d'un conflit — ou à
+   * l'original dont elle est la copie. Absent pour l'immense majorité des
+   * fichiers : seul « Créer une copie » en pose un (voir `sync/copyLink.ts`).
+   */
+  copyLink?: CopyLink
 }
 
 /**

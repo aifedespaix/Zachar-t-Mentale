@@ -126,6 +126,9 @@ function Tab({ active, onClick, children }: { active: boolean; onClick: () => vo
 function resolutionLabel(resolution: string | undefined): string {
   if (resolution === 'took-local') return 'version élève'
   if (resolution === 'kept-remote') return 'version serveur'
+  // Personne n'a tranché ICI : une synchronisation a simplement constaté que
+  // les deux côtés étaient de nouveau d'accord (voir `syncReporting.ts`).
+  if (resolution === 'resolved-elsewhere') return 'résolu sur l’appareil'
   return 'classé'
 }
 

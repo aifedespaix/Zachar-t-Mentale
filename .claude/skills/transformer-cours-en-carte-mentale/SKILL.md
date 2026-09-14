@@ -1,6 +1,6 @@
 ---
 name: transformer-cours-en-carte-mentale
-description: Use when converting a course PDF (or any raw course material — worksheet, fill-in-the-blank sheet, existing but poorly-structured mind map) into a mind map file for the Zachar't Mentale app — producing Card JSON data, not application code.
+description: Use when converting a course PDF (or any raw course material — worksheet, fill-in-the-blank sheet, existing but poorly-structured mind map) into a mind map file for the Zachar't Mentale app, or when correcting a student's already-filled `.zmap` as a teacher — producing Card JSON data, not application code.
 ---
 
 # Transformer un cours en carte mentale
@@ -28,6 +28,7 @@ interface Card {
   content?: CardBlock[]    // optionnel pour une définition, obligatoire (≥ 1 bloc non-text) pour un média
   parentId: string | null  // null uniquement pour la racine
   order: number             // position parmi les frères/sœurs
+  icon?: string             // nom Lucide en PascalCase, purement mnémonique — cf. « Corriger le fichier d'un élève »
 }
 
 type CardBlock =
@@ -44,9 +45,12 @@ type CardBlock =
 - `meta` = `{ "id": <uuid>, "author": <pseudo fourni>, "role": <"eleve" | "prof" fourni>, "lastModified": <ISO maintenant>, "type": <type> }`.
   Le pseudo et le rôle sont ceux de la personne pour qui le fichier est produit ;
   si l’invocation ne les donne pas, les DEMANDER avant d’écrire.
-- `type` appartient à `"cours" | "exo" | "prise de notes" | "corrections" | "default"` :
+- `type` appartient à
+  `"cours" | "exo" | "prise de notes" | "corrections" | "corrigé" | "default"` :
   `cours` pour un contenu de référence, `exo` pour un entraînement,
-  `prise de notes` pour des notes à compléter, `corrections` pour une correction,
+  `prise de notes` pour des notes à compléter, `corrections` pour un corrigé de
+  référence écrit pour tout le monde, `corrigé` pour la copie d’un élève
+  reprise par son prof (voir « Corriger le fichier d’un élève » plus bas),
   `default` si le document ne relève clairement d’aucun.
 - Extension : `.zmap` — c'est celle que l'installeur associe à l'app, donc la
   carte s'ouvre d'un double-clic depuis l'explorateur. Le contenu reste du JSON.
@@ -225,6 +229,65 @@ Son frère niveau 3 "Même signe" reçoit une `definition` de longueur et de
 registre comparables, pas deux fois plus courte — sinon un QCM les
 distinguerait trivialement.
 
+## Corriger le fichier d’un élève — le type `corrigé`
+
+Cas d’entrée différent de tous les autres : l’invocation ne donne pas un
+support de cours à structurer mais un `.zmap` DÉJÀ REMPLI par un élève (une
+fiche de questions, des réponses, une prise de notes), et demande de le
+corriger en tant que prof. Le résultat est le MÊME fichier, repris — jamais
+un fichier neuf à côté.
+
+**`corrections` et `corrigé` ne sont pas le même type** :
+
+| Type | Ce que c’est | Qui l’écrit |
+|---|---|---|
+| `corrections` | le corrigé de référence d’un exercice ou d’une évaluation, indépendant de toute copie | le prof, pour toute la classe |
+| `corrigé` | la copie d’UN élève, reprise et rectifiée, son travail conservé | le prof, dans le fichier de l’élève |
+
+### Ce qui change dans `meta`
+
+Seulement `type` → `"corrigé"` et `lastModified` → l’instant de la correction.
+
+**`id`, `author` et `role` ne changent pas.** Le fichier reste celui de
+l’élève : l’app autorise explicitement un prof à écrire le contenu d’une
+carte dont il n’est pas l’auteur (`canEditContent` dans
+`src/sync/permissions.ts`), et la synchro repousse la carte sous son auteur
+d’origine. Recréer un fichier avec un nouvel `id` ferait un doublon côté
+serveur et sortirait l’élève de sa propre carte.
+
+Le fichier garde aussi son chemin et son nom : le renommer ou le déplacer
+n’apporte rien et se lit comme un déplacement côté synchro.
+
+### Ce qu’on ne touche jamais
+
+- **Aucun `id` de carte réécrit, aucune carte supprimée, aucun `parentId` ni
+  `order` remanié.** La structure de l’élève FAIT PARTIE de son travail :
+  la remanier lui rend une carte qu’il ne reconnaît plus.
+- **Une réponse juste reste telle quelle**, même mal tournée. Corriger le
+  style n’est pas corriger.
+
+### Ce qu’on corrige
+
+- **Une réponse fausse** : la `definition` (ou les blocs `content`) est
+  réécrite juste, en gardant les mots de l’élève partout où ils n’étaient pas
+  faux. Ne JAMAIS laisser une erreur dans une `definition` : le fichier sert
+  à réviser, et le quiz apprendrait la faute par cœur.
+- **Un trou** : carte laissée sans `definition`, « ………… » recopié du sujet
+  → complété avec la bonne réponse, exactement comme pour une fiche à trous.
+- **Ce qui manque complètement** : une carte NOUVELLE, à sa place dans
+  l’arbre, avec un `id` neuf qui n’entre en collision avec aucun de ceux de
+  l’élève.
+- Toute carte ajoutée ou réécrite repasse par les règles habituelles : titre
+  et définition qui se déterminent l’un l’autre, sœurs de longueur
+  comparable, maths en blocs `math`, mots-clés en `**gras**`.
+
+### Montrer ce qui a été repris (facultatif)
+
+Poser `icon: "PencilLine"` sur les cartes touchées donne à l’élève la liste
+de ce que le prof a repris d’un coup d’œil : l’icône est purement mnémonique,
+elle n’entre dans aucun quiz. Ne rien poser sur les cartes laissées intactes,
+et laisser en place une icône que l’élève avait déjà choisie — elle est à lui.
+
 ## Écrire pour le mode quiz
 
 Chaque card devient une question. Une carte mentale bien structurée mais
@@ -377,6 +440,10 @@ dans l'arbre, à côté de trois distracteurs. Un renvoi y devient du bruit.
 | Titre identique à celui d'une carte d'une autre branche | Rend le QCM titre→définition réellement ambigu — aucune des deux définitions n'est reconnaissable comme LA bonne réponse |
 | Écrire le `.zmap` directement sous `<matière>/`, sans dossier de chapitre | Casse l'arborescence `matière/chapitre/fichier.zmap` — même un chapitre à un seul fichier a son dossier |
 | Suffixer le nom de fichier par le type (`-cours`, `-exo`) | Le type est déjà `meta.type` ; le nom de fichier décrit le sous-thème, pas la nature du contenu |
+| Corriger un élève en créant un fichier neuf (nouvel `id`, `author` du prof) | Doublon côté serveur, et l’élève est sorti de sa propre carte : le corrigé s’écrit DANS son fichier |
+| Classer en `corrections` la copie reprise d’un élève | `corrections` est le corrigé de référence d’un exercice ; une copie d’élève rectifiée est `corrigé` |
+| Laisser la réponse fausse de l’élève dans une `definition` | Le fichier sert à réviser : le quiz apprendrait l’erreur par cœur |
+| Réécrire les ids ou réordonner l’arbre d’un élève pour « faire propre » | Sa structure fait partie de son travail, et la synchro y verrait un autre fichier |
 
 ## Adaptation à d'autres matières
 

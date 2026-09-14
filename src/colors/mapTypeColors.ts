@@ -71,6 +71,21 @@ export const mapTypeColors: Record<Exclude<MapType, 'default'>, MapTypeColorPair
       text: { l: 0.88, c: 0.05, h: 30 },
     },
   },
+  corrigé: {
+    // Violet — le travail de l'élève repassé par le prof. Volontairement loin
+    // du rouge-orangé de « corrections » : les deux mots se ressemblent déjà
+    // assez pour qu'une pilule voisine dans l'arborescence prête à confusion.
+    light: {
+      bg: { l: 0.96, c: 0.03, h: 305 },
+      border: { l: 0.55, c: 0.16, h: 305 },
+      text: { l: 0.32, c: 0.14, h: 305 },
+    },
+    dark: {
+      bg: { l: 0.22, c: 0.035, h: 305 },
+      border: { l: 0.62, c: 0.14, h: 305 },
+      text: { l: 0.88, c: 0.05, h: 305 },
+    },
+  },
 }
 
 /**

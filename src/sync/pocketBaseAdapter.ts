@@ -82,5 +82,7 @@ export function createReportingClient(pb: PocketBase): ReportingClient {
       }),
     createConflict: data => conflicts.create(data),
     updateConflict: (id, data) => conflicts.update(id, data),
+    closeConflict: (id, resolution, by) =>
+      conflicts.update(id, { status: 'resolved', resolution, resolved_by: by, resolved_at: new Date().toISOString() }),
   }
 }
