@@ -10,6 +10,15 @@ import { useWorkspaceStore, createWorkspaceStore } from '../state/useWorkspaceSt
 import type { MindMapMeta } from '../types/card'
 
 const LOCAL_PATH = '/cours/chapitre1.zmap'
+
+/** Ce que `stampMindMapSyncMeta` REND désormais : le meta écrit, ou `null` si le fichier en avait déjà un. */
+const STAMPED: MindMapMeta = {
+  id: 'file-1',
+  author: 'aife',
+  role: 'prof',
+  lastModified: '2025-01-01T00:00:00.000Z',
+  type: 'default',
+}
 const OUTSIDE_PATH = '/ailleurs/chapitre1.zmap'
 const META: MindMapMeta = { id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' }
 
@@ -30,7 +39,7 @@ function resetStores() {
 describe('usePublishMindMap — eligibility', () => {
   beforeEach(() => {
     resetStores()
-    vi.mocked(stampMindMapSyncMeta).mockReset().mockResolvedValue(true)
+    vi.mocked(stampMindMapSyncMeta).mockReset().mockResolvedValue(STAMPED)
   })
 
   it('accepts a local map inside the sync folder, with an account to stamp it with', () => {
@@ -60,7 +69,7 @@ describe('usePublishMindMap — eligibility', () => {
 describe('usePublishMindMap — publishing', () => {
   beforeEach(() => {
     resetStores()
-    vi.mocked(stampMindMapSyncMeta).mockReset().mockResolvedValue(true)
+    vi.mocked(stampMindMapSyncMeta).mockReset().mockResolvedValue(STAMPED)
   })
 
   it('stamps the file for the signed-in account, then refreshes what read its header', async () => {
@@ -76,7 +85,7 @@ describe('usePublishMindMap — publishing', () => {
 
   it('says so when the file already had an identity, instead of stamping over it', async () => {
     const { result } = renderHook(() => usePublishMindMap())
-    vi.mocked(stampMindMapSyncMeta).mockResolvedValue(false)
+    vi.mocked(stampMindMapSyncMeta).mockResolvedValue(null)
 
     expect(await result.current.publish(LOCAL_PATH)).toBe('already-published')
     expect(useWorkspaceStore.getState().workspaceError).toMatch(/déjà publiée/)
@@ -106,9 +115,9 @@ describe('usePublishMindMap — publishing', () => {
 
   it('counts a failure without giving up on the rest of the list', async () => {
     vi.mocked(stampMindMapSyncMeta)
-      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(STAMPED)
       .mockRejectedValueOnce(new Error('disque plein'))
-      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(STAMPED)
     const { result } = renderHook(() => usePublishMindMap())
 
     const outcome = await result.current.publishAll(['/cours/a.zmap', '/cours/b.zmap', '/cours/c.zmap'])
@@ -117,7 +126,7 @@ describe('usePublishMindMap — publishing', () => {
   })
 
   it('refreshes nothing when there was nothing to publish', async () => {
-    vi.mocked(stampMindMapSyncMeta).mockResolvedValue(false) // already published, all of them
+    vi.mocked(stampMindMapSyncMeta).mockResolvedValue(null) // already published, all of them
     const { result } = renderHook(() => usePublishMindMap())
 
     expect(await result.current.publishAll([LOCAL_PATH])).toEqual({ published: 0, failed: 0 })

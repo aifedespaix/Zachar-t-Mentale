@@ -1,6 +1,6 @@
 import { exists, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { DEFAULT_MAP_TYPE, type MapType } from '../types/mapType'
-import type { Card, MindMapMeta, UserRole } from '../types/card'
+import type { Card, MindMapMeta, SyncUser, UserRole } from '../types/card'
 import type { CopyLink } from '../sync/copyLink'
 import { serializeMindMap, deserializeMindMap } from './serialization'
 
@@ -75,20 +75,39 @@ export async function stripMindMapSyncMeta(path: string): Promise<boolean> {
  * Unlike the strip, this one is NOT silent: it runs from a click, and a
  * failure (unreadable file, read-only disk) must reach the user's banner.
  *
- * @returns whether the file was stamped.
+ * @returns the stamped `meta`, or `null` for a file that already had one.
  */
-export async function stampMindMapSyncMeta(path: string, author: string, role: UserRole): Promise<boolean> {
+export async function stampMindMapSyncMeta(
+  path: string,
+  author: string,
+  role: UserRole
+): Promise<MindMapMeta | null> {
   const { meta, cards } = deserializeMindMap(await readTextFile(path))
-  if (meta !== null) return false
-  const stamped: MindMapMeta = {
+  if (meta !== null) return null
+  const stamped = newMindMapMeta({ username: author, role })
+  await writeTextFile(path, serializeMindMap(stamped, cards))
+  return stamped
+}
+
+/**
+ * L'identité de synchronisation d'une carte qui vient de naître : un
+ * identifiant neuf, son propriétaire, et AUCUN type — `default` n'est pas un
+ * classement, c'est son absence, et c'est à l'élève (ou au prof) de poser
+ * « exo », « cours »… ensuite.
+ *
+ * Une seule définition, partagée par la création d'un fichier (`fileOps`), la
+ * publication d'un brouillon (`stampMindMapSyncMeta`) et l'adoption qu'une
+ * synchronisation fait des brouillons du dossier : trois producteurs qui
+ * doivent écrire exactement la même forme.
+ */
+export function newMindMapMeta(owner: SyncUser): MindMapMeta {
+  return {
     id: crypto.randomUUID(),
-    author,
-    role,
+    author: owner.username,
+    role: owner.role,
     lastModified: new Date().toISOString(),
     type: DEFAULT_MAP_TYPE,
   }
-  await writeTextFile(path, serializeMindMap(stamped, cards))
-  return true
 }
 
 /**

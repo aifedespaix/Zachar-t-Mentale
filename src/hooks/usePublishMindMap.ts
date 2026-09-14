@@ -53,7 +53,7 @@ export function usePublishMindMap() {
 
       try {
         const stamped = await stampMindMapSyncMeta(path, user.username, user.role)
-        return { outcome: stamped ? 'published' : 'already-published', error: null }
+        return { outcome: stamped !== null ? 'published' : 'already-published', error: null }
       } catch (error) {
         // Carried out rather than swallowed: the caller is the one that can tell
         // the user WHY the write failed.

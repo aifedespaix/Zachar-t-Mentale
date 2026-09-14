@@ -22,7 +22,17 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 vi.mock('@tauri-apps/api/path', () => ({
   join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
 }))
-vi.mock('./fileStore', () => ({ mindMapExists: vi.fn(), loadMindMap: vi.fn(), stripMindMapSyncMeta: vi.fn() }))
+vi.mock('./fileStore', async importOriginal => {
+  const actual = await importOriginal<typeof import('./fileStore')>()
+  return {
+    mindMapExists: vi.fn(),
+    loadMindMap: vi.fn(),
+    stripMindMapSyncMeta: vi.fn(),
+    // Pas un double : c'est la définition partagée de l'identité d'une carte,
+    // et un faux ici ne dirait plus rien de ce que la création écrit vraiment.
+    newMindMapMeta: actual.newMindMapMeta,
+  }
+})
 
 import { mkdir, remove, rename, writeTextFile, exists, readDir, copyFile } from '@tauri-apps/plugin-fs'
 import { mindMapExists, loadMindMap, stripMindMapSyncMeta } from './fileStore'
@@ -40,6 +50,25 @@ describe('createMindMapFile', () => {
     expect(cards).toEqual([
       expect.objectContaining({ level: 1, title: 'Chapitre 3', parentId: null, order: 0 }),
     ])
+  })
+
+  it('fait naître la carte PUBLIÉE quand elle a un propriétaire', async () => {
+    // Le fichier porte son identité de synchronisation dès sa première
+    // écriture : il part au serveur à la synchro suivante, et son type est
+    // classable tout de suite (le type vit dans `meta`).
+    await createMindMapFile('/cours', 'Chapitre 3', { username: 'lea', role: 'eleve' })
+
+    const written = JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string)
+    expect(written.meta).toEqual(
+      expect.objectContaining({ author: 'lea', role: 'eleve', type: 'default', id: expect.any(String) })
+    )
+    expect(written.cards).toHaveLength(1)
+  })
+
+  it('reste un brouillon sans propriétaire — un tableau nu, comme avant', async () => {
+    await createMindMapFile('/brouillons', 'Chapitre 3')
+    const written = JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string)
+    expect(Array.isArray(written)).toBe(true)
   })
 
   it('title-cases the name it gives the root card, without touching the file name', async () => {

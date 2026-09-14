@@ -3,11 +3,19 @@ import { FilePlus, FileUp, FolderPlus } from 'lucide-react'
 import { ContextMenuItem } from '../ui/context-menu'
 import { NameDialog } from './NameDialog'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
-import { createMindMapFile, createSubfolder, freeMindMapPath, freeSiblingPath } from '../../persistence/fileOps'
-import { saveMindMap, mindMapExists } from '../../persistence/fileStore'
+import {
+  createMindMapFile,
+  createSubfolder,
+  freeMindMapPath,
+  freeSiblingPath,
+  writeNewMindMap,
+} from '../../persistence/fileOps'
+import { mindMapExists } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
 import { fileNameOf, mindMapBaseName, separatorOf, withMindMapExtension } from '../../persistence/paths'
+import { useSyncStore } from '../../state/useSyncStore'
+import { newMapOwner } from '../../sync/newMapOwner'
 
 /** A dialog that needs a name typed into it before it can act. */
 interface NamingAction {
@@ -40,6 +48,16 @@ export function useFolderCreation(
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const [namingAction, setNamingAction] = useState<NamingAction | null>(null)
 
+  /**
+   * Le propriétaire à inscrire dans une carte créée ICI — l'état du store est lu
+   * à l'appel, jamais capturé : le menu peut rester monté à travers une
+   * connexion ou un changement de dossier synchronisé.
+   */
+  function ownerForThisFolder() {
+    const { currentUser, syncFolderPath } = useSyncStore.getState()
+    return newMapOwner({ folderPath, currentUser, syncFolderPath })
+  }
+
   async function openCreateMindMapDialog() {
     const fullPath = await freeSiblingPath(folderPath, 'Nouvelle carte mentale', false)
     const name = mindMapBaseName(fileNameOf(fullPath))
@@ -62,7 +80,7 @@ export function useFolderCreation(
       return
     }
     try {
-      const path = await createMindMapFile(folderPath, name)
+      const path = await createMindMapFile(folderPath, name, ownerForThisFolder())
       await refreshFolder(folderPath)
       onOpenFile(path)
     } catch (error) {
@@ -102,7 +120,9 @@ export function useFolderCreation(
       const sheets = await readXmindFile(bytes)
       for (const sheet of sheets) {
         const target = await freeMindMapPath(folderPath, sheet.sheetTitle)
-        await saveMindMap(target, sheet.cards)
+        // Une feuille XMind importée est une carte comme une autre : dans le
+        // dossier synchronisé, elle naît publiée plutôt que brouillon.
+        await writeNewMindMap(target, sheet.cards, ownerForThisFolder())
         sheetsWritten += 1
       }
       await refreshFolder(folderPath)

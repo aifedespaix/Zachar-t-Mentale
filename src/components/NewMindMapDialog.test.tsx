@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { NewMindMapDialog, folderOptions } from './NewMindMapDialog'
 import { useWorkspaceStore, createWorkspaceStore } from '../state/useWorkspaceStore'
+import { useSyncStore } from '../state/useSyncStore'
 import type { RootFolder } from '../types/workspace'
 
 vi.mock('../persistence/fileOps', async importOriginal => {
@@ -67,6 +68,7 @@ describe('NewMindMapDialog', () => {
   beforeEach(() => {
     resetWorkspaceStore()
     useWorkspaceStore.setState({ rootFolders: ROOTS })
+    useSyncStore.setState({ currentUser: null, syncFolderPath: null })
     vi.mocked(createMindMapFile).mockReset()
     vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
     vi.mocked(scanFolder).mockReset().mockResolvedValue([])
@@ -84,11 +86,36 @@ describe('NewMindMapDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Créer' }))
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('/cours/maths/algebre/Chapitre 1.zmap'))
-    expect(createMindMapFile).toHaveBeenCalledWith('/cours/maths/algebre', 'Chapitre 1')
+    // Hors du dossier synchronisé (aucun n'est configuré ici) : pas de
+    // propriétaire, donc une carte purement locale — l'ancien comportement.
+    expect(createMindMapFile).toHaveBeenCalledWith('/cours/maths/algebre', 'Chapitre 1', null)
     expect(onClose).toHaveBeenCalled()
     // Every folder down to the destination, so the new file is actually visible.
     expect([...useWorkspaceStore.getState().expandedPaths]).toEqual(
       expect.arrayContaining(['/cours', '/cours/maths', '/cours/maths/algebre'])
+    )
+  })
+
+  it('fait naître la carte PUBLIÉE quand un compte est connecté et le dossier synchronisé', async () => {
+    // Le cœur de « par défaut, ça se synchronise » : plus rien à cliquer pour
+    // qu'une carte d'élève parte au serveur — ni pour qu'elle soit classable.
+    const user = userEvent.setup()
+    useSyncStore.setState({
+      currentUser: { username: 'lea', role: 'eleve' },
+      syncFolderPath: '/cours',
+    })
+    vi.mocked(createMindMapFile).mockResolvedValue('/cours/maths/algebre/Chapitre 1.zmap')
+    render(<NewMindMapDialog onClose={vi.fn()} onCreated={vi.fn()} />)
+
+    await user.selectOptions(screen.getByLabelText('Dossier de destination'), '/cours/maths/algebre')
+    await user.type(screen.getByLabelText('Nom de la nouvelle carte mentale'), 'Chapitre 1')
+    await user.click(screen.getByRole('button', { name: 'Créer' }))
+
+    await waitFor(() =>
+      expect(createMindMapFile).toHaveBeenCalledWith('/cours/maths/algebre', 'Chapitre 1', {
+        username: 'lea',
+        role: 'eleve',
+      })
     )
   })
 

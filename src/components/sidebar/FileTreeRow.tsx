@@ -198,7 +198,6 @@ export function FileTreeRow({
   // identité de synchronisation : `canClassify` en est la SEULE définition,
   // partagée avec la synchronisation.
   const classifyAllowed = currentUser !== null && canClassify(meta, currentUser)
-  const classifyBlockedBecauseDraft = meta === null
   const syncFolderPath = useSyncStore(s => s.syncFolderPath)
   /**
    * Une carte publiée mais sortie du dossier de synchronisation : elle a un
@@ -212,6 +211,14 @@ export function FileTreeRow({
   // file has nothing to publish, and a locked one is entered through
   // « Personnaliser » on the canvas.
   const publishable = canPublish(node.path, meta)
+  /**
+   * Un brouillon PUBLIABLE se classe quand même : le clic publie d'abord, puis
+   * classe (voir `classify`). Le type vit dans `meta`, mais faire de cette
+   * mécanique un refus obligerait l'élève à connaître le mot « publier » pour
+   * poser « exo » sur sa propre carte — alors que l'application peut le faire
+   * pour lui, sans rien lui prendre.
+   */
+  const classifyAfterPublishing = !classifyAllowed && publishable
   // The creation trio (« Nouvelle carte mentale », « Nouveau sous-dossier »,
   // « Importer XMind ») is shared with the file sidebar's own empty-area menu,
   // which targets the first root folder.
@@ -432,6 +439,11 @@ export function FileTreeRow({
    */
   async function classify(type: MapType) {
     try {
+      // Un brouillon n'a pas de `meta`, donc pas de place où écrire un type :
+      // on lui en donne une plutôt que de refuser le geste. `publish` rapporte
+      // lui-même ses propres échecs ; un refus laisse `setMindMapType` lever,
+      // et le message ci-dessous dit alors la vraie raison.
+      if (meta === null && publishable) await publish(node.path)
       await setMindMapType(node.path, type)
       useWorkspaceStore.getState().bumpFileMetaRevision()
       await refreshFolder(parentDirOf(node.path))
@@ -730,7 +742,7 @@ export function FileTreeRow({
             <ContextMenuItem onSelect={openExport}>
               <Download size={14} /> Exporter
             </ContextMenuItem>
-            {classifyAllowed ? (
+            {classifyAllowed || classifyAfterPublishing ? (
               <ContextMenuSub>
                 <ContextMenuSubTrigger>
                   <Tag size={14} /> Type
@@ -758,8 +770,8 @@ export function FileTreeRow({
               // donc un `title` posé dessus ne serait jamais montré.
               <div
                 title={
-                  classifyBlockedBecauseDraft
-                    ? 'Publiez cette carte pour pouvoir la classer'
+                  meta === null
+                    ? 'Connectez-vous et placez cette carte dans le dossier synchronisé pour pouvoir la classer'
                     : 'Seul l’auteur ou un prof peut classer cette carte'
                 }
               >

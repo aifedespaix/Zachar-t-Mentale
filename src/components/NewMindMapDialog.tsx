@@ -4,6 +4,8 @@ import { useWorkspaceStore, describeError } from '../state/useWorkspaceStore'
 import { createMindMapFile } from '../persistence/fileOps'
 import { mindMapExists } from '../persistence/fileStore'
 import { sanitizeFileName, separatorOf, parentDirOf, withMindMapExtension } from '../persistence/paths'
+import { useSyncStore } from '../state/useSyncStore'
+import { newMapOwner } from '../sync/newMapOwner'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
 
@@ -98,7 +100,15 @@ export function NewMindMapDialog({ onClose, onCreated }: NewMindMapDialogProps) 
         setError(`« ${fileName} » existe déjà dans ce dossier. Choisissez un autre nom.`)
         return
       }
-      const path = await createMindMapFile(folder, safeName)
+      // Lu au moment du clic, pas capturé à l'ouverture : la connexion a pu
+      // aboutir pendant que la boîte était ouverte, et une carte créée juste
+      // après doit déjà appartenir à ce compte.
+      const { currentUser, syncFolderPath } = useSyncStore.getState()
+      const path = await createMindMapFile(
+        folder,
+        safeName,
+        newMapOwner({ folderPath: folder, currentUser, syncFolderPath })
+      )
       await refreshFolder(folder)
       // So the new map is visible in the tree, not just on the canvas: it may
       // well have landed inside folders the user has never expanded.

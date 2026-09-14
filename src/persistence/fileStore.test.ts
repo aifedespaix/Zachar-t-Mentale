@@ -144,7 +144,10 @@ describe('stampMindMapSyncMeta', () => {
     vi.mocked(readTextFile).mockResolvedValue(JSON.stringify(sample))
     const before = Date.now()
 
-    expect(await stampMindMapSyncMeta('/cours/chapitre.zmap', 'aife', 'prof')).toBe(true)
+    // Le meta ÉCRIT est rendu, pas un booléen : la passe d'adoption d'une
+    // synchronisation en a besoin pour enchaîner sur l'envoi sans relire le fichier.
+    const stamped = await stampMindMapSyncMeta('/cours/chapitre.zmap', 'aife', 'prof')
+    expect(stamped?.author).toBe('aife')
 
     const [path, contents] = vi.mocked(writeTextFile).mock.calls[0]
     expect(path).toBe('/cours/chapitre.zmap')
@@ -160,7 +163,7 @@ describe('stampMindMapSyncMeta', () => {
   it('refuses to overwrite an existing meta — that id points at a remote record', async () => {
     vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta, cards: sample }))
 
-    expect(await stampMindMapSyncMeta('/cours/chapitre.zmap', 'aife', 'prof')).toBe(false)
+    expect(await stampMindMapSyncMeta('/cours/chapitre.zmap', 'aife', 'prof')).toBeNull()
     expect(writeTextFile).not.toHaveBeenCalled()
   })
 

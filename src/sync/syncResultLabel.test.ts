@@ -25,6 +25,12 @@ describe('syncResultLabel', () => {
     expect(syncResultLabel(result({ pushed: 1, pulled: 1, errors }))).toBe('1 envoyé(s), 1 reçu(s), 1 erreur(s)')
   })
 
+  it('dit les brouillons adoptés, que les deux compteurs ne racontent pas', () => {
+    // « 2 envoyé(s), 2 publiée(s) » : la synchronisation leur a donné une
+    // identité en passant, et c'est la seule trace de ce qu'elle a fait au dossier.
+    expect(syncResultLabel(result({ pushed: 2, published: 2 }))).toBe('2 envoyé(s), 0 reçu(s), 2 publiée(s)')
+  })
+
   it('says a run was interrupted, since its counters are then partial', () => {
     expect(syncResultLabel(result({ pushed: 2, cancelled: true }))).toBe('2 envoyé(s), 0 reçu(s) (interrompue)')
   })

@@ -18,6 +18,10 @@ export function syncResultLabel(result: SyncResult): string {
   // Une adoption de type n'est ni un envoi ni une réception : comme un
   // déplacement, elle doit se lire même quand les deux compteurs sont à zéro.
   if ((result.reclassified ?? 0) > 0) parts.push(`${result.reclassified ?? 0} reclassé(s)`)
+  // Une adoption n'est pas un envoi non plus : elle dit « ces cartes n'avaient
+  // pas d'identité de synchronisation, elles en ont une maintenant » — et c'est
+  // la seule trace de ce que la passe 0 a fait au dossier.
+  if ((result.published ?? 0) > 0) parts.push(`${result.published ?? 0} publiée(s)`)
   const floated = (result.merged ?? []).reduce((sum, entry) => sum + entry.floatedCount, 0)
   if (floated > 0) parts.push(`${floated} carte(s) mise(s) de côté`)
   if (result.conflicts.length > 0) parts.push(`${result.conflicts.length} conflit(s)`)

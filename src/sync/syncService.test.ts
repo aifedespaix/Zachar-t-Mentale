@@ -17,6 +17,7 @@ vi.mock('../persistence/fileStore', () => ({
   loadMindMap: vi.fn(),
   loadMindMapMeta: vi.fn(),
   setMindMapType: vi.fn(),
+  stampMindMapSyncMeta: vi.fn(),
 }))
 vi.mock('../persistence/fileTree', () => ({ scanFolder: vi.fn() }))
 vi.mock('../persistence/assets', () => ({
@@ -26,7 +27,7 @@ vi.mock('../persistence/assets', () => ({
 }))
 
 import { exists, writeTextFile, readDir, rename, mkdir } from '@tauri-apps/plugin-fs'
-import { loadMindMap, loadMindMapMeta, setMindMapType } from '../persistence/fileStore'
+import { loadMindMap, loadMindMapMeta, setMindMapType, stampMindMapSyncMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { readAssetBytes, writeAsset } from '../persistence/assets'
 import {
@@ -95,6 +96,15 @@ beforeEach(() => {
   vi.mocked(loadMindMap).mockReset()
   vi.mocked(loadMindMapMeta).mockReset()
   vi.mocked(setMindMapType).mockReset().mockResolvedValue(undefined)
+  // Par défaut, la passe d'adoption écrit bien l'identité qu'elle promet : les
+  // tests qui ont des brouillons redéfinissent le meta rendu.
+  vi.mocked(stampMindMapSyncMeta).mockReset().mockImplementation(async (path, author, role) => ({
+    id: 'stamped-' + path,
+    author,
+    role,
+    lastModified: '2026-01-01T00:00:00.000Z',
+    type: 'default',
+  }))
   vi.mocked(scanFolder).mockReset()
   vi.mocked(rename).mockReset().mockResolvedValue(undefined)
   vi.mocked(mkdir).mockReset().mockResolvedValue(undefined)
@@ -445,14 +455,9 @@ describe('sync — push', () => {
     expect(result.pushed).toBe(0)
   })
 
-  it('never pushes a file authored by someone else when I am not a prof, or one never synced (meta: null)', async () => {
-    vi.mocked(scanFolder).mockResolvedValue([
-      { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
-      { type: 'mindmap', name: 'b.zmap', path: '/cours/b.zmap' },
-    ])
-    vi.mocked(loadMindMapMeta).mockImplementation(async path =>
-      path === '/cours/a.zmap' ? { ...AIFE, author: 'someone-else' } : null
-    )
+  it('never pushes a file authored by someone else when I am not a prof', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, author: 'someone-else' })
     const client = fakeClient()
 
     // Un élève : « auteur ou prof » lui refuse le contenu d'autrui. (Pour un
@@ -552,6 +557,73 @@ describe('sync — push', () => {
     expect(result.errors).toEqual([
       { fileId: 'file-1', message: 'plusieurs fichiers locaux partagent le même identifiant de synchronisation' },
     ])
+  })
+})
+
+describe('sync — adoption des brouillons', () => {
+  it('publie une carte sans identité puis l’envoie, dans la même exécution', async () => {
+    // Le cœur de « par défaut, ça se synchronise » côté serveur : plus besoin
+    // de cliquer « Publier » pour qu'une carte du dossier parte.
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'neuve.zmap', path: '/cours/neuve.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue(null)
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    const client = fakeClient()
+    const state = emptySyncState()
+
+    const result = await runSync({ client, state, currentUser: 'lea', currentRole: 'eleve' })
+
+    // L'auteur inscrit est celui qui synchronise : le fichier est sur sa machine.
+    expect(stampMindMapSyncMeta).toHaveBeenCalledWith('/cours/neuve.zmap', 'lea', 'eleve')
+    expect(result.published).toBe(1)
+    expect(client.mindMaps.create).toHaveBeenCalledWith(
+      expect.objectContaining({ file_id: 'stamped-/cours/neuve.zmap', author: 'lea', path: 'neuve.zmap' }),
+      expect.anything()
+    )
+    expect(result.pushed).toBe(1)
+    // Et la mémoire de synchronisation la connaît désormais, comme n'importe
+    // quelle carte : le prochain run ne la republiera pas.
+    expect(state.servers['https://pb.test'].entries['stamped-/cours/neuve.zmap']).toBeDefined()
+  })
+
+  it('adopte les brouillons d’un prof comme ceux d’un élève', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'neuve.zmap', path: '/cours/neuve.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue(null)
+    vi.mocked(loadMindMap).mockResolvedValue([])
+
+    const result = await runSync({ client: fakeClient(), state: emptySyncState() })
+
+    expect(stampMindMapSyncMeta).toHaveBeenCalledWith('/cours/neuve.zmap', 'aife', 'prof')
+    expect(result.published).toBe(1)
+  })
+
+  it('laisse le fichier brouillon et continue le lot quand la publication échoue', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'neuve.zmap', path: '/cours/neuve.zmap' },
+      { type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' },
+    ])
+    vi.mocked(loadMindMapMeta).mockImplementation(async path => (path === '/cours/a.zmap' ? AIFE : null))
+    vi.mocked(loadMindMap).mockResolvedValue([])
+    vi.mocked(stampMindMapSyncMeta).mockRejectedValue(new Error('disque plein'))
+    const client = fakeClient()
+
+    const result = await runSync({ client, state: emptySyncState() })
+
+    expect(result.published).toBe(0)
+    expect(result.errors).toEqual([
+      { fileId: 'neuve.zmap', message: 'impossible de publier cette carte : disque plein' },
+    ])
+    // L'autre carte du dossier part quand même.
+    expect(result.pushed).toBe(1)
+  })
+
+  it('ne touche pas aux fichiers qui ne sont pas des cartes', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'donnees.json', path: '/cours/donnees.json' }])
+    vi.mocked(loadMindMapMeta).mockRejectedValue(new Error('pas une carte'))
+
+    const result = await runSync({ client: fakeClient(), state: emptySyncState() })
+
+    expect(stampMindMapSyncMeta).not.toHaveBeenCalled()
+    expect(result.published).toBe(0)
   })
 })
 

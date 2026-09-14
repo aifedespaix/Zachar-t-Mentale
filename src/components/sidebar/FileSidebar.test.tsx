@@ -736,7 +736,7 @@ describe('FileSidebar', () => {
     await user.clear(field)
     await user.type(field, 'Chapitre 1{Enter}')
 
-    await waitFor(() => expect(createMindMapFile).toHaveBeenCalledWith('/cours-svt', 'Chapitre 1'))
+    await waitFor(() => expect(createMindMapFile).toHaveBeenCalledWith('/cours-svt', 'Chapitre 1', null))
     expect(onOpenFile).toHaveBeenCalledWith('/cours-svt/Chapitre 1.json')
   })
 
@@ -759,7 +759,7 @@ describe('FileSidebar', () => {
     await user.clear(field)
     await user.type(field, 'B{Enter}')
 
-    await waitFor(() => expect(createMindMapFile).toHaveBeenCalledWith('/autre', 'B'))
+    await waitFor(() => expect(createMindMapFile).toHaveBeenCalledWith('/autre', 'B', null))
   })
 })
 

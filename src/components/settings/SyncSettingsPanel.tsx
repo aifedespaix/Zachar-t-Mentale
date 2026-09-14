@@ -336,9 +336,11 @@ export function SyncSettingsPanel() {
           </p>
         )}
         {/*
-          A sync that reports « 0 envoyé » while the folder is full of chapters
-          needs an explanation, not a shrug: those maps have no sync identity, so
-          the file loop skips them by design. One click gives them one.
+          Ces cartes n'ont pas encore d'identité de synchronisation. Depuis que
+          la synchronisation les ADOPTE (passe 0 de `sync()`), elles ne sont plus
+          condamnées à rester locales : le bouton ne fait qu'avancer ce que la
+          prochaine synchronisation ferait de toute façon — utile pour classer
+          (« exo », « cours »…) tout de suite, puisque le type vit dans `meta`.
         */}
         {localOnlyCount !== null && localOnlyCount > 0 && (
           <div
@@ -346,9 +348,10 @@ export function SyncSettingsPanel() {
           >
             <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5 }}>
               <strong>{localOnlyCount}</strong> carte{localOnlyCount > 1 ? 's' : ''} de ce dossier n’
-              {localOnlyCount > 1 ? 'ont' : 'a'} pas encore d’identité de synchronisation : elle
-              {localOnlyCount > 1 ? 's ne partent' : ' ne part'} jamais au serveur, même en cliquant
-              « Synchroniser ».
+              {localOnlyCount > 1 ? 'ont' : 'a'} pas encore d’identité de synchronisation. La
+              prochaine synchronisation {localOnlyCount > 1 ? 'les publiera' : 'la publiera'}{' '}
+              automatiquement ; publiez-{localOnlyCount > 1 ? 'les' : 'la'} maintenant pour pouvoir{' '}
+              {localOnlyCount > 1 ? 'leur' : 'lui'} donner un type sans attendre.
             </p>
             <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <Button variant="outline" onClick={() => void publishLocalMaps()} disabled={publishingLocal}>

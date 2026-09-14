@@ -2,7 +2,7 @@ import { mkdir, remove, rename, writeTextFile, exists, readDir, copyFile } from 
 import { join } from '@tauri-apps/api/path'
 import { createRootCard } from '../state/cardsReducer'
 import { serializeMindMap } from './serialization'
-import { loadMindMap, mindMapExists, stripMindMapSyncMeta } from './fileStore'
+import { loadMindMap, mindMapExists, newMindMapMeta, stripMindMapSyncMeta } from './fileStore'
 import {
   isMindMapPath,
   sanitizeFileName,
@@ -16,7 +16,7 @@ import {
 } from './paths'
 import { titleCase } from '../utils/titleCase'
 import { sidecarDirOf } from './assets'
-import type { MindMapMeta, UserRole } from '../types/card'
+import type { Card, MindMapMeta, SyncUser, UserRole } from '../types/card'
 
 /**
  * Writes a brand-new mind map with a single root card, and returns its path.
@@ -30,11 +30,38 @@ import type { MindMapMeta, UserRole } from '../types/card'
  * Relatifs ») and left as typed for the FILE, which stays the thing the user
  * named.
  */
-export async function createMindMapFile(folderPath: string, fileName: string): Promise<string> {
+export async function createMindMapFile(
+  folderPath: string,
+  fileName: string,
+  owner: SyncUser | null = null
+): Promise<string> {
   const path = await join(folderPath, withMindMapExtension(fileName))
   const title = titleCase(mindMapBaseName(path))
-  await writeTextFile(path, serializeMindMap(null, [createRootCard(title === '' ? 'Nouveau chapitre' : title)]))
+  await writeNewMindMap(path, [createRootCard(title === '' ? 'Nouveau chapitre' : title)], owner)
   return path
+}
+
+/**
+ * Écrit une carte qui n'existait pas — avec son identité de synchronisation
+ * quand elle en a une (`owner`), sans quand elle n'en a pas.
+ *
+ * C'est ici que se joue « par défaut, ça se synchronise » : une carte créée par
+ * un compte connecté, dans le dossier synchronisé, naît DÉJÀ publiée. Elle part
+ * au serveur à la synchronisation suivante sans un geste de plus, et son type
+ * (« exo », « cours »…) est classable tout de suite — le classement vit dans
+ * `meta`, qu'un brouillon n'a pas.
+ *
+ * `owner` à `null` garde l'ancien comportement, et ce n'est pas un repli
+ * paresseux : une carte écrite hors du dossier synchronisé, ou par une
+ * application sans compte connecté, n'a personne à qui appartenir. Elle reste
+ * un brouillon local, que « Publier » ou la prochaine synchronisation adoptera.
+ *
+ * C'est `newMapOwner` (voir `sync/newMapOwner.ts`) qui décide de ce `owner`,
+ * pour que les deux points de création (la boîte « Nouvelle carte mentale » et
+ * le menu d'un dossier) ne puissent pas répondre différemment.
+ */
+export async function writeNewMindMap(path: string, cards: Card[], owner: SyncUser | null): Promise<void> {
+  await writeTextFile(path, serializeMindMap(owner === null ? null : newMindMapMeta(owner), cards))
 }
 
 export async function createSubfolder(folderPath: string, folderName: string): Promise<string> {

@@ -1,6 +1,6 @@
 import { exists, mkdir, readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
-import { loadMindMap, loadMindMapMeta, setMindMapType } from '../persistence/fileStore'
+import { loadMindMap, loadMindMapMeta, setMindMapType, stampMindMapSyncMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { renamePath } from '../persistence/fileOps'
 import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
@@ -186,11 +186,18 @@ export interface SyncResult {
   merged?: { fileId: string; path: string; floatedCount: number }[]
   /** Combien de dossiers vides décidés ailleurs ont été créés localement. */
   foldersCreated?: number
+  /**
+   * Combien de brouillons du dossier la synchronisation a ADOPTÉS — voir la
+   * passe 0 de `sync()`. Ce n'est pas un envoi : ces cartes viennent seulement
+   * de recevoir l'identité qui leur permet d'en être un, dans la même
+   * exécution.
+   */
+  published?: number
 }
 
 /** Le résultat tel que `sync()` le construit : déplacements, notices et reclassements y sont toujours renseignés. */
 type SyncRunResult = SyncResult &
-  Required<Pick<SyncResult, 'relocated' | 'moved' | 'notices' | 'reclassified' | 'merged'>>
+  Required<Pick<SyncResult, 'relocated' | 'moved' | 'notices' | 'reclassified' | 'merged' | 'published'>>
 
 export interface SyncParams {
   client: SyncClient
@@ -614,6 +621,7 @@ export async function sync({
     notices: [],
     reclassified: 0,
     merged: [],
+    published: 0,
   }
 
   const remoteRecords = await client.mindMaps.getFullList({ signal })
@@ -637,6 +645,44 @@ export async function sync({
   server.syncFolderPath = syncFolderPath
 
   const scans = await scanLocalMaps(syncFolderPath)
+
+  // ── Passe 0 : adoption des brouillons ───────────────────────────────────
+  //
+  // Une carte du dossier synchronisé se synchronise, POINT. Celles qui n'ont
+  // pas encore d'identité — créées par une version qui les faisait naître
+  // brouillons, dupliquées (la copie est dépouillée exprès), ou déposées là
+  // depuis ailleurs — la reçoivent ici, au nom du compte qui synchronise, et
+  // repartent avec tout le monde dans les passes suivantes.
+  //
+  // C'est ce qui remplace le « Publier » qu'il fallait penser à cliquer : un
+  // élève ne travaille plus pour lui seul sans le savoir, et son menu « Type »
+  // (« exo », « cours »…) s'ouvre dès la première synchronisation, puisque le
+  // classement vit dans `meta`.
+  //
+  // L'auteur inscrit est celui qui synchronise : le fichier est sur SA machine,
+  // dans SON dossier, et personne d'autre ne peut en revendiquer la paternité.
+  // Un échec d'écriture est l'échec de CE fichier, jamais l'abandon du lot : la
+  // carte reste un brouillon, exactement comme avant la passe.
+  for (const [index, scan] of scans.entries()) {
+    if (scan.kind !== 'local-only') continue
+    if (aborted()) {
+      result.cancelled = true
+      break
+    }
+    try {
+      const meta = await stampMindMapSyncMeta(scan.path, currentUser, currentRole)
+      // `null` veut dire « ce fichier avait déjà un meta » : impossible ici (le
+      // scan vient de le lire comme brouillon), et rien à faire si ça arrivait.
+      if (meta === null) continue
+      scans[index] = { path: scan.path, kind: 'map', meta }
+      result.published += 1
+    } catch (error) {
+      result.errors.push({
+        fileId: relativeTo(syncFolderPath, scan.path),
+        message: 'impossible de publier cette carte : ' + describeSyncError(error),
+      })
+    }
+  }
 
   async function reconcileOne(scan: MapScan): Promise<void> {
     const entry = entries[scan.meta.id]

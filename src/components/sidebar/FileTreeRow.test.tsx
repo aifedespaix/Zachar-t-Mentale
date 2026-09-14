@@ -17,6 +17,7 @@ vi.mock('../../persistence/fileOps', async importOriginal => {
     deletePath: vi.fn(),
     duplicatePath: vi.fn(),
     freeSiblingPath: vi.fn(),
+    writeNewMindMap: vi.fn(),
   }
 })
 vi.mock('../../persistence/fileTree', async importOriginal => {
@@ -43,6 +44,7 @@ import {
   deletePath,
   duplicatePath,
   freeSiblingPath,
+  writeNewMindMap,
 } from '../../persistence/fileOps'
 import { scanFolder } from '../../persistence/fileTree'
 import { loadMindMap, saveMindMap, mindMapExists, stampMindMapSyncMeta, setMindMapType } from '../../persistence/fileStore'
@@ -87,8 +89,15 @@ describe('FileTreeRow', () => {
     vi.mocked(scanFolder).mockReset()
     vi.mocked(loadMindMap).mockReset()
     vi.mocked(saveMindMap).mockReset()
+    vi.mocked(writeNewMindMap).mockReset()
     vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
-    vi.mocked(stampMindMapSyncMeta).mockReset().mockResolvedValue(true)
+    vi.mocked(stampMindMapSyncMeta).mockReset().mockResolvedValue({
+      id: 'file-1',
+      author: 'aife',
+      role: 'prof',
+      lastModified: '2025-01-01T00:00:00.000Z',
+      type: 'default',
+    })
     vi.mocked(pickXmindFile).mockReset()
     vi.mocked(readBinaryFile).mockReset()
     vi.mocked(readXmindFile).mockReset()
@@ -608,7 +617,7 @@ describe('FileTreeRow', () => {
     await user.clear(input)
     await user.type(input, 'nouveau{Enter}')
 
-    expect(createMindMapFile).toHaveBeenCalledWith('/cours/chimie', 'nouveau')
+    expect(createMindMapFile).toHaveBeenCalledWith('/cours/chimie', 'nouveau', null)
     await waitFor(() => expect(onOpenFile).toHaveBeenCalledWith('/cours/chimie/nouveau.json'))
   })
 
@@ -916,13 +925,19 @@ describe('FileTreeRow', () => {
     openMenu(/cours/i)
     await user.click(await screen.findByRole('menuitem', { name: 'Importer XMind' }))
 
-    await waitFor(() => expect(saveMindMap).toHaveBeenCalledTimes(2))
-    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 1.zmap', [
-      { id: 'r1', level: 1, title: 'R1', parentId: null, order: 0 },
-    ])
-    expect(saveMindMap).toHaveBeenCalledWith('/cours/Chapitre 2.zmap', [
-      { id: 'r2', level: 1, title: 'R2', parentId: null, order: 0 },
-    ])
+    await waitFor(() => expect(writeNewMindMap).toHaveBeenCalledTimes(2))
+    // Aucun dossier synchronisé dans ce test : les feuilles importées restent
+    // des brouillons, comme toute carte née hors du dossier.
+    expect(writeNewMindMap).toHaveBeenCalledWith(
+      '/cours/Chapitre 1.zmap',
+      [{ id: 'r1', level: 1, title: 'R1', parentId: null, order: 0 }],
+      null
+    )
+    expect(writeNewMindMap).toHaveBeenCalledWith(
+      '/cours/Chapitre 2.zmap',
+      [{ id: 'r2', level: 1, title: 'R2', parentId: null, order: 0 }],
+      null
+    )
     expect(scanFolder).toHaveBeenCalledWith('/cours')
   })
 
@@ -935,7 +950,7 @@ describe('FileTreeRow', () => {
     openMenu(/cours/i)
     await user.click(await screen.findByRole('menuitem', { name: 'Importer XMind' }))
 
-    expect(saveMindMap).not.toHaveBeenCalled()
+    expect(writeNewMindMap).not.toHaveBeenCalled()
   })
 
   it('reports an XMind import failure through the workspace error channel', async () => {
@@ -960,7 +975,7 @@ describe('FileTreeRow', () => {
       { sheetTitle: 'Chapitre 1', cards: [{ id: 'r1', level: 1, title: 'R1', parentId: null, order: 0 }] },
       { sheetTitle: 'Chapitre 2', cards: [{ id: 'r2', level: 1, title: 'R2', parentId: null, order: 0 }] },
     ])
-    vi.mocked(saveMindMap).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('disque plein'))
+    vi.mocked(writeNewMindMap).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('disque plein'))
     vi.mocked(scanFolder).mockResolvedValue([])
     const node: FileTreeNode = { type: 'folder', name: 'cours', path: '/cours', children: [] }
     render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
@@ -1157,7 +1172,9 @@ describe('FileTreeRow — type de carte', () => {
     expect(setMindMapType).toHaveBeenCalledWith(PATH, 'default')
   })
 
-  it('montre « Type » désactivé pour un brouillon, avec la raison', async () => {
+  it('montre « Type » désactivé pour un brouillon que rien ne peut publier, avec la raison', async () => {
+    // Personne de connecté, aucun dossier synchronisé : il n'y a ni `meta` où
+    // écrire le type, ni moyen d'en fabriquer un.
     vi.mocked(useMindMapAuthor).mockReturnValue(null)
     renderRow()
     openContextMenu()
@@ -1170,7 +1187,26 @@ describe('FileTreeRow — type de carte', () => {
     expect(item).not.toHaveAttribute('title')
     const wrapper = item?.closest('[title]')
     expect(wrapper).not.toBe(item)
-    expect(wrapper).toHaveAttribute('title', 'Publiez cette carte pour pouvoir la classer')
+    expect(wrapper).toHaveAttribute(
+      'title',
+      'Connectez-vous et placez cette carte dans le dossier synchronisé pour pouvoir la classer'
+    )
+  })
+
+  it('publie le brouillon puis le classe — l’élève n’a pas à connaître le mot « publier »', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useMindMapAuthor).mockReturnValue(null)
+    vi.mocked(setMindMapType).mockResolvedValue(undefined)
+    vi.mocked(scanFolder).mockResolvedValue([])
+    useSyncStore.setState({ currentUser: { username: 'lea', role: 'eleve' }, syncFolderPath: '/cours' })
+    renderRow()
+    await screen.findByText('Chapitre')
+    openContextMenu()
+    await user.hover(screen.getByText('Type'))
+    fireEvent.click(await screen.findByText('Exercices'))
+
+    await waitFor(() => expect(stampMindMapSyncMeta).toHaveBeenCalledWith(PATH, 'lea', 'eleve'))
+    await waitFor(() => expect(setMindMapType).toHaveBeenCalledWith(PATH, 'exo'))
   })
 })
 
