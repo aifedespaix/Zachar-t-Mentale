@@ -22,10 +22,16 @@ describe('mapTypeOf', () => {
     expect(mapTypeOf(undefined)).toBe(DEFAULT_MAP_TYPE)
     expect(mapTypeOf({ type: 'cours' })).toBe(DEFAULT_MAP_TYPE)
   })
+
+  // « corrigé » est le seul type accentué : recopié depuis un éditeur ou un
+  // Finder macOS, il peut arriver décomposé (NFD) et doit rester reconnu.
+  it('recognises an accented type written in NFD, and renders it in NFC', () => {
+    expect(mapTypeOf('corrige\u0301')).toBe('corrigé')
+  })
 })
 
 describe('isKnownMapType', () => {
-  it('accepts the four classified types and default', () => {
+  it('accepts the five classified types and default', () => {
     for (const type of MAP_TYPES) expect(isKnownMapType(type)).toBe(true)
     expect(isKnownMapType('default')).toBe(true)
   })
