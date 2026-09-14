@@ -58,18 +58,23 @@ Dossiers matière à renommer :
 
 Fichiers à renommer (kebab-case, sans suffixe de type) :
 
-- [ ] `anglais/edward-hopper/Biographie.zmap` → `biographie.zmap`
-- [ ] `anglais/edward-hopper/hooper.zmap` — vérifier si "hooper" est une
-      faute pour "hopper" avant de renommer (relire le contenu)
-- [ ] `Français/Cahier de Lecteur.zmap` → `cahier-de-lecteur.zmap`
-- [ ] `Français/les classes grammaticales exercices.zmap` →
+- [x] `anglais/edward-hopper/Biographie.zmap` → `biographie.zmap`
+- [x] `anglais/edward-hopper/hooper.zmap` — confirmé faute pour "hopper"
+      (le contenu porte sur son professeur Robert Henri et le mouvement
+      Ashcan/Abstract Expressionism, pas une seconde biographie) → renommé
+      `influences.zmap` d'après son contenu plutôt qu'en corrigeant juste
+      l'orthographe
+- [x] `francais/Cahier de Lecteur.zmap` → `cahier-de-lecteur.zmap`
+      (dossier `.assets` associé renommé en conséquence)
+- [x] `francais/les classes grammaticales exercices.zmap` →
       `classes-grammaticales.zmap`
-- [ ] `Français/les mots invariables.zmap` → `mots-invariables.zmap`
-- [ ] `Histoire-Geo/Guerre Totale.zmap` → `guerre-totale.zmap`
-- [ ] `Histoire-Geo/la violence de masse touche les civils lé génocide
-      arménien.zmap` → renommer court, ex. `genocide-armenien.zmap`
-      (corriger aussi le typo "lé" → "le" si repris dans le titre d'une carte)
-- [ ] `Histoire-Geo/rediger un développement construit.zmap` →
+- [x] `francais/les mots invariables.zmap` → `mots-invariables.zmap`
+- [x] `histoire-geo/Guerre Totale.zmap` → `guerre-totale.zmap`
+- [x] `histoire-geo/la violence de masse touche les civils lé génocide
+      arménien.zmap` → `genocide-armenien.zmap` (typo "Lé" → "Le" corrigé
+      dans le titre de la carte racine, reste du contenu laissé intact pour
+      le sous-projet 2)
+- [x] `histoire-geo/rediger un développement construit.zmap` →
       `rediger-un-developpement-construit.zmap`
 
 Fichiers `meta.type: "default"` à reclasser :
