@@ -45,7 +45,7 @@ committe, et s'arrête proprement.
 
 ## Sous-projet 1 — Mise aux normes de `.cartes-mentales/`
 
-**Statut** : ⬜ Pas commencé
+**Statut** : ✅ Terminé
 **Pourquoi en premier** : les sous-projets 2 et 3 écrivent dans cette
 arborescence ; autant qu'elle soit propre avant.
 
@@ -79,16 +79,18 @@ Fichiers à renommer (kebab-case, sans suffixe de type) :
 
 Fichiers `meta.type: "default"` à reclasser :
 
-- [ ] `.cartes-mentales/animaux.zmap` — à la racine, sans matière ni
-      chapitre ; déterminer si ce fichier a encore un usage (semble être un
-      reliquat/test) — si oui le ranger dans une matière, sinon proposer sa
-      suppression à l'utilisateur avant de la faire
-- [ ] `Histoire-Geo/rediger un développement construit.zmap` — probablement
-      `type: "cours"` (c'est une méthode), à confirmer et corriger
+- [x] `.cartes-mentales/animaux.zmap` — contenu de test manifeste
+      (`"qsdqsd"`, remplissage clavier), confirmé reliquat par l'utilisateur
+      — **décision : laisser tel quel**, ne pas ranger ni supprimer
+- [x] `histoire-geo/rediger-un-developpement-construit.zmap` — pas une
+      méthode rédigée : titre racine copié de l'exercice génocide arménien,
+      une seule sous-carte vide. **Décision de l'utilisateur : c'est le
+      travail en cours de l'élève (il va continuer), laisser `type:
+      "default"` et le contenu tels quels, ne pas reclasser**
 
-Une fois les renommages faits : vérifier qu'aucun `.zmap` ne reste avec un
-dossier `.assets` orphelin — un renommage de fichier doit renommer le
-dossier `.assets` associé s'il existe (l'app le dérive du nom du fichier).
+Vérifié : aucun `.zmap` ne reste avec un dossier `.assets` orphelin après
+les renommages ci-dessus (chaque `.assets` correspond à un `.zmap` du même
+nom).
 
 ---
 
