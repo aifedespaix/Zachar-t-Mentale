@@ -18,6 +18,9 @@ import {
 import {
   ASSETS_COLLECTION,
   DEFAULT_BACKUP_CRON,
+  FOLDERS_COLLECTION,
+  SYNC_CONFLICTS_COLLECTION,
+  SYNC_EVENTS_COLLECTION,
   DEFAULT_BACKUP_KEEP,
   MIND_MAPS_COLLECTION,
   USERS_COLLECTION,
@@ -211,8 +214,11 @@ describe('export du schéma', () => {
     expect(first.collections.map(collection => collection.name)).toEqual([
       ASSETS_COLLECTION,
       MIND_MAPS_COLLECTION,
+      FOLDERS_COLLECTION,
+      SYNC_CONFLICTS_COLLECTION,
+      SYNC_EVENTS_COLLECTION,
       USERS_COLLECTION,
-    ])
+    ].sort())
   })
 
   it('leaves out collections that are none of this script\'s business', () => {
@@ -425,12 +431,17 @@ describe('runSetup', () => {
     const report = await runSetup(client, config, silent)
 
     expect(client.auth).toHaveBeenCalled()
-    expect(client.createCollection).toHaveBeenCalledTimes(2)
+    // Tout ce que le script possède sauf `users`, qui EXISTE déjà sur un
+    // PocketBase vierge et n'est donc jamais créée, seulement complétée.
+    expect(client.createCollection).toHaveBeenCalledTimes(5)
     expect(client.updateCollection).toHaveBeenCalledTimes(1) // users only
     expect(report.collections.map(entry => [entry.name, entry.status])).toEqual([
       [MIND_MAPS_COLLECTION, 'created'],
       [ASSETS_COLLECTION, 'created'],
       [USERS_COLLECTION, 'updated'],
+      [FOLDERS_COLLECTION, 'created'],
+      [SYNC_EVENTS_COLLECTION, 'created'],
+      [SYNC_CONFLICTS_COLLECTION, 'created'],
     ])
   })
 

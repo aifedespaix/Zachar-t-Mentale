@@ -32,12 +32,22 @@ jobs:
       - name: install frontend dependencies
         run: bun install
 
-      # La version n'est PAS réécrite ici : elle est lue dans le compose, pour
-      # que la CI prouve la version réellement déployée et pas une autre.
+      # La version n'est PAS réécrite ici : elle est lue dans le Dockerfile, qui
+      # est depuis l'arrivée de l'interface d'administration le seul endroit où
+      # l'image de base est nommée (le compose, lui, construit). La CI prouve
+      # donc la version réellement déployée, et pas une autre.
+      #
+      # `FROM ghcr...` est exigé dans le motif : sans cette ancre, le grep
+      # attraperait aussi bien une version citée dans un commentaire, et la CI
+      # testerait alors une version que personne ne déploie.
       - name: read the pinned PocketBase version
         id: pocketbase
         run: |
-          version=$(grep -oP 'pocketbase:\K[0-9.]+' infra/docker-compose.yml)
+          version=$(grep -oP '^FROM ghcr\.io/muchobien/pocketbase:\K[0-9.]+' infra/Dockerfile)
+          if [ -z "$version" ]; then
+            echo "::error::Version PocketBase introuvable dans infra/Dockerfile"
+            exit 1
+          fi
           echo "Version épinglée : $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 

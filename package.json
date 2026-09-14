@@ -9,6 +9,13 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
+    "test:admin": "cd admin && bun run test",
+    "test:all": "bun run test && bun run test:admin",
+    "admin:dev": "cd admin && bun run dev",
+    "admin:build": "cd admin && bun run build",
+    "infra:check": "bun run infra/setup-pocketbase.mjs --check",
+    "infra:plan": "bun run infra/setup-pocketbase.mjs --dry-run",
+    "infra:apply": "bun run infra/setup-pocketbase.mjs",
     "version:bump": "bun scripts/bump-version.mjs"
   },
   "dependencies": {

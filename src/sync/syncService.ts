@@ -84,6 +84,18 @@ export interface SyncConflict {
   localModified: string
   /** The server record's `updated`. */
   remoteUpdated: string
+  /**
+   * La version LOCALE entière, sérialisée — celle qui n'a PAS été envoyée.
+   *
+   * Sans elle, un conflit ne se tranche que devant la machine de l'élève :
+   * c'est le seul endroit où cette version existe. La capturer ici permet à
+   * l'interface d'administration de la remonter au prof, qui arbitre alors à
+   * distance (voir `syncReporting.ts`).
+   *
+   * Optionnelle parce qu'une lecture de fichier peut échouer : un conflit se
+   * signale TOUJOURS, même quand on n'a pas réussi à en joindre la pièce.
+   */
+  localContent?: string
 }
 
 export interface SyncResult {
@@ -667,11 +679,25 @@ export async function sync({
     // s'applique donc que si c'est du contenu qu'on s'apprête à envoyer.
     if (plan.content && isConflict(meta, known, remote, remote === undefined ? '' : await hashContent(remote.content))) {
       // Reported, never resolved here: both versions hold work someone did.
+      //
+      // La version locale est jointe au signalement. C'est une lecture de plus,
+      // mais UNIQUEMENT sur un fichier en conflit — l'exception, pas le cas
+      // courant — et elle est ce qui rend l'arbitrage possible ailleurs que
+      // devant cette machine. Un échec de lecture ne fait pas disparaître le
+      // conflit : il le laisse simplement sans pièce jointe.
+      let localContent: string | undefined
+      try {
+        const cards = await loadMindMap(scan.path)
+        if (cards !== null) localContent = serializeMindMap(meta, cards)
+      } catch {
+        localContent = undefined
+      }
       result.conflicts.push({
         fileId: meta.id,
         path: relativeTo(syncFolderPath, scan.path),
         localModified: meta.lastModified,
         remoteUpdated: remote.updated,
+        ...(localContent === undefined ? {} : { localContent }),
       })
       return
     }

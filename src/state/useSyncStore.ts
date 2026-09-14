@@ -7,13 +7,32 @@ import { loadServerSyncState, saveSyncState, serverStateOf } from '../persistenc
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { logSyncEvent } from '../persistence/syncLog'
-import { createSyncClient } from '../sync/pocketBaseAdapter'
+import { createReportingClient, createSyncClient } from '../sync/pocketBaseAdapter'
+import { reportSyncRun } from '../sync/syncReporting'
 import { surveySyncFolder, sync, type SyncResult } from '../sync/syncService'
 import { syncResultLabel } from '../sync/syncResultLabel'
 import { useWorkspaceStore } from './useWorkspaceStore'
 
 /** Who asked for a run: only a background one is allowed to stay quiet about a failure. */
 export type SyncTrigger = 'manual' | 'auto'
+
+/**
+ * Comment cette machine se nomme dans le journal SERVEUR.
+ *
+ * Volontairement grossier — « Windows », « macOS », « Linux » — et jamais un
+ * user-agent complet : la question à laquelle ce champ répond est « depuis quel
+ * poste ? » quand un élève en a deux, pas « quelle version du moteur de rendu ».
+ * Un user-agent entier serait un identifiant de machine autrement plus bavard
+ * pour un gain nul.
+ */
+export function describeDevice(userAgent: string): string {
+  if (/windows/i.test(userAgent)) return 'Windows'
+  if (/mac os|macintosh/i.test(userAgent)) return 'macOS'
+  if (/android/i.test(userAgent)) return 'Android'
+  if (/iphone|ipad/i.test(userAgent)) return 'iOS'
+  if (/linux/i.test(userAgent)) return 'Linux'
+  return 'inconnu'
+}
 
 export interface SyncTriggerOptions {
   trigger?: SyncTrigger
@@ -400,6 +419,33 @@ export function createSyncStore(): SyncStore {
           if (result.errors.length > 0) {
             // The per-file detail, which is what a bug report actually needs.
             await logSyncEvent('error', 'fichiers en erreur pendant la synchronisation', result.errors)
+          }
+          // Le même compte rendu, mais côté SERVEUR, pour l'interface
+          // d'administration : le prof lit depuis son téléphone ce qui s'est
+          // passé sur une machine où il n'est pas.
+          //
+          // Le `try` n'est pas une redondance avec les garanties de
+          // `reportSyncRun`, qui n'avale que ce qui se produit une fois le
+          // client construit. La CONSTRUCTION, elle, est du code ordinaire qui
+          // peut échouer, et une exception ici serait rattrapée par le `catch`
+          // de la synchronisation : un envoi parfaitement réussi s'afficherait
+          // alors en échec, pour une ligne de journal. Le compte rendu est un
+          // effet de bord — il ne décide jamais du sort d'une synchronisation.
+          try {
+            const report = await reportSyncRun(createReportingClient(pb), result, {
+              username: currentUser.username,
+              role: currentUser.role,
+              trigger,
+              // La phrase déjà affichée à l'utilisateur : en réécrire une
+              // seconde ici les ferait diverger sans que rien ne le signale.
+              summary: syncResultLabel(result),
+              device: describeDevice(navigator.userAgent),
+            })
+            if (report.failures.length > 0) {
+              await logSyncEvent('debug', 'compte rendu au serveur partiellement refusé', report.failures)
+            }
+          } catch (error) {
+            await logSyncEvent('debug', 'compte rendu au serveur impossible', error)
           }
           if (result.cancelled) {
             // An interrupted run is not a success: « dernière synchro » must not

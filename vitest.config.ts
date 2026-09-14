@@ -22,6 +22,11 @@ export default defineConfig({
     // Worktrees are full second checkouts of this repo (see .gitignore and
     // .git/info/exclude). Collecting them runs every suite twice and trips
     // over the standalone runners inside their own copy of `tools/`.
-    exclude: [...configDefaults.exclude, 'tools/**', '.claude/**', '.worktrees/**'],
+    // `admin/` est un SECOND projet, avec son propre vitest.config.ts, son
+    // propre package.json et son propre alias `@app` vers ce `src/`. Collecté
+    // ici, il s'exécuterait avec la configuration de celui-ci — où `@app`
+    // n'existe pas — et chaque suite tomberait à l'import. On le lance par
+    // `bun run test:admin`.
+    exclude: [...configDefaults.exclude, 'tools/**', '.claude/**', '.worktrees/**', 'admin/**'],
   },
 })

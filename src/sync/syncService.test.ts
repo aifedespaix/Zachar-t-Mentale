@@ -41,6 +41,7 @@ import {
   type RemoteAssetRecord,
 } from './syncService'
 import { hashContent } from './contentHash'
+import { serializeMindMap } from '../persistence/serialization'
 import { emptySyncState, type SyncState, type SyncStateEntry } from '../persistence/syncState'
 import type { MindMapMeta, SyncUser } from '../types/card'
 
@@ -734,8 +735,28 @@ describe('sync — conflits', () => {
         path: 'a.zmap',
         localModified: '2026-02-01T00:00:00.000Z',
         remoteUpdated: '2026-02-01 10:00:00.000Z',
+        // La version locale voyage avec le signalement : c'est la seule copie
+        // qui existe, et sans elle le conflit ne se tranche que devant cette
+        // machine (voir `syncReporting.ts`).
+        localContent: serializeMindMap({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z' }, []),
       },
     ])
+  })
+
+  it('still reports the conflict when the losing local version cannot be read', async () => {
+    localFile('2026-02-01T00:00:00.000Z')
+    // Le fichier est bien là pour le scan, mais sa lecture échoue au moment de
+    // joindre la pièce : un conflit sans pièce jointe reste un conflit.
+    vi.mocked(loadMindMap).mockRejectedValue(new Error('disque illisible'))
+    const client = fakeClient({
+      mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
+    })
+
+    const result = await runSync({ client, state: memory({ ...CACHED }) })
+
+    expect(result.conflicts).toHaveLength(1)
+    expect(result.conflicts[0].localContent).toBeUndefined()
+    expect(client.mindMaps.update).not.toHaveBeenCalled()
   })
 
   it('is not a conflict when only we moved — that is an ordinary push', async () => {

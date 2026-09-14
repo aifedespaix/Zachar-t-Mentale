@@ -10,6 +10,33 @@ on:
   workflow_dispatch:
 
 jobs:
+  # L'interface d'administration est un SECOND projet, avec ses propres
+  # dépendances : elle n'est ni compilée ni testée par le job Windows, qui ne
+  # connaît que l'application de bureau. Sans ce job, une erreur de types dans
+  # `admin/` ne se découvrirait qu'au `docker build` du déploiement — c'est-à-dire
+  # au pire moment, et sur la machine de quelqu'un d'autre.
+  admin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: install admin dependencies
+        working-directory: admin
+        run: bun install --frozen-lockfile
+
+      - name: run admin tests
+        working-directory: admin
+        run: bun run test
+
+      # Exactement ce que fait `infra/Dockerfile` : `tsc && vite build`. Si ça
+      # passe ici, l'image se construira.
+      - name: build the admin bundle
+        working-directory: admin
+        run: bun run build
+
   build-windows:
     runs-on: windows-latest
     steps:

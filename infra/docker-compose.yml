@@ -1,10 +1,22 @@
 services:
   pocketbase:
-    # ÉPINGLÉ, jamais :latest — le script infra/setup-pocketbase.mjs parle l'API
-    # des collections de PocketBase >= 0.23, et le SDK JS embarqué dans l'app
+    # Construite plutôt que tirée telle quelle : l'image ajoute l'interface
+    # d'administration (`admin/`) dans le `/pb_public` de PocketBase, qui la
+    # sert alors à la racine du même domaine que l'API. Un seul conteneur, un
+    # seul port, aucune origine supplémentaire — voir infra/Dockerfile.
+    #
+    # L'image de BASE reste ÉPINGLÉE (ghcr.io/muchobien/pocketbase:0.40.3),
+    # jamais :latest — le script infra/setup-pocketbase.mjs parle l'API des
+    # collections de PocketBase >= 0.23, et le SDK JS embarqué dans l'app
     # (pocketbase@0.28) vise exactement cette série. Mettez à jour les deux
-    # ensemble : nouvelle image + vérification du script.
-    image: ghcr.io/muchobien/pocketbase:0.40.3
+    # ensemble : nouvelle image dans infra/Dockerfile + vérification du script.
+    #
+    # Le contexte est la RACINE du dépôt, pas `infra/` : la construction a
+    # besoin de `admin/` et de `src/` (l'admin importe le code pur de
+    # l'application de bureau).
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
     restart: unless-stopped
     environment:
       # L'image crée (ou met à jour) ce superutilisateur au démarrage via

@@ -2,6 +2,29 @@
 
 Tauri + React/TypeScript app (not a monorepo). Frontend in `src/`, Rust backend in `src-tauri/`.
 
+## Two front-ends, one shared core
+
+`admin/` is a SECOND, standalone Vite app — the teacher's web admin panel, built
+into the PocketBase image (`infra/Dockerfile`) and served from `/pb_public` at
+the root of the sync domain. It has its own `package.json`, `tsconfig`,
+`vitest.config.ts` and `node_modules`.
+
+- It imports the desktop app's **pure** modules through the `@app` alias
+  (`admin/src/…` → `../src/…`): card types, `validateCards`/`repairCards`,
+  serialization, path helpers. Never copy that code into `admin/` — a validator
+  that drifts from the real format is worse than none.
+- Nothing under `admin/` may import `@tauri-apps/*`, directly or transitively.
+- Run its suite with `bun run test:admin` from the root (which delegates to
+  `admin/`'s own scripts). Invoking `vitest` directly from the root against
+  `admin/` picks up the wrong binary and its jest-dom matchers go missing.
+- The root `vitest.config.ts` deliberately excludes `admin/**`.
+
+Server-side schema lives in `infra/pocketbase-schema.mjs` as data, and
+`infra/setup-pocketbase.mjs` applies it idempotently — `bun run infra:plan` /
+`infra:apply` / `infra:check`. Adding a collection means editing the schema
+module, nothing else: the script, its tests and the docs all read that one
+definition.
+
 ## Explore via the knowledge graph first
 
 A graphify knowledge graph exists at `graphify-out/graph.json` (513 nodes, 28 communities, rebuilt from `git rev-parse HEAD`). For any question about architecture, "what calls X", data flow, or "where does Y live" — run `/graphify query "<question>"` before grepping or reading files raw. This applies to subagents too: if you spawn an Explore/general-purpose agent for a codebase question, tell it to check for `graphify-out/graph.json` and query it first instead of walking the tree cold.
