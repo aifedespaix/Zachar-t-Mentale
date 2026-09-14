@@ -174,7 +174,16 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
       ce sont des documents complémentaires, pas des doublons. `ref/archi/`
       et `ref/autoportrait/` = images/PDF de référence légitimes. Rien à
       supprimer ni déplacer ; dossier déjà propre, validé par l'utilisateur
-- [ ] Tri — français 4e
+- [x] Tri — français 4e : aucun bruit technique trouvé (pas de `.~lock.*#`,
+      pas de `._*`, pas de `.tmp`, pas de dossiers "Ancien"/"Nouveau"
+      dupliqués). Noms les plus ambigus vérifiés par contenu (`Sans nom
+      2.odt`, `journal.odt`, `français.odt`) : tous du vrai travail d'élève
+      (exercice de grammaire, QQOQCP actualité, analyse d'image), pas des
+      fichiers vides ou perdus. Une dizaine de fichiers posés directement
+      sous `4e/` sans dossier Chapitre/Séquence (contrairement à Chapitre 1
+      et 2, bien structurés) — pas du bruit, juste une organisation à
+      trancher au moment de l'ingestion. Rien à supprimer, validé par
+      l'utilisateur
 - [ ] Tri — histoire-geo (3e, 4e, 5e, 6A)
 - [ ] Une fois le tri validé, ingestion matière par matière via la skill
       `transformer-cours-en-carte-mentale`, chapitre par chapitre —
