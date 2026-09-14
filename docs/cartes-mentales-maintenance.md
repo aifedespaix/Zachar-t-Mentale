@@ -106,7 +106,11 @@ Aucun fichier de type `corrections` n'existe aujourd'hui dans
       dans l'exo source au moment de la correction ; contenu déjà
       factuellement correct, corrections mineures de formulation seulement
       (indices `qcm-title` moins littéraux)
-- [ ] `espagnol/ejercicios/hablamos espanol en el mundo.zmap`
+- [x] `espagnol/ejercicios/hablamos-espanol-en-el-mundo.zmap` — 4 cartes
+      source. Fichier lui-même oublié par le sous-projet 1 (nom avec espaces,
+      hors de sa liste) : renommé en kebab-case à cette occasion, `.assets`
+      inclus. Contenu déjà correct ; images reprises telles quelles dans un
+      `.assets` dédié à la correction (copie physique, pas de génération)
 - [ ] `espagnol/vocabulario/dias-de-la-semana.zmap`
 - [ ] `espagnol/vocabulario/estaciones-del-ano.zmap`
 - [ ] `espagnol/vocabulario/meses-del-ano.zmap`
