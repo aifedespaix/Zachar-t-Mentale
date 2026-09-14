@@ -111,9 +111,12 @@ Aucun fichier de type `corrections` n'existe aujourd'hui dans
       hors de sa liste) : renommé en kebab-case à cette occasion, `.assets`
       inclus. Contenu déjà correct ; images reprises telles quelles dans un
       `.assets` dédié à la correction (copie physique, pas de génération)
-- [ ] `espagnol/vocabulario/dias-de-la-semana.zmap`
-- [ ] `espagnol/vocabulario/estaciones-del-ano.zmap`
-- [ ] `espagnol/vocabulario/meses-del-ano.zmap`
+- [x] `espagnol/vocabulario/dias-de-la-semana.zmap` — 7 cartes source,
+      contenu déjà exact, correction = version prof identique
+- [x] `espagnol/vocabulario/estaciones-del-ano.zmap` — 4 cartes source,
+      contenu déjà exact, correction = version prof identique
+- [x] `espagnol/vocabulario/meses-del-ano.zmap` — 12 cartes source, contenu
+      déjà exact, correction = version prof identique
 - [ ] `francais/classes-grammaticales.zmap` (ex-"les classes grammaticales
       exercices")
 - [ ] `francais/mots-invariables.zmap`
