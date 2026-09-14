@@ -141,6 +141,24 @@ async function copyDirRecursive(sourceDir: string, destDir: string, stripSyncMet
 }
 
 /**
+ * Copie le dossier d'images d'une carte vers celui d'une autre.
+ *
+ * BEST-EFFORT, comme partout ici : l'appelant a déjà écrit la carte elle-même
+ * quand il arrive ici, et échouer sur des images laisserait un fichier bien
+ * écrit signalé comme un échec. Une carte sans images (le cas courant) n'a
+ * rien à copier et n'est pas une erreur.
+ */
+export async function copyAssetSidecar(sourcePath: string, destPath: string): Promise<void> {
+  try {
+    const sourceSidecar = sidecarDirOf(sourcePath)
+    if (!(await exists(sourceSidecar))) return
+    await copyDirRecursive(sourceSidecar, sidecarDirOf(destPath))
+  } catch {
+    // Voir le contrat ci-dessus : la carte est déjà écrite.
+  }
+}
+
+/**
  * Duplicates a file or folder onto a new sibling path, carrying a mind
  * map's asset sidecar with it — and WITHOUT its sync metadata.
  *

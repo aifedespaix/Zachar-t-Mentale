@@ -7,6 +7,7 @@ vi.mock('../persistence/workspaceConfig', () => ({
 }))
 vi.mock('../persistence/fileTree', () => ({ scanFolder: vi.fn() }))
 vi.mock('../persistence/fileOps', () => ({ movePath: vi.fn() }))
+vi.mock('../persistence/copyLinkOps', () => ({ moveLinkedGroup: vi.fn() }))
 vi.mock('../persistence/sessionState', () => ({
   loadSessionState: vi.fn(),
   saveSessionState: vi.fn(),
@@ -16,6 +17,7 @@ import { loadWorkspaceConfig, saveWorkspaceConfig } from '../persistence/workspa
 import { scanFolder } from '../persistence/fileTree'
 import { loadSessionState, saveSessionState } from '../persistence/sessionState'
 import { movePath } from '../persistence/fileOps'
+import { moveLinkedGroup } from '../persistence/copyLinkOps'
 
 describe('useWorkspaceStore', () => {
   beforeEach(() => {
@@ -23,6 +25,7 @@ describe('useWorkspaceStore', () => {
     vi.mocked(saveWorkspaceConfig).mockReset().mockResolvedValue(undefined)
     vi.mocked(scanFolder).mockReset()
     vi.mocked(movePath).mockReset().mockResolvedValue(undefined)
+    vi.mocked(moveLinkedGroup).mockReset().mockResolvedValue([])
     vi.mocked(loadSessionState)
       .mockReset()
       .mockReturnValue({ currentFilePath: null, expandedPaths: [], recentFiles: [] })
@@ -393,6 +396,33 @@ describe('useWorkspaceStore.moveNode', () => {
     expect(state.expandedPaths.has('/cours-svt/Divers/SVT/Lycée')).toBe(true)
     // Opened as a destination, so the folder that just arrived is visible.
     expect(state.expandedPaths.has('/cours-svt/Divers')).toBe(true)
+  })
+
+  it('takes a linked copy along, so « same folder » survives the move', async () => {
+    const store = storeWithTree()
+    vi.mocked(scanFolder).mockResolvedValue([])
+    vi.mocked(moveLinkedGroup).mockResolvedValue([
+      { from: '/cours-svt/SVT/a (copie).zmap', to: '/cours-svt/SVT/Lycée/a (copie).zmap' },
+    ])
+
+    await store.getState().moveNode('/cours-svt/SVT/a.zmap', '/cours-svt/SVT/Lycée', false)
+
+    expect(moveLinkedGroup).toHaveBeenCalledWith({
+      memberPath: '/cours-svt/SVT/Lycée/a.zmap',
+      previousFolderPath: '/cours-svt/SVT',
+      destFolderPath: '/cours-svt/SVT/Lycée',
+    })
+    // Les en-têtes relus : la pastille de lien doit suivre les fichiers.
+    expect(store.getState().fileMetaRevision).toBe(1)
+  })
+
+  it('never asks a moved FOLDER to drag a copy group along', async () => {
+    const store = storeWithTree()
+    vi.mocked(scanFolder).mockResolvedValue([])
+
+    await store.getState().moveNode('/cours-svt/SVT', '/cours-svt/Divers', true)
+
+    expect(moveLinkedGroup).not.toHaveBeenCalled()
   })
 
   it('reports a refused move and leaves the open file, the tree and the session alone', async () => {

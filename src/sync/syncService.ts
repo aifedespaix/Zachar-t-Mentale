@@ -13,6 +13,7 @@ import { canClassify, canEditContent, canReorder } from './permissions'
 import { mergeCards } from './cardMerge'
 import { mapTypeOf } from '../types/mapType'
 import { hashContent } from './contentHash'
+import { countCards, emptyCardCounts, type CardCounts } from './cardCounts'
 import { reconcilePath, seedLastSyncedPath } from './pathReconciliation'
 import { reconcileType, seedLastSyncedType } from './typeReconciliation'
 
@@ -76,6 +77,35 @@ export interface SyncClient {
   assets: AssetsApi
 }
 
+/**
+ * Ce qu'une résolution de conflit a besoin de MONTRER et d'APPLIQUER, capturé
+ * pendant le sync parce que c'est le seul moment où les deux versions sont
+ * là en même temps.
+ *
+ * Optionnel dans `SyncConflict` pour la même raison que `relocated` et ses
+ * voisins dans `SyncResult` : plusieurs tests hors du périmètre de ce chantier
+ * construisent des conflits littéraux, et `tsconfig` inclut tout `src`. `sync()`
+ * le renseigne TOUJOURS ; la boîte de dialogue, elle, sait dire « relancez une
+ * synchronisation » plutôt que d'afficher un comparatif vide.
+ */
+export interface SyncConflictDetail {
+  /** Le chemin ABSOLU du fichier local — ce qu'une copie et une relecture visent. */
+  localPath: string
+  /** Le chemin RELATIF que le serveur détient : différent dès qu'un côté a renommé ou rangé. */
+  remotePath: string
+  /**
+   * Le contenu distant tel que ce run l'a vu. Il sert au comparatif (compter
+   * les cartes du serveur sans un aller-retour réseau de plus) et à l'empreinte
+   * que « garder ma version » enregistre — voir `resolvedStateEntry`.
+   */
+  remoteContent: string
+  /** L'empreinte de `remoteContent`, déjà calculée par la détection de conflit. */
+  remoteContentHash: string
+  /** Combien de cartes, par niveau, de chaque côté. */
+  localCounts: CardCounts
+  remoteCounts: CardCounts
+}
+
 /** A file both sides changed since the last sync — skipped, never resolved in silence. */
 export interface SyncConflict {
   fileId: string
@@ -84,6 +114,8 @@ export interface SyncConflict {
   localModified: string
   /** The server record's `updated`. */
   remoteUpdated: string
+  /** Tout ce qu'une résolution demande — toujours renseigné par `sync()`. */
+  detail?: SyncConflictDetail
 }
 
 export interface SyncResult {
@@ -445,6 +477,56 @@ async function pullAssetsFor(
   }
 }
 
+/**
+ * Le même `meta`, sans son LIEN DE COPIE.
+ *
+ * Le lien décrit un arrangement de FICHIERS sur une machine : « cette carte a
+ * une copie à côté d'elle, même dossier, même nom ». Rien de tout cela n'est
+ * vrai ailleurs — une autre machine n'a pas la copie —, donc il ne monte pas au
+ * serveur, et un tirage ne l'écrase pas (voir `pullOne`). Ce n'est pas une
+ * censure : c'est la différence entre le contenu d'une carte, qui se partage,
+ * et le rangement d'un dossier, qui est à chacun.
+ */
+function withoutCopyLink(meta: MindMapMeta): MindMapMeta {
+  if (meta.copyLink === undefined) return meta
+  const { copyLink: _copyLink, ...rest } = meta
+  return rest
+}
+
+/**
+ * Le comparatif d'un conflit : où sont les deux versions, et de quoi elles sont
+ * faites.
+ *
+ * Compter des cartes ne doit JAMAIS faire échouer une synchronisation. Un
+ * fichier illisible d'un côté ou de l'autre donne un comptage vide plutôt
+ * qu'une erreur : le conflit reste signalé, avec ses dates et ses chemins, et
+ * c'est le seul message qui compte vraiment ici.
+ */
+async function conflictDetailOf(params: {
+  localPath: string
+  remote: RemoteMindMapRecord
+  remoteContentHash: string
+}): Promise<SyncConflictDetail> {
+  const { localPath, remote, remoteContentHash } = params
+  const localCounts = await loadMindMap(localPath)
+    .then(cards => (cards === null ? emptyCardCounts() : countCards(cards)))
+    .catch(() => emptyCardCounts())
+  let remoteCounts: CardCounts
+  try {
+    remoteCounts = countCards(deserializeMindMap(remote.content).cards)
+  } catch {
+    remoteCounts = emptyCardCounts()
+  }
+  return {
+    localPath,
+    remotePath: remote.path,
+    remoteContent: remote.content,
+    remoteContentHash,
+    localCounts,
+    remoteCounts,
+  }
+}
+
 async function ensureLocalFolder(path: string): Promise<void> {
   const dir = parentDirOf(path)
   if (dir && !(await exists(dir))) await mkdir(dir, { recursive: true })
@@ -665,13 +747,22 @@ export async function sync({
 
     // Un conflit porte sur du CONTENU, jamais sur un rangement : le contrôle ne
     // s'applique donc que si c'est du contenu qu'on s'apprête à envoyer.
-    if (plan.content && isConflict(meta, known, remote, remote === undefined ? '' : await hashContent(remote.content))) {
+    // Calculée à la même condition qu'avant d'être sortie de la ligne ci-dessous
+    // (`plan.content &&`) : une empreinte est un hachage du contenu complet, et
+    // la prendre pour tous les fichiers d'un dossier alors que la plupart n'ont
+    // rien à envoyer serait un coût pur.
+    const remoteContentHash = plan.content && remote !== undefined ? await hashContent(remote.content) : ''
+    if (plan.content && isConflict(meta, known, remote, remoteContentHash)) {
       // Reported, never resolved here: both versions hold work someone did.
       result.conflicts.push({
         fileId: meta.id,
         path: relativeTo(syncFolderPath, scan.path),
         localModified: meta.lastModified,
         remoteUpdated: remote.updated,
+        // Le comparatif est monté ICI parce que c'est le seul instant où les
+        // deux versions sont sous la main : plus tard, il faudrait retélécharger
+        // l'enregistrement pour pouvoir seulement compter ses cartes.
+        detail: await conflictDetailOf({ localPath: scan.path, remote, remoteContentHash }),
       })
       return
     }
@@ -696,7 +787,7 @@ export async function sync({
         // jumeau sérialisé différemment rendrait la comparaison de conflit
         // « toujours différente » pour tout fichier modifié, sans qu'aucun
         // test ne tombe.
-        content = serializeMindMap(meta, cards)
+        content = serializeMindMap(withoutCopyLink(meta), cards)
         contentHash = await hashContent(content)
         // Assets are pushed BEFORE the record that references them: an
         // observer's getFullList() must never see a record whose content
@@ -808,15 +899,16 @@ export async function sync({
       // backed up nowhere. Only overwrite when the file already there is a
       // previous pull/update of THIS SAME record; anything else is left
       // alone and reported instead of silently destroyed.
-      if (await exists(localPath)) {
-        const localMeta = await loadMindMapMeta(localPath)
-        if (localMeta === null || localMeta.id !== record.file_id) {
-          result.errors.push({
-            fileId: record.file_id,
-            message: 'un fichier local existe déjà à cet emplacement et n’est pas ce fichier synchronisé',
-          })
-          return
-        }
+      // Relu ICI plutôt que dans la seule branche du garde ci-dessous : son lien
+      // de copie doit survivre à la réécriture, quelques lignes plus bas.
+      const alreadyThere = await exists(localPath)
+      const localMeta = alreadyThere ? await loadMindMapMeta(localPath) : null
+      if (alreadyThere && (localMeta === null || localMeta.id !== record.file_id)) {
+        result.errors.push({
+          fileId: record.file_id,
+          message: 'un fichier local existe déjà à cet emplacement et n’est pas ce fichier synchronisé',
+        })
+        return
       }
 
       await ensureLocalFolder(localPath)
@@ -830,8 +922,18 @@ export async function sync({
         result.merged.push({ fileId: record.file_id, path: record.path, floatedCount })
       }
       // Le champ `type` de l'enregistrement fait foi : la copie locale est
-      // réécrite avec lui, sans toucher au reste du `meta`.
-      const applied = meta === null ? null : { ...meta, type: mapTypeOf(record.type) }
+      // réécrite avec lui, sans toucher au reste du `meta`. Le LIEN DE COPIE,
+      // lui, est remis tel qu'il était en local : il ne vient pas du serveur
+      // (voir `withoutCopyLink`), donc sans cette ligne le premier tirage venu
+      // délierait une copie que l'utilisateur a expressément demandée.
+      const applied =
+        meta === null
+          ? null
+          : {
+              ...meta,
+              type: mapTypeOf(record.type),
+              ...(localMeta?.copyLink === undefined ? {} : { copyLink: localMeta.copyLink }),
+            }
       const serialized = serializeMindMap(applied, mergedCards)
       await writeTextFile(localPath, serialized)
       // `referencedAssets` lit la chaîne ÉCRITE (`serialized`), jamais la chaîne
@@ -839,13 +941,18 @@ export async function sync({
       await pullAssetsFor(client, localPath, referencedAssets(serialized, remoteAssets), { signal })
       // L'empreinte est prise sur la chaîne FINALEMENT ÉCRITE, jamais sur la
       // chaîne reçue : c'est le fichier réel, donc la seule base juste pour la
-      // comparaison de conflit du prochain passage.
+      // comparaison de conflit du prochain passage. Sans son lien de copie,
+      // toutefois : ce qu'elle sert à comparer, c'est le contenu DISTANT, qui
+      // n'en porte jamais. La prendre sur le fichier tel quel ferait déclarer un
+      // conflit à chaque édition d'une carte liée, le lien suffisant à faire
+      // diverger les deux empreintes pour toujours.
+      const comparable = applied === null ? serialized : serializeMindMap(withoutCopyLink(applied), mergedCards)
       entries[record.file_id] = {
         lastSyncedModified: meta?.lastModified ?? record.updated,
         lastSyncedUpdated: record.updated,
         lastSyncedPath: record.path,
         lastSyncedType: mapTypeOf(record.type),
-        lastSyncedContentHash: await hashContent(serialized),
+        lastSyncedContentHash: await hashContent(comparable),
       }
       result.pulled += 1
       result.transferred.push({ fileId: record.file_id, path: record.path, direction: 'pull' })

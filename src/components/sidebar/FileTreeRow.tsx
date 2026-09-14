@@ -10,6 +10,7 @@ import { renamePath, deletePath, duplicatePath, freeSiblingPath } from '../../pe
 import { countDescendants } from '../../persistence/fileTree'
 import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, mindMapExtensionSuffix, withMindMapExtension, isInsideFolder } from '../../persistence/paths'
 import { loadMindMap, mindMapExists, setMindMapType } from '../../persistence/fileStore'
+import { renameLinkedGroup, unlinkIfAlone } from '../../persistence/copyLinkOps'
 import { beginTreeDrag, consumeSwallowedClick, isValidDropTarget } from './treeDrag'
 import { flattenFolders, isRowVisible, type FolderOption } from './treeFilter'
 import { validateCards } from '../../validation/cardsValidation'
@@ -35,6 +36,7 @@ import { useSyncStore } from '../../state/useSyncStore'
 import { canClassify, canEditContent } from '../../sync/permissions'
 import { MAP_TYPES, MAP_TYPE_LABELS, type MapType } from '../../types/mapType'
 import { MapTypeBadge } from './MapTypeBadge'
+import { CopyLinkBadge } from './CopyLinkBadge'
 
 /**
  * The class list shared by every row: the base, then whichever state modifiers
@@ -304,6 +306,22 @@ export function FileTreeRow({
     const newName = node.type === 'mindmap' ? `${baseName}${mindMapExtensionSuffix(node.name)}` : baseName
     if (newName === node.name) return
     const newPath = `${parentPath}${separator}${newName}`
+    // Une carte LIÉE se renomme avec sa copie, sinon la règle « même nom »
+    // tiendrait le temps d'un renommage et le couple se perdrait de vue. Le
+    // groupe décide alors du nom final : ce qui a été tapé en donne la racine,
+    // et chaque membre reprend le suffixe qui lui revient.
+    if (meta?.copyLink !== undefined) {
+      try {
+        const moves = await renameLinkedGroup({ memberPath: node.path, typedBaseName: baseName })
+        const own = moves.find(move => move.from === node.path)
+        if (own !== undefined && node.path === currentFilePath) setCurrentFile(own.to)
+        await refreshFolder(parentPath)
+        useWorkspaceStore.getState().bumpFileMetaRevision()
+      } catch (error) {
+        setWorkspaceError(`Impossible de renommer « ${node.name} » : ${describeError(error)}`)
+      }
+      return
+    }
     try {
       await renamePath(node.path, newPath)
     } catch (error) {
@@ -323,11 +341,19 @@ export function FileTreeRow({
     setConfirmDeleteOpen(false)
     const parentPath = parentDirOf(node.path)
     const separator = separatorOf(node.path)
+    // Lu AVANT la suppression : après, il n'y a plus de fichier à interroger.
+    const link = meta?.copyLink
     try {
       await deletePath(node.path, node.type === 'folder')
     } catch (error) {
       setWorkspaceError(`Impossible de supprimer « ${node.name} » : ${describeError(error)}`)
       return
+    }
+    // Un lien qui ne désigne plus personne est pire que pas de lien : le badge
+    // promettrait un voisin que l'utilisateur irait chercher.
+    if (link !== undefined) {
+      await unlinkIfAlone(parentPath, link.groupId)
+      useWorkspaceStore.getState().bumpFileMetaRevision()
     }
     if (currentFilePath === node.path || currentFilePath?.startsWith(node.path + separator)) setCurrentFile(null)
     await refreshFolder(parentPath)
@@ -624,6 +650,7 @@ export function FileTreeRow({
     const mindMapTrailing = (
       <>
         <MapTypeBadge type={meta?.type} />
+        <CopyLinkBadge link={meta?.copyLink} />
         {outOfSyncFolder && (
           <CloudOff size={13} aria-label="Hors du dossier de synchronisation" style={{ opacity: 0.7, flexShrink: 0 }}>
             <title>Hors du dossier de synchronisation : cette carte ne sera plus envoyée.</title>

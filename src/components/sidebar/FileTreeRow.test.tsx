@@ -34,6 +34,7 @@ vi.mock('../../persistence/exportIO', () => ({ pickXmindFile: vi.fn(), readBinar
 vi.mock('../../xmind/importXmind', () => ({ readXmindFile: vi.fn() }))
 vi.mock('../../hooks/useMindMapFormatValid', () => ({ useMindMapFormatValid: vi.fn() }))
 vi.mock('../../hooks/useMindMapAuthor', () => ({ useMindMapAuthor: vi.fn() }))
+vi.mock('../../persistence/copyLinkOps', () => ({ renameLinkedGroup: vi.fn(), unlinkIfAlone: vi.fn() }))
 
 import {
   createMindMapFile,
@@ -49,6 +50,7 @@ import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
 import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
 import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
+import { renameLinkedGroup, unlinkIfAlone } from '../../persistence/copyLinkOps'
 import { useSyncStore } from '../../state/useSyncStore'
 
 /**
@@ -1169,5 +1171,127 @@ describe('FileTreeRow — type de carte', () => {
     const wrapper = item?.closest('[title]')
     expect(wrapper).not.toBe(item)
     expect(wrapper).toHaveAttribute('title', 'Publiez cette carte pour pouvoir la classer')
+  })
+})
+
+/**
+ * Le LIEN DE COPIE, vu de l'arborescence : la pastille qui montre que deux
+ * lignes vont ensemble, et la règle « même dossier, même nom » quand on
+ * renomme ou supprime l'une d'elles.
+ */
+describe('FileTreeRow — lien de copie', () => {
+  const node: FileTreeNode = { type: 'mindmap', name: 'Chapitre 1.zmap', path: '/cours/Chapitre 1.zmap' }
+  const copyNode: FileTreeNode = {
+    type: 'mindmap',
+    name: 'Chapitre 1 (copie).zmap',
+    path: '/cours/Chapitre 1 (copie).zmap',
+  }
+  const base: MindMapMeta = { id: 'f1', author: 'aife', role: 'prof', lastModified: 'x' }
+
+  beforeEach(() => {
+    resetWorkspaceStore()
+    vi.mocked(useMindMapFormatValid).mockReset().mockReturnValue(true)
+    vi.mocked(useMindMapAuthor).mockReset().mockReturnValue(null)
+    vi.mocked(renameLinkedGroup).mockReset().mockResolvedValue([])
+    vi.mocked(unlinkIfAlone).mockReset().mockResolvedValue(undefined)
+    vi.mocked(deletePath).mockReset().mockResolvedValue(undefined)
+    vi.mocked(renamePath).mockReset().mockResolvedValue(undefined)
+    vi.mocked(scanFolder).mockReset().mockResolvedValue([])
+    useSyncStore.setState({ currentUser: { username: 'aife', role: 'prof' }, syncFolderPath: null })
+  })
+
+  function renderRow(target: FileTreeNode = node) {
+    return render(
+      <TooltipProvider>
+        <FileTreeRow node={target} depth={0} onOpenFile={vi.fn()} />
+      </TooltipProvider>
+    )
+  }
+
+  it('marks both sides of a linked pair, each saying which one it is', () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue({
+      ...base,
+      copyLink: { groupId: 'f1', role: 'source', baseName: 'Chapitre 1' },
+    })
+    const { unmount } = renderRow()
+    expect(screen.getByTestId('copy-link-badge')).toHaveTextContent('liée')
+    expect(screen.getByLabelText(/Chapitre 1 \(copie\)/)).toBeInTheDocument()
+    unmount()
+
+    vi.mocked(useMindMapAuthor).mockReturnValue({
+      ...base,
+      id: 'f2',
+      copyLink: { groupId: 'f1', role: 'copy', baseName: 'Chapitre 1', index: 1 },
+    })
+    renderRow(copyNode)
+    expect(screen.getByTestId('copy-link-badge')).toHaveTextContent('copie')
+    expect(screen.getByLabelText(/Copie liée de « Chapitre 1 »/)).toBeInTheDocument()
+  })
+
+  it('marks nothing on an ordinary map', () => {
+    vi.mocked(useMindMapAuthor).mockReturnValue(base)
+    renderRow()
+    expect(screen.queryByTestId('copy-link-badge')).not.toBeInTheDocument()
+  })
+
+  it('renaming a linked map renames the whole group, never the one file alone', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useMindMapAuthor).mockReturnValue({
+      ...base,
+      copyLink: { groupId: 'f1', role: 'source', baseName: 'Chapitre 1' },
+    })
+    vi.mocked(renameLinkedGroup).mockResolvedValue([
+      { from: '/cours/Chapitre 1.zmap', to: '/cours/Chapitre 2.zmap' },
+      { from: '/cours/Chapitre 1 (copie).zmap', to: '/cours/Chapitre 2 (copie).zmap' },
+    ])
+    useWorkspaceStore.setState({ currentFilePath: '/cours/Chapitre 1.zmap' })
+    renderRow()
+
+    await user.dblClick(screen.getByText('Chapitre 1'))
+    const field = screen.getByRole('textbox')
+    await user.clear(field)
+    await user.type(field, 'Chapitre 2{Enter}')
+
+    await waitFor(() =>
+      expect(renameLinkedGroup).toHaveBeenCalledWith({
+        memberPath: '/cours/Chapitre 1.zmap',
+        typedBaseName: 'Chapitre 2',
+      })
+    )
+    // Le renommage ordinaire n'a PAS eu lieu : il aurait laissé la copie
+    // derrière, avec un nom qui ne correspond plus à rien.
+    expect(renamePath).not.toHaveBeenCalled()
+    // Le fichier ouvert suit son propre déplacement.
+    await waitFor(() => expect(useWorkspaceStore.getState().currentFilePath).toBe('/cours/Chapitre 2.zmap'))
+  })
+
+  it('renames an ordinary map the ordinary way', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useMindMapAuthor).mockReturnValue(base)
+    renderRow()
+
+    await user.dblClick(screen.getByText('Chapitre 1'))
+    const field = screen.getByRole('textbox')
+    await user.clear(field)
+    await user.type(field, 'Chapitre 2{Enter}')
+
+    await waitFor(() => expect(renamePath).toHaveBeenCalledWith('/cours/Chapitre 1.zmap', '/cours/Chapitre 2.zmap'))
+    expect(renameLinkedGroup).not.toHaveBeenCalled()
+  })
+
+  it('drops a link left pointing at nobody once its partner is deleted', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useMindMapAuthor).mockReturnValue({
+      ...base,
+      copyLink: { groupId: 'f1', role: 'source', baseName: 'Chapitre 1' },
+    })
+    renderRow()
+
+    openMenu(/Chapitre 1/)
+    await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
+    await user.click(await screen.findByRole('button', { name: 'Confirmer' }))
+
+    await waitFor(() => expect(deletePath).toHaveBeenCalledWith('/cours/Chapitre 1.zmap', false))
+    await waitFor(() => expect(unlinkIfAlone).toHaveBeenCalledWith('/cours', 'f1'))
   })
 })

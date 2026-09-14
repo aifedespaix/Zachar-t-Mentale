@@ -3,6 +3,7 @@ import {
   loadMindMap,
   saveMindMap,
   loadMindMapMeta,
+  setMindMapCopyLink,
   setMindMapType,
   stampMindMapSyncMeta,
   stripMindMapSyncMeta,
@@ -241,6 +242,45 @@ describe('setMindMapType', () => {
     vi.mocked(readTextFile).mockResolvedValue(JSON.stringify(sample))
 
     await expect(setMindMapType('/cours/brouillon.zmap', 'cours')).rejects.toThrow(/identité de synchronisation/)
+    expect(writeTextFile).not.toHaveBeenCalled()
+  })
+})
+
+describe('setMindMapCopyLink', () => {
+  const link = { groupId: 'abc-123', role: 'source' as const, baseName: 'Chapitre' }
+
+  beforeEach(() => {
+    vi.mocked(readTextFile).mockReset()
+    vi.mocked(writeTextFile).mockReset()
+  })
+
+  it('writes the link and preserves everything else, lastModified included', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta, cards: sample }))
+
+    await setMindMapCopyLink('/cours/chapitre.zmap', link)
+
+    const written = JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string)
+    expect(written.meta).toEqual({ ...meta, copyLink: link })
+    expect(written.cards).toEqual(sample)
+    // Lier deux fichiers n'est pas éditer leur contenu : bumper la date ferait
+    // repartir en conflit la carte qu'on vient tout juste de résoudre.
+    expect(written.meta.lastModified).toBe(meta.lastModified)
+  })
+
+  it('removes the link rather than writing an empty one', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify({ meta: { ...meta, copyLink: link }, cards: sample }))
+
+    await setMindMapCopyLink('/cours/chapitre.zmap', undefined)
+
+    const written = JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string)
+    expect(written.meta).toEqual(meta)
+    expect('copyLink' in written.meta).toBe(false)
+  })
+
+  it('refuses a draft with no meta: there is nowhere to write a link', async () => {
+    vi.mocked(readTextFile).mockResolvedValue(JSON.stringify(sample))
+
+    await expect(setMindMapCopyLink('/cours/brouillon.zmap', link)).rejects.toThrow(/identité de synchronisation/)
     expect(writeTextFile).not.toHaveBeenCalled()
   })
 })

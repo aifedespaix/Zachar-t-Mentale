@@ -586,26 +586,66 @@ describe('FileSidebar', () => {
   })
 
   it('announces a conflict rather than letting an overwrite go unspoken', async () => {
-    useSyncStore.setState({
-      lastResult: {
-        pushed: 0,
-        pulled: 0,
-        errors: [],
-        cancelled: false,
-        conflicts: [
-          {
-            fileId: 'f1',
-            path: 'chapitre1.zmap',
-            localModified: '2026-02-01T10:00:00.000Z',
-            remoteUpdated: '2026-02-01 09:00:00.000Z',
-          },
-        ],
-        transferred: [],
-      },
-    })
+    useSyncStore.setState({ lastResult: resultWithConflict() })
     render(<FileSidebar onOpenFile={() => {}} />)
 
     expect(await screen.findByText(/1 conflit\(s\)/)).toBeInTheDocument()
+  })
+
+  /** Un résultat de synchronisation portant un conflit complet, comparatif compris. */
+  function resultWithConflict() {
+    return {
+      pushed: 0,
+      pulled: 0,
+      errors: [],
+      cancelled: false,
+      conflicts: [
+        {
+          fileId: 'f1',
+          path: 'chapitre1.zmap',
+          localModified: '2026-02-01T10:00:00.000Z',
+          remoteUpdated: '2026-02-01 09:00:00.000Z',
+          detail: {
+            localPath: '/cours-svt/chapitre1.zmap',
+            remotePath: 'chapitre1.zmap',
+            remoteContent: '[]',
+            remoteContentHash: 'h',
+            localCounts: { total: 3, byLevel: { 1: 1, 2: 2, 3: 0, 4: 0 }, detached: 0 },
+            remoteCounts: { total: 2, byLevel: { 1: 1, 2: 1, 3: 0, 4: 0 }, detached: 0 },
+          },
+        },
+      ],
+      transferred: [],
+    }
+  }
+
+  it('puts the way out ON the message that announces the conflict', async () => {
+    const user = userEvent.setup()
+    useSyncStore.setState({ lastResult: resultWithConflict() })
+    render(<FileSidebar onOpenFile={() => {}} />)
+
+    await user.click(await screen.findByRole('button', { name: /Résoudre le conflit/ }))
+
+    // La boîte s'ouvre sur le comparatif, pas sur un renvoi vers les réglages.
+    expect(await screen.findByText(/Conflit 1 sur 1 — chapitre1/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Accepter le changement/ })).toBeInTheDocument()
+  })
+
+  it('keeps a conflict message on screen instead of auto-hiding the only way to resolve it', async () => {
+    vi.useFakeTimers()
+    try {
+      useSyncStore.setState({ lastResult: resultWithConflict() })
+      render(<FileSidebar onOpenFile={() => {}} />)
+      await screen.findByText(/1 conflit\(s\)/)
+
+      // Le délai qui efface les messages ordinaires ne doit rien effacer ici :
+      // ce message-là porte une décision à prendre.
+      act(() => void vi.advanceTimersByTime(10000))
+
+      expect(screen.getByText(/1 conflit\(s\)/)).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows how far the run has got, and lets the user stop it', async () => {
