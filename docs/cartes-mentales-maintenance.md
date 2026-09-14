@@ -213,7 +213,9 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
       section "Adaptation à d'autres matières" de la skill). **En cours**,
       démarré par `français 4e` (contenu déjà exploitable, contrairement à
       arts-plastiques dont le vocabulaire est sans définition — voir décision
-      juste en dessous) :
+      juste en dessous). `histoire-geo` volontairement restreint à la 3e sur
+      demande utilisateur — **4e/5e/6A pas oubliés, juste hors périmètre
+      pour l'instant**, à reprendre si l'utilisateur le demande :
   - [x] `français/4e/Chapitre 1/Cours/Conjugaison du passé simple.odt` →
         `.cartes-mentales/francais/conjugaison-passe-simple.zmap` (`cours`,
         aife/prof). Tableau de conjugaison propre (Avoir, Être, Venir,
