@@ -166,8 +166,14 @@ bruit : fichiers verrouillés LibreOffice (`.~lock.*#`), fichiers
 AppleDouble macOS (`._*`), fichiers `.tmp`, doublons entre dossiers "Ancien"
 et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
 
-- [ ] Tri — arts-plastiques : lister utile vs bruit (`._*`, doublons), sans
-      rien supprimer avant validation par l'utilisateur
+- [x] Tri — arts-plastiques : aucun bruit trouvé (pas de `.~lock.*#`, pas de
+      `._*`, pas de `.tmp`, pas de dossiers "Ancien"/"Nouveau" dupliqués).
+      Racine (`3-01` à `3-10`) = fiches élève ; `TXT/` (`3-00` à `3-10`,
+      numérotation alignée) = fiches de séquence prof plus complètes
+      (vocabulaire, programme) pour les mêmes séquences — vérifié sur `3-01`,
+      ce sont des documents complémentaires, pas des doublons. `ref/archi/`
+      et `ref/autoportrait/` = images/PDF de référence légitimes. Rien à
+      supprimer ni déplacer ; dossier déjà propre, validé par l'utilisateur
 - [ ] Tri — français 4e
 - [ ] Tri — histoire-geo (3e, 4e, 5e, 6A)
 - [ ] Une fois le tri validé, ingestion matière par matière via la skill
