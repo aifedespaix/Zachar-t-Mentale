@@ -92,9 +92,17 @@ jobs:
         run: |
           bun run infra/setup-pocketbase.mjs --export /tmp/schema-applied.json
           bun run infra/setup-pocketbase.mjs --export /tmp/schema-applied-2.json
-          # Deux exports du même serveur doivent être identiques : le diff d'une
-          # PR ne doit montrer qu'une vraie dérive de configuration.
-          diff /tmp/schema-applied.json /tmp/schema-applied-2.json
+          # Deux exports du même serveur doivent décrire la MÊME configuration :
+          # le diff d'une PR ne doit montrer qu'une vraie dérive.
+          #
+          # `exportedAt` est écarté de la comparaison, et c'est la seule façon
+          # que cette étape a de dire quelque chose : il vaut « maintenant » à
+          # chaque appel, donc deux exports diffèrent toujours par cette ligne,
+          # et l'étape échouait quel que soit l'état du serveur. Le comparer
+          # revenait à vérifier que l'horloge avance.
+          jq 'del(.exportedAt)' /tmp/schema-applied.json > /tmp/schema-a.json
+          jq 'del(.exportedAt)' /tmp/schema-applied-2.json > /tmp/schema-b.json
+          diff /tmp/schema-a.json /tmp/schema-b.json
 
       - name: an ordinary account can publish, read and delete its file
         run: |

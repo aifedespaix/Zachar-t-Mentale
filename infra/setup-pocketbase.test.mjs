@@ -221,6 +221,21 @@ describe('export du schéma', () => {
     ].sort())
   })
 
+  it('varies ONLY by `exportedAt` between two exports of the same server', () => {
+    // L'invariant sur lequel s'appuie la comparaison de la CI. Il vaut d'être
+    // écrit : le workflow comparait les deux documents ENTIERS, donc il
+    // échouait toujours — `exportedAt` vaut « maintenant » à chaque appel, et
+    // le comparer revenait à vérifier que l'horloge avance.
+    const wanted = desiredCollections().map(entry => ({ ...entry, type: 'base', fields: [], indexes: [] }))
+    const first = exportDocument(wanted, '2026-09-10T20:00:00.000Z')
+    const second = exportDocument(wanted, '2026-09-10T20:00:01.000Z')
+
+    expect(first).not.toEqual(second)
+    const { exportedAt: _first, ...firstConfiguration } = first
+    const { exportedAt: _second, ...secondConfiguration } = second
+    expect(firstConfiguration).toEqual(secondConfiguration)
+  })
+
   it('leaves out collections that are none of this script\'s business', () => {
     const document = exportDocument(
       [{ name: 'autre', type: 'base', fields: [], indexes: [] }],
