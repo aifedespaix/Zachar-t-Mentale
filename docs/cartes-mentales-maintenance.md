@@ -102,7 +102,10 @@ nom).
 Aucun fichier de type `corrections` n'existe aujourd'hui dans
 `.cartes-mentales/`. Exercices identifiés (type `exo`) à corriger :
 
-- [ ] `anglais/edward-hopper/influences.zmap` (ex-"hooper.zmap")
+- [x] `anglais/edward-hopper/influences.zmap` (ex-"hooper.zmap") — 11 cartes
+      dans l'exo source au moment de la correction ; contenu déjà
+      factuellement correct, corrections mineures de formulation seulement
+      (indices `qcm-title` moins littéraux)
 - [ ] `espagnol/ejercicios/hablamos espanol en el mundo.zmap`
 - [ ] `espagnol/vocabulario/dias-de-la-semana.zmap`
 - [ ] `espagnol/vocabulario/estaciones-del-ano.zmap`
