@@ -11,6 +11,8 @@ vi.mock('../sync/pocketBaseAdapter', () => ({ createSyncClient: vi.fn().mockRetu
 vi.mock('../sync/syncService', () => ({ sync: vi.fn(), surveySyncFolder: vi.fn() }))
 vi.mock('../persistence/syncLog', () => ({ logSyncEvent: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('../persistence/syncStatus', () => ({ loadSyncStatus: vi.fn(), saveSyncStatus: vi.fn() }))
+vi.mock('../persistence/fileStore', () => ({ loadMindMapMeta: vi.fn() }))
+vi.mock('../persistence/copyLinkOps', () => ({ createLinkedCopy: vi.fn() }))
 
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { DEFAULT_SYNC_SETTINGS } from '../types/syncSettings'
@@ -19,6 +21,8 @@ import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { surveySyncFolder, sync } from '../sync/syncService'
 import { logSyncEvent } from '../persistence/syncLog'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
+import { loadMindMapMeta } from '../persistence/fileStore'
+import { createLinkedCopy } from '../persistence/copyLinkOps'
 import { createSyncStore, type SyncStore } from './useSyncStore'
 import { useWorkspaceStore } from './useWorkspaceStore'
 
@@ -64,6 +68,8 @@ describe('useSyncStore', () => {
     vi.mocked(loadSyncStatus).mockReset().mockResolvedValue({ lastSuccessAt: null })
     vi.mocked(saveSyncStatus).mockReset().mockResolvedValue(undefined)
     vi.mocked(surveySyncFolder).mockReset().mockResolvedValue({ pending: [], localOnly: [] })
+    vi.mocked(loadMindMapMeta).mockReset().mockResolvedValue(null)
+    vi.mocked(createLinkedCopy).mockReset()
     store = createSyncStore()
   })
 
@@ -621,5 +627,125 @@ describe('useSyncStore', () => {
     // a second `sync` invocation once the first one completed.
     expect(sync).toHaveBeenCalledTimes(1)
     expect(store.getState().status).toBe('idle')
+  })
+
+  /**
+   * La résolution de conflits. Ce qu'on vérifie ici n'est jamais « le fichier a
+   * été écrit » — la résolution ne transfère rien, exprès (voir
+   * `resolvedStateEntry`) : c'est la MÉMOIRE du dernier sync qu'elle réécrit,
+   * pour que la synchronisation suivante fasse le transfert elle-même.
+   */
+  describe('resolveConflict', () => {
+    const conflict = {
+      fileId: 'file-1',
+      path: 'Maths/Chapitre 1.zmap',
+      localModified: '2026-02-01T10:00:00.000Z',
+      remoteUpdated: '2026-02-01 12:00:00.000Z',
+      detail: {
+        localPath: '/cours/Maths/Chapitre 1.zmap',
+        remotePath: 'Maths/Chapitre 1.zmap',
+        remoteContent: '[]',
+        remoteContentHash: 'empreinte-distante',
+        localCounts: { total: 2, byLevel: { 1: 1, 2: 1, 3: 0, 4: 0 }, detached: 0 },
+        remoteCounts: { total: 1, byLevel: { 1: 1, 2: 0, 3: 0, 4: 0 }, detached: 0 },
+      },
+    }
+
+    /** Un store prêt à résoudre : compte connecté, dossier choisi, conflit en mémoire. */
+    async function armed(entries: Record<string, any> = { 'file-1': { lastSyncedModified: '2026-01-01T00:00:00.000Z', lastSyncedUpdated: '2026-01-01 00:00:00.000Z' } }) {
+      vi.mocked(createPocketBaseClient).mockReturnValue(
+        fakePocketBase(vi.fn().mockResolvedValue({ record: { username: 'eleve1', role: 'eleve' } })) as any
+      )
+      vi.mocked(serverStateOf).mockReturnValue({ syncFolderPath: '/cours', entries, tombstones: [] })
+      await store.getState().setServerUrl('https://pi.local')
+      await store.getState().setSyncFolderPath('/cours')
+      await store.getState().login('eleve1', 'secret')
+      store.setState({
+        lastResult: { pushed: 0, pulled: 0, errors: [], cancelled: false, conflicts: [conflict], transferred: [] },
+      })
+      return entries
+    }
+
+    it('accepting the server disarms the push and drops the conflict from the list', async () => {
+      const entries = await armed()
+      vi.mocked(loadMindMapMeta).mockResolvedValue({
+        id: 'file-1',
+        author: 'eleve1',
+        role: 'eleve',
+        lastModified: '2026-02-01T11:00:00.000Z',
+      })
+
+      await store.getState().resolveConflict('file-1', 'accept-remote')
+
+      // La date est celle RELUE sur le disque, pas celle du conflit : le fichier
+      // a pu être édité entre les deux.
+      expect(entries['file-1'].lastSyncedModified).toBe('2026-02-01T11:00:00.000Z')
+      expect(entries['file-1'].lastSyncedUpdated).toBe('2026-01-01 00:00:00.000Z')
+      expect(saveSyncState).toHaveBeenCalled()
+      expect(store.getState().lastResult?.conflicts).toEqual([])
+    })
+
+    it('keeping the local version marks the server revision as seen', async () => {
+      const entries = await armed()
+
+      await store.getState().resolveConflict('file-1', 'keep-local')
+
+      expect(entries['file-1'].lastSyncedUpdated).toBe('2026-02-01 12:00:00.000Z')
+      expect(entries['file-1'].lastSyncedContentHash).toBe('empreinte-distante')
+      expect(entries['file-1'].lastSyncedModified).toBe('2026-01-01T00:00:00.000Z')
+    })
+
+    it('a copy is written BEFORE the state is touched, and the tree is refreshed', async () => {
+      const entries = await armed()
+      vi.mocked(createLinkedCopy).mockResolvedValue({
+        path: '/cours/Maths/Chapitre 1 (copie).zmap',
+        link: { groupId: 'file-1', role: 'copy', baseName: 'Chapitre 1', index: 1 },
+      })
+      const refreshFolder = vi.fn().mockResolvedValue(undefined)
+      const bumpFileMetaRevision = vi.fn()
+      useWorkspaceStore.setState({ refreshFolder, bumpFileMetaRevision } as any)
+
+      await store.getState().resolveConflict('file-1', 'copy')
+
+      expect(createLinkedCopy).toHaveBeenCalledWith({
+        sourcePath: '/cours/Maths/Chapitre 1.zmap',
+        author: 'eleve1',
+        role: 'eleve',
+      })
+      // Puis résolu comme « accepter le serveur » : les deux versions survivent.
+      expect(entries['file-1'].lastSyncedModified).toBe('2026-02-01T10:00:00.000Z')
+      expect(refreshFolder).toHaveBeenCalledWith('/cours/Maths')
+      expect(bumpFileMetaRevision).toHaveBeenCalled()
+    })
+
+    it('leaves the conflict in place when the copy could not be written', async () => {
+      await armed()
+      vi.mocked(createLinkedCopy).mockRejectedValue(new Error('disque plein'))
+
+      await store.getState().resolveConflict('file-1', 'copy')
+
+      expect(saveSyncState).not.toHaveBeenCalled()
+      expect(store.getState().lastResult?.conflicts).toHaveLength(1)
+      expect(store.getState().error).toMatch(/disque plein/)
+    })
+
+    it('refuses a conflict with no comparison rather than writing at random', async () => {
+      await armed()
+      store.setState({
+        lastResult: {
+          pushed: 0,
+          pulled: 0,
+          errors: [],
+          cancelled: false,
+          conflicts: [{ fileId: 'file-1', path: 'a.zmap', localModified: 'm', remoteUpdated: 'u' }],
+          transferred: [],
+        },
+      })
+
+      await store.getState().resolveConflict('file-1', 'accept-remote')
+
+      expect(saveSyncState).not.toHaveBeenCalled()
+      expect(store.getState().error).toMatch(/trop ancienne/)
+    })
   })
 })

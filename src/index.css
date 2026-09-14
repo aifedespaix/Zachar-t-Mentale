@@ -507,6 +507,85 @@
   color: var(--info-fg);
 }
 
+/* Les trois issues d'un conflit. La couleur est ici le message : on lit la
+   rangée avant de lire les mots, et chacune doit dire ce qu'elle fait sans
+   être lue. Bleu = accepter ce qui vient d'ailleurs (les mêmes jetons `info`
+   que la bannière informative), rouge = refuser (le `destructive` du thème),
+   orange = garder les deux (le `locked`, l'orange du logo, déjà celui de « ce
+   fichier n'est pas seulement à toi »).
+
+   Les jetons du thème, jamais des valeurs en dur : ces trois boutons doivent
+   se repeindre en sombre comme tout le reste. */
+.conflict-choice {
+  border-width: 1px;
+  border-style: solid;
+}
+
+.conflict-choice--accept {
+  border-color: var(--info-border);
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+
+.conflict-choice--accept:hover {
+  background: color-mix(in oklch, var(--info-bg), var(--info-border) 35%);
+}
+
+.conflict-choice--keep {
+  border-color: color-mix(in oklch, var(--destructive), transparent 55%);
+  background: color-mix(in oklch, var(--destructive), transparent 88%);
+  color: var(--destructive);
+}
+
+.conflict-choice--keep:hover {
+  background: color-mix(in oklch, var(--destructive), transparent 78%);
+}
+
+.conflict-choice--copy {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+}
+
+.conflict-choice--copy:hover {
+  background: color-mix(in oklch, var(--warning-bg), var(--warning-border) 35%);
+}
+
+/* « Nom différent », « Dossier différent » : ce que le comparatif signale d'un
+   coup d'œil, avant même la grille de chiffres. */
+.conflict-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--warning-border);
+  border-radius: 999px;
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* Le lien de copie, dans l'arborescence : deux fichiers qui vont ensemble
+   portent la même pastille, et c'est tout ce qu'elle a à dire. Volontairement
+   plus discrète que le tag de type — elle qualifie une relation entre deux
+   lignes, pas le contenu de l'une d'elles. */
+.copy-link-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 0 5px;
+  border: 1px dashed color-mix(in oklch, var(--info-border), transparent 20%);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--info-bg), transparent 35%);
+  color: var(--info-fg);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
 /* The circular theme-toggle transition (see src/theme/circularReveal.ts)
    animates `clip-path` itself — the View Transitions API's default
    cross-fade between old/new snapshots would show through underneath and

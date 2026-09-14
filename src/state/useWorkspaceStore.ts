@@ -4,6 +4,7 @@ import { loadWorkspaceConfig, saveWorkspaceConfig } from '../persistence/workspa
 import { scanFolder } from '../persistence/fileTree'
 import { loadSessionState, saveSessionState, type RecentFile } from '../persistence/sessionState'
 import { movePath } from '../persistence/fileOps'
+import { moveLinkedGroup } from '../persistence/copyLinkOps'
 import { fileNameOf, parentDirOf, separatorOf } from '../persistence/paths'
 
 /** How many recently-opened files the empty-state screen offers to reopen. */
@@ -286,6 +287,18 @@ export function createWorkspaceStore(): WorkspaceStore {
         saveSessionState({ currentFilePath, expandedPaths: [...expandedPaths], recentFiles })
         return { currentFilePath, expandedPaths, recentFiles }
       })
+      // Une carte LIÉE emmène sa copie : « même dossier » est la moitié de la
+      // règle, et c'est celle qui compte le jour où l'original part dans
+      // « Archives ». Le déplacement du fichier demandé a déjà eu lieu et reste
+      // vrai même si un membre ne peut pas suivre — d'où l'absence de garde.
+      if (!isFolder) {
+        const followed = await moveLinkedGroup({
+          memberPath: destination,
+          previousFolderPath: sourceParent,
+          destFolderPath,
+        }).catch(() => [])
+        if (followed.length > 0) get().bumpFileMetaRevision()
+      }
       await get().refreshFolder(sourceParent)
       await get().refreshFolder(destFolderPath)
       return true

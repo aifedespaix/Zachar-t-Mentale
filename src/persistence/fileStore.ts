@@ -1,6 +1,7 @@
 import { exists, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { DEFAULT_MAP_TYPE, type MapType } from '../types/mapType'
 import type { Card, MindMapMeta, UserRole } from '../types/card'
+import type { CopyLink } from '../sync/copyLink'
 import { serializeMindMap, deserializeMindMap } from './serialization'
 
 /**
@@ -131,4 +132,27 @@ export async function setMindMapType(path: string, type: MapType): Promise<void>
     throw new Error('setMindMapType : ce fichier n’a pas d’identité de synchronisation, impossible de le classer.')
   }
   await writeTextFile(path, serializeMindMap({ ...meta, type }, cards))
+}
+
+/**
+ * Pose ou retire le LIEN DE COPIE d'une carte (voir `sync/copyLink.ts`).
+ *
+ * `lastModified` est PRÉSERVÉ, exactement comme pour le type et pour la même
+ * raison : attacher deux fichiers l'un à l'autre n'est pas modifier leur
+ * contenu. Le bumper ferait passer le lien pour une édition, donc déclencherait
+ * un envoi — et, sur un fichier qu'on vient justement de résoudre en conflit,
+ * un nouveau conflit dans la foulée.
+ *
+ * Un fichier SANS identité de synchronisation est refusé explicitement : le
+ * lien vit dans `meta`, et un brouillon local n'en a pas.
+ */
+export async function setMindMapCopyLink(path: string, copyLink: CopyLink | undefined): Promise<void> {
+  const { meta, cards } = deserializeMindMap(await readTextFile(path))
+  if (meta === null) {
+    throw new Error('setMindMapCopyLink : ce fichier n’a pas d’identité de synchronisation, impossible de le lier.')
+  }
+  const next: MindMapMeta = { ...meta }
+  if (copyLink === undefined) delete next.copyLink
+  else next.copyLink = copyLink
+  await writeTextFile(path, serializeMindMap(next, cards))
 }
