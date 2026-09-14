@@ -184,7 +184,29 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
       et 2, bien structurés) — pas du bruit, juste une organisation à
       trancher au moment de l'ingestion. Rien à supprimer, validé par
       l'utilisateur
-- [ ] Tri — histoire-geo (3e, 4e, 5e, 6A)
+- [ ] Tri — histoire-geo (3e, 4e, 5e, 6A) : **en cours**, voir détail
+      ci-dessous ; case à cocher une fois les 2 points en attente résolus
+  - [x] 8 locks LibreOffice `.~lock.*#` et 3 fichiers `.tmp` trouvés et
+        supprimés (3e, 4e ×2, 5e ×3 locks ; 3e, 5e ×2 tmp)
+  - [x] Pas de vrai doublon "Ancien"/"Nouveau" prof dans `4e/` malgré les
+        noms de dossiers : `Ancien professeur d'histoire M. Lorite` couvre
+        H1/H2/H3 + esclavage, `Nouveau professeur d'histoire Mr. Oliveira`
+        couvre d'autres chapitres (empire industriel...) — deux profs
+        successifs sur des chapitres différents, pas de chevauchement,
+        les deux dossiers sont gardés tels quels
+  - [ ] Doublon confirmé (checksum identique) dans `4e/Ancien professeur
+        d'histoire M. Lorite/` : `Fiches TD/` et `L'esclavage/` contiennent
+        les 3 mêmes fichiers (`CORRECTION FICHE TD 5et6.doc`, `Fiche TD
+        Etre esclave dans une plantation.jpg`, `Fiche Td Les traites
+        négrières.jpg`). Suppression de `Fiches TD/` bloquée par le
+        classificateur de sécurité (suppression irréversible hors git) —
+        **en attente que l'utilisateur supprime ce dossier lui-même, ou
+        accorde la permission**
+  - [ ] `6A/Géographie` et `6A/Histoire` : pas des dossiers malgré leur nom,
+        ce sont deux fichiers de 16K sans extension, contenu binaire
+        illisible (pas un `.odt`/`.docx` valide), probablement corrompus.
+        Suppression bloquée pour la même raison — **en attente de
+        confirmation utilisateur avant suppression**
 - [ ] Une fois le tri validé, ingestion matière par matière via la skill
       `transformer-cours-en-carte-mentale`, chapitre par chapitre —
       **redéfinir le mapping niveau 2/3/4 pour chaque matière avant de
