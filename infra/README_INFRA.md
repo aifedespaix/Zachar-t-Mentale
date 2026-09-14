@@ -66,7 +66,33 @@ l'administrateur, sauf si vous voulez y jeter un œil.
 > monter de version : changez l'image, relancez le script (voir plus bas) ; s'il
 > se plaint, lisez son message avant de déployer.
 
-## 3. Configurer le serveur : une commande
+## 3. Configurer le serveur
+
+### Automatiquement, à chaque déploiement (par défaut)
+
+Le compose embarque un service `schema` : il attend que PocketBase se déclare
+sain, applique `infra/setup-pocketbase.mjs`, puis s'arrête. **Vous n'avez rien à
+lancer** — un `git push` suivi d'un déploiement Dokploy met la base au niveau du
+code qui vient d'être déployé.
+
+Ce n'est pas un service qui tourne : pas de port, pas de domaine, rien à router.
+Il vit trois secondes et sort. Le script étant idempotent, un serveur déjà à
+jour ne bouge pas (« Rien à faire »), et le rejouer à chaque déploiement ne
+coûte rien.
+
+```bash
+docker compose -f infra/docker-compose.yml logs schema   # ce qu'il a fait
+```
+
+> Si le service `schema` échoue, le déploiement est signalé en échec. C'est
+> voulu : une base en retard sur le code est exactement ce qu'on ne veut pas
+> laisser passer sans le savoir. Ses messages d'erreur sont ceux du script
+> (section 8).
+>
+> Pour reprendre la main, supprimez le bloc `schema` du compose : la commande
+> ci-dessous fait exactement la même chose, quand vous le décidez.
+
+### À la main, quand vous le voulez
 
 Depuis votre machine, dans le dépôt :
 
@@ -123,6 +149,25 @@ devrait avoir, et n'écrit que ce qui diffère. Relancée, elle répond
 >
 > ```bash
 > bun run infra/setup-pocketbase.mjs --dry-run   # les trois créations annoncées
+> bun run infra/setup-pocketbase.mjs             # applique
+> ```
+
+> **Un serveur amorcé PAR CE SCRIPT avant cette version n'a ni `created` ni
+> `updated` sur `cartes_mentales`, et doit être réappliqué.** PocketBase ≥ 0.23
+> a cessé d'ajouter ces colonnes d'office : le tableau de bord les met encore
+> sur toute collection qu'il crée, mais une collection créée par l'API reçoit
+> exactement les champs demandés, et le script ne les demandait pas. Un serveur
+> configuré à la main dans `/_/` n'est donc PAS concerné ; un serveur monté de
+> zéro par le script l'est.
+>
+> L'effet est silencieux et sérieux : `updated` est ce que la synchronisation
+> lit pour distinguer « le serveur a bougé » de « je l'ai déjà vu »
+> (`isConflict`, et le contrôle de révision côté réception). Absent, l'API ne
+> le renvoie pas, chaque comparaison porte sur `undefined`, et l'algorithme perd
+> son seul repère. Le script ajoute les deux champs sans toucher aux données :
+>
+> ```bash
+> bun run infra/setup-pocketbase.mjs --dry-run   # « champ « updated » ajouté (autodate) »
 > bun run infra/setup-pocketbase.mjs             # applique
 > ```
 

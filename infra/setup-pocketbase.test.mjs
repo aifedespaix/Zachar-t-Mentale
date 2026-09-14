@@ -380,10 +380,56 @@ describe('planCollection', () => {
     const desired = desiredCollections().find(entry => entry.name === MIND_MAPS_COLLECTION)
     const plan = planCollection(undefined, desired)
     expect(plan.create).toMatchObject({ name: MIND_MAPS_COLLECTION, type: 'base' })
-    expect(plan.create.fields.map(field => field.name)).toEqual(['file_id', 'author', 'path', 'content', 'type'])
+    // `created`/`updated` sont DEMANDÉS explicitement : PocketBase >= 0.23 ne
+    // les ajoute plus tout seul à une collection créée par l'API, et `updated`
+    // est ce que la synchronisation lit pour savoir si le serveur a bougé.
+    expect(plan.create.fields.map(field => field.name)).toEqual([
+      'file_id',
+      'author',
+      'path',
+      'content',
+      'type',
+      'created',
+      'updated',
+    ])
     expect(plan.create.updateRule).toBe('@request.auth.username = author || @request.auth.role = "prof"')
     expect(plan.create.deleteRule).toBe('@request.auth.username = author || @request.auth.role = "prof"')
     expect(plan.changes).toEqual(['collection « cartes_mentales » créée'])
+  })
+
+  it('makes `updated` an autodate that follows every write — the sync reads nothing else', () => {
+    // Sans ce champ, l'API omet `updated`, `isConflict` compare des `undefined`
+    // et la synchronisation perd le seul signal qui dit « le serveur a bougé ».
+    const desired = desiredCollections().find(entry => entry.name === MIND_MAPS_COLLECTION)
+    const updated = desired.fields.find(field => field.name === 'updated')
+
+    expect(updated).toMatchObject({ type: 'autodate', onCreate: true, onUpdate: true })
+    // `created` se pose une fois et ne bouge plus : c'est ce qui les distingue.
+    expect(desired.fields.find(field => field.name === 'created')).toMatchObject({
+      type: 'autodate',
+      onCreate: true,
+      onUpdate: false,
+    })
+  })
+
+  it('reports an `updated` that stopped following writes, instead of calling it conform', () => {
+    // Le cas qui compte : le champ EXISTE mais n'est plus mis à jour. Sans
+    // `onCreate`/`onUpdate` dans les options comparées, ce serveur passerait
+    // pour conforme tout en cassant la synchronisation en silence.
+    const desired = desiredCollections().find(entry => entry.name === MIND_MAPS_COLLECTION)
+    const current = {
+      id: 'id-1',
+      name: MIND_MAPS_COLLECTION,
+      fields: desired.fields.map(field =>
+        field.name === 'updated' ? { ...field, id: 'f-updated', onUpdate: false } : { ...field, id: `f-${field.name}` }
+      ),
+      indexes: desired.indexes,
+      ...desired.rules,
+    }
+
+    expect(planCollection(current, desired).changes).toEqual([
+      expect.stringContaining('champ « updated » : onUpdate false → true'),
+    ])
   })
 
   it('is a no-op against a collection it already configured — the idempotence the script promises', () => {

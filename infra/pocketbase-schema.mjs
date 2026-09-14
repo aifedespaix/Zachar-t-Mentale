@@ -98,6 +98,26 @@ export const ASSET_RULES = {
 }
 
 /**
+ * The `created` / `updated` timestamps — which PocketBase >= 0.23 does NOT add
+ * on its own.
+ *
+ * They used to be implicit system columns; they are now ordinary `autodate`
+ * fields. The DASHBOARD still puts them on every collection it creates, which
+ * is why this was invisible for so long: a server set up by hand had them, and
+ * only a server bootstrapped by THIS script did not. Creating a collection
+ * through the API with an explicit `fields` array gets exactly those fields and
+ * nothing else.
+ *
+ * That is not cosmetic. `updated` is load-bearing for the sync: `isConflict`
+ * and the pull-side "have I already seen this revision?" check both read
+ * `remote.updated` (see `src/sync/syncService.ts`). Without the field the API
+ * simply omits it, every comparison comes out `undefined`, and the algorithm
+ * loses the only thing that tells it a record moved on the server.
+ */
+const CREATED_FIELD = { name: 'created', type: 'autodate', onCreate: true, onUpdate: false }
+const UPDATED_FIELD = { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+
+/**
  * `help` is written to the server so the dashboard explains each field to
  * whoever opens the collections later — the documentation travels with the
  * schema instead of living only in this repository.
@@ -128,6 +148,11 @@ export const MIND_MAP_FIELDS = [
     max: 64,
     help: 'Type de la carte (cours, exo, prise de notes, corrections). Vide = non classée.',
   },
+  // `updated` est LU par la synchronisation à chaque passage : ce n'est pas une
+  // commodité d'affichage, c'est ce qui distingue « le serveur a bougé » de
+  // « je l'ai déjà vu ». Voir le commentaire de CREATED_FIELD.
+  CREATED_FIELD,
+  UPDATED_FIELD,
 ]
 
 export const ASSET_FIELDS = [
@@ -281,6 +306,10 @@ const OWNED_OPTIONS = [
   'values',
   'help',
   'autogeneratePattern',
+  // Propres aux champs `autodate` : sans eux, un `updated` qui ne se met plus à
+  // jour à l'écriture ressemblerait à un champ conforme.
+  'onCreate',
+  'onUpdate',
 ]
 
 function sameJson(a, b) {
@@ -558,6 +587,9 @@ export const SYNC_EVENT_FIELDS = [
     max: 255,
     help: 'De quelle machine vient l’exécution, tel que le client se décrit. Informatif.',
   },
+  // L'interface trie et date le journal là-dessus : sans ce champ, la liste
+  // arrive dans un ordre arbitraire et chaque ligne affiche « — ».
+  CREATED_FIELD,
 ]
 
 export const SYNC_EVENT_INDEXES = ['CREATE INDEX `idx_sync_events_created` ON `sync_events` (`created`)']
@@ -619,6 +651,8 @@ export const SYNC_CONFLICT_FIELDS = [
   },
   { name: 'resolved_by', type: 'text', required: false, max: 255, help: 'Le compte qui a tranché.' },
   { name: 'resolved_at', type: 'text', required: false, max: 64, help: 'Quand, en ISO 8601.' },
+  CREATED_FIELD,
+  UPDATED_FIELD,
 ]
 
 export const SYNC_CONFLICT_INDEXES = [
