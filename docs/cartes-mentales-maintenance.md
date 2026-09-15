@@ -315,16 +315,17 @@ que d'essayer de tout faire d'un coup.
 
 ## Sous-projet 4 — Fraîcheur des corrections (dev)
 
-**Statut** : ⬜ Pas commencé — nécessite un `/superpowers:brainstorming`
-dédié avant toute implémentation
+**Statut** : ✅ Terminé — spec
+`docs/superpowers/specs/2026-09-14-fraicheur-corrections-design.md`,
+implémentée dans les commits `40e6cb7` (types) et `0a4611b` (doc de skill)
 
-Problème à résoudre (pas de solution actée) : une correction créée pour un
-exercice doit pouvoir être marquée "à jour" une fois écrite ; si l'exercice
-source gagne de nouvelles cartes ensuite, la correction doit pouvoir être
-détectée comme obsolète (probablement via `src/sync/cardCounts.ts`, déjà
-utilisé pour comparer des jeux de cartes) et remise à jour. À concevoir : où
-vit le flag, comment il se réinitialise, ce qui déclenche la détection (un
-scan manuel, un passage automatique, autre).
+Portée réduite au terme du brainstorming : deux champs optionnels
+(`correctsId`, `correctsSnapshot`) ajoutés à `MindMapMeta`, lus et écrits
+uniquement par la skill `transformer-cours-en-carte-mentale` — aucun
+changement applicatif, aucune UI, aucun scan automatique. Volontairement
+plus étroit que le problème initial : pas de flag "à jour" cliquable dans
+l'app, la fraîcheur se recalcule par comparaison de comptes de cartes
+chaque fois que la skill traite un fichier `corrections`.
 
 ---
 

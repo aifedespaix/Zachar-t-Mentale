@@ -109,7 +109,11 @@ correctsSnapshot?: CardCounts   // compte de cartes de l'exo, capturé ici
 `CardCounts` est le type de `src/sync/cardCounts.ts` :
 `{ total, byLevel, detached }`. Le compter à la main sur les `cards` de
 l'exo lié (un objet, incrémenté par carte, séparant les cartes volantes
-— `detached: true` — du reste) plutôt que d'en approximer un.
+— `detached: true` — du reste) plutôt que d'en approximer un. Deux règles à
+respecter pour rester fidèle à `countCards()` : une carte volante compte
+dans `total` mais dans aucun niveau de `byLevel` ; une carte dont le
+`level` sort de 1-4 compte aussi dans `total` sans être rangée dans aucun
+niveau. Un écart sur ces deux règles produit un faux signal d'obsolescence.
 
 ### À la création ou régénération d'un fichier `corrections`
 
