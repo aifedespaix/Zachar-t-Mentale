@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { describeError } from '../state/useWorkspaceStore'
+import { describeError, useWorkspaceStore } from '../state/useWorkspaceStore'
 import { useSyncStore } from '../state/useSyncStore'
 
 export interface UnsavedChangesPrompt {
@@ -39,13 +39,18 @@ export function useUnsavedChangesGuard(
 
   const requestOpenFile = useCallback(
     (path: string) => {
+      // Lu AVANT `setCurrentFile` : c'est le fichier qu'on QUITTE qu'il faut
+      // synchroniser, pas celui qu'on ouvre — voir `syncOneFile`.
+      const outgoingPath = useWorkspaceStore.getState().currentFilePath
       flush()
         .then(() => {
           setCurrentFile(path)
           // Fire-and-forget: switching files must never wait on the network,
           // and the file we just left is no longer "open in the canvas" —
-          // see `SyncParams.openFilePath` — so it is now safe to pull into.
-          void useSyncStore.getState().syncNow({ trigger: 'auto' })
+          // see `SyncOneFileParams.openFilePath` — so it is now safe to pull
+          // into. Un seul fichier, jamais le dossier entier : voir
+          // `2026-09-15-suppression-publication-auto-sync-ciblee-design.md`.
+          if (outgoingPath !== null) void useSyncStore.getState().syncOneFile(outgoingPath)
         })
         .catch((error: unknown) => {
           setPrompt({
@@ -94,6 +99,9 @@ export function useUnsavedChangesGuard(
       win
         .onCloseRequested(async event => {
           event.preventDefault()
+          // Lu AVANT `flush()` : c'est le fichier encore ouvert au moment de
+          // fermer qu'il faut synchroniser — voir `requestOpenFile`.
+          const closingPath = useWorkspaceStore.getState().currentFilePath
           try {
             await flush()
           } catch (error) {
@@ -112,7 +120,7 @@ export function useUnsavedChangesGuard(
             })
             return
           }
-          void useSyncStore.getState().syncNow({ trigger: 'auto' })
+          if (closingPath !== null) void useSyncStore.getState().syncOneFile(closingPath)
           await closeNow()
         })
         .then(fn => {

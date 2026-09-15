@@ -17,8 +17,6 @@ import { CommandButton } from '../commands/CommandButton'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useSyncStore } from '../../state/useSyncStore'
 import { syncResultLabel } from '../../sync/syncResultLabel'
-import { ConflictResolutionDialog } from '../sync/ConflictResolutionDialog'
-import { ResolveConflictsButton } from '../sync/ResolveConflictsButton'
 import { formatRelativeTime } from '../../utils/relativeTime'
 import { FileTreeRow } from './FileTreeRow'
 import { TreeDragGhost } from './TreeDragGhost'
@@ -115,10 +113,6 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const localOnlyCount = useSyncStore(s => s.localOnlyCount)
   const lastSuccessAt = useSyncStore(s => s.lastSuccessAt)
   const refreshPendingCount = useSyncStore(s => s.refreshPendingCount)
-  const resolveConflict = useSyncStore(s => s.resolveConflict)
-  // Le fichier ouvert : une synchronisation ne le réécrit jamais, et la boîte de
-  // résolution doit pouvoir le dire avant qu'on accepte une version du serveur.
-  const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   // The username, not the object: a fresh `{username, role}` on every auth tick
   // would make the effect below walk the sync folder for nothing.
   const syncUserName = useSyncStore(s => s.currentUser?.username ?? null)
@@ -149,8 +143,6 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const [syncFeedbackDismissed, setSyncFeedbackDismissed] = useState(false)
   /** Hovering the sync banner holds off the auto-hide timer below. */
   const [syncFeedbackHovered, setSyncFeedbackHovered] = useState(false)
-  /** La boîte de résolution de conflits, ouverte depuis le message de synchro. */
-  const [resolvingConflicts, setResolvingConflicts] = useState(false)
   const handleRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -160,26 +152,16 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const showSyncError = syncError !== null && !syncFeedbackDismissed && !syncRunning
   const showSyncResult =
     syncError === null && lastResult !== null && !syncFeedbackDismissed && !syncRunning
-  /**
-   * Les conflits restés sans décision. Ils ne sont pas une nouvelle qui passe :
-   * tant qu'ils sont là, du travail attend d'un côté ET de l'autre, et c'est ce
-   * bouton — sur le message lui-même — qui est le seul chemin pour trancher.
-   */
-  const unresolvedConflicts = lastResult?.conflicts ?? []
-  const hasConflicts = unresolvedConflicts.length > 0
 
   // Reads and dismisses only — the settings panel keeps the store's own record
   // of the run, so this timer never touches anything the settings panel shows.
   // Not the workspace error banner: that one names a problem the user has to
   // act on (a missing folder, a permission failure), not a transient result.
-  // Un message qui annonce des CONFLITS ne s'efface jamais tout seul : il porte
-  // le seul bouton qui mène à la résolution, et le faire disparaître au bout de
-  // cinq secondes reviendrait à cacher la décision qu'il réclame.
   useEffect(() => {
-    if ((!showSyncError && !showSyncResult) || syncFeedbackHovered || hasConflicts) return
+    if ((!showSyncError && !showSyncResult) || syncFeedbackHovered) return
     const timer = setTimeout(() => setSyncFeedbackDismissed(true), 5000)
     return () => clearTimeout(timer)
-  }, [showSyncError, showSyncResult, syncFeedbackHovered, hasConflicts])
+  }, [showSyncError, showSyncResult, syncFeedbackHovered])
 
   // Selecting what is already there is what makes the shortcut a REPLACEMENT:
   // pressing it again retypes the query from scratch rather than appending to
@@ -406,9 +388,9 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const syncResultDetail =
     showSyncResult && (lastResult.conflicts.length > 0 || lastResult.errors.length > 0)
       ? [
-          ...lastResult.conflicts.map(
-            conflict => `conflit : ${conflict.path} (ici ${conflict.localModified}, serveur ${conflict.remoteUpdated})`
-          ),
+          // Un conflit est déjà TRANCHÉ à ce stade (voir syncService.ts) : ce
+          // n'est plus une décision qui attend, juste ce qui s'est passé.
+          ...lastResult.conflicts.map(conflict => `conflit résolu : ${conflict.path}`),
           ...lastResult.errors.map(error => `${error.fileId} : ${error.message}`),
         ].join('\n')
       : undefined
@@ -624,12 +606,6 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
                     onMouseLeave={() => setSyncFeedbackHovered(false)}
                   >
                     <span style={{ flex: 1 }}>{syncError}</span>
-                    {hasConflicts && (
-                      <ResolveConflictsButton
-                        count={unresolvedConflicts.length}
-                        onClick={() => setResolvingConflicts(true)}
-                      />
-                    )}
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -654,12 +630,6 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
                     onMouseLeave={() => setSyncFeedbackHovered(false)}
                   >
                     <span style={{ flex: 1 }}>{syncResultLabel(lastResult)}</span>
-                    {hasConflicts && (
-                      <ResolveConflictsButton
-                        count={unresolvedConflicts.length}
-                        onClick={() => setResolvingConflicts(true)}
-                      />
-                    )}
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -807,17 +777,6 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
             />
             {newFolderDialog}
             {folderCreation.dialog}
-            {resolvingConflicts && (
-              <ConflictResolutionDialog
-                conflicts={unresolvedConflicts}
-                openFilePath={currentFilePath}
-                onResolve={resolveConflict}
-                // Les décisions sont écrites dans l'état de synchronisation ;
-                // c'est CETTE synchronisation-là qui les exécute.
-                onApply={() => syncNow()}
-                onClose={() => setResolvingConflicts(false)}
-              />
-            )}
               </>
             )}
           </div>

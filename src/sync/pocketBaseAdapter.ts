@@ -29,6 +29,19 @@ export function createSyncClient(pb: PocketBase): SyncClient {
     getFullList: options => mindMapsCollection.getFullList<RemoteMindMapRecord>(options),
     create: (data, options) => mindMapsCollection.create<RemoteMindMapRecord>(data, options),
     update: (id, data, options) => mindMapsCollection.update<RemoteMindMapRecord>(id, data, options),
+    getOne: (fileId, options) =>
+      mindMapsCollection
+        .getFirstListItem<RemoteMindMapRecord>(pb.filter('file_id = {:fileId}', { fileId }), options)
+        .catch((error: unknown) => {
+          // `getFirstListItem` rejette avec un 404 quand rien ne correspond —
+          // c'est le cas normal « jamais publié » ou « déjà supprimé », pas une
+          // panne à faire remonter.
+          if (error !== null && typeof error === 'object' && (error as { status?: unknown }).status === 404) {
+            return undefined
+          }
+          throw error
+        }),
+    delete: (id, options) => mindMapsCollection.delete(id, options).then(() => undefined),
   }
 
   const assets: AssetsApi = {

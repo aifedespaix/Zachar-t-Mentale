@@ -39,15 +39,26 @@ export interface ReconcileParams {
   relPath: string
   lastSyncedPath: string
   remotePath: string | undefined
+  /** Le compte courant a le rôle prof — voir le cas « les deux ont bougé » ci-dessous. */
+  iAmProf: boolean
 }
 
 /**
- * Qui a bougé, et ce qu'il faut en faire. « Premier arrivé gagne, égalité → le
- * serveur » : aucune branche ne dépend du rôle, ce qui rend la règle valable
- * aussi bien pour l'élève dont le prof déplace un fichier que pour le prof qui
- * vient de déplacer.
+ * Qui a bougé, et ce qu'il faut en faire.
+ *
+ * Quand un seul côté a bougé, la règle ne dépend pas du rôle : « premier
+ * arrivé gagne » suffit, et c'est valable aussi bien pour l'élève dont le prof
+ * déplace un fichier (le serveur a bougé, je me relocalise) que pour le prof
+ * qui vient de déplacer (j'ai bougé, je pousse).
+ *
+ * Quand les DEUX ont bougé, différemment, il faut trancher — et « égalité →
+ * le serveur » était une course : gagnait celui dont le push avait atteint le
+ * serveur en premier, prof ou élève indifféremment, y compris quand c'est le
+ * rangement du PROF qui se faisait défaire par un élève plus rapide à
+ * synchroniser. Le prof a le dernier mot : je pousse mon propre chemin si je
+ * suis prof, sinon je me relocalise sur celui du serveur.
  */
-export function reconcilePath({ relPath, lastSyncedPath, remotePath }: ReconcileParams): PathAction {
+export function reconcilePath({ relPath, lastSyncedPath, remotePath, iAmProf }: ReconcileParams): PathAction {
   // Aucun enregistrement distant : la création enverra le chemin local, il n'y
   // a rien à réconcilier.
   if (remotePath === undefined) return { kind: 'none' }
@@ -60,5 +71,6 @@ export function reconcilePath({ relPath, lastSyncedPath, remotePath }: Reconcile
   if (!iMoved && serverMoved) return { kind: 'relocate', to: remotePath, bothMoved: false }
   // Les deux ont bougé.
   if (relPath === remotePath) return { kind: 'none' }
+  if (iAmProf) return { kind: 'push-path' }
   return { kind: 'relocate', to: remotePath, bothMoved: true }
 }

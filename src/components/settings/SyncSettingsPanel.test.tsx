@@ -155,7 +155,7 @@ describe('SyncSettingsPanel', () => {
     expect(screen.getByText(/2 envoyé\(s\), 1 reçu\(s\)/)).toBeInTheDocument()
   })
 
-  it('lists the files the two sides disagree on, and says nothing was overwritten', () => {
+  it('lists the files the two sides disagreed on, already resolved automatically', () => {
     useSyncStore.setState({
       currentUser: { username: 'aife', role: 'prof' },
       syncFolderPath: '/cours',
@@ -178,44 +178,8 @@ describe('SyncSettingsPanel', () => {
     render(<SyncSettingsPanel />)
 
     expect(screen.getByText(/chapitre1.zmap/)).toBeInTheDocument()
-    // The whole point: nothing was overwritten, so the user is told so.
-    expect(screen.getByText(/rien n’a été écrasé/)).toBeInTheDocument()
-  })
-
-  it('opens the resolution dialog from the list that reports the conflicts', async () => {
-    const user = userEvent.setup()
-    useSyncStore.setState({
-      currentUser: { username: 'aife', role: 'prof' },
-      syncFolderPath: '/cours',
-      lastResult: {
-        pushed: 0,
-        pulled: 0,
-        errors: [],
-        cancelled: false,
-        conflicts: [
-          {
-            fileId: 'f1',
-            path: 'chapitre1.zmap',
-            localModified: '2026-02-01T10:00:00.000Z',
-            remoteUpdated: '2026-02-01 09:00:00.000Z',
-            detail: {
-              localPath: '/cours/chapitre1.zmap',
-              remotePath: 'chapitre1.zmap',
-              remoteContent: '[]',
-              remoteContentHash: 'h',
-              localCounts: { total: 3, byLevel: { 1: 1, 2: 2, 3: 0, 4: 0 }, detached: 0 },
-              remoteCounts: { total: 2, byLevel: { 1: 1, 2: 1, 3: 0, 4: 0 }, detached: 0 },
-            },
-          },
-        ],
-        transferred: [],
-      },
-    })
-    render(<SyncSettingsPanel />)
-
-    await user.click(screen.getByRole('button', { name: /Résoudre le conflit/ }))
-
-    expect(await screen.findByText(/Conflit 1 sur 1 — chapitre1/)).toBeInTheDocument()
+    // The whole point: it's already decided, not a pending choice.
+    expect(screen.getByText(/résolu automatiquement/)).toBeInTheDocument()
   })
 
   it('lists per-file sync errors under the summary, so the safety guards are visible', () => {

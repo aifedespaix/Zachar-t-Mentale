@@ -31,7 +31,7 @@ describe('syncResultLabel', () => {
 
   it('counts the conflicts, which are reported but never resolved', () => {
     const conflicts = [{ fileId: 'f1', path: 'a.zmap', localModified: 'x', remoteUpdated: 'y' }]
-    expect(syncResultLabel(result({ conflicts }))).toBe('0 envoyé(s), 0 reçu(s), 1 conflit(s)')
+    expect(syncResultLabel(result({ conflicts }))).toBe('0 envoyé(s), 0 reçu(s), 1 conflit(s) résolu(s)')
   })
 
   it('says how many files followed a path decided elsewhere', () => {

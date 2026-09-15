@@ -345,25 +345,29 @@ chaque fois que la skill traite un fichier `corrections`.
 
 ## Sous-projet 5 — Politique de sync contenu vs déplacement (dev)
 
-**Statut** : ✅ Terminé — déjà résolu par une fonctionnalité développée
-séparément, repérée en reprenant ce chantier plutôt que construite pour lui
+**Statut** : ✅ Terminé — résolu en deux temps : une fonctionnalité
+développée séparément (résolution manuelle), puis remplacée le 2026-09-15 par
+une résolution automatique par rôle (voir
+`docs/superpowers/specs/2026-09-15-autorite-prof-conflits-design.md`)
 
 État du code (vérifié) :
 
-- Déplacement/renommage de fichier : déjà finement géré par
-  `src/sync/pathReconciliation.ts` (résolution premier-arrivé-gagne,
-  égalité → le serveur gagne).
-- Carte présente localement et absente du distant (ou l'inverse) : déjà
+- Déplacement/renommage de fichier : géré par `src/sync/pathReconciliation.ts`.
+  Un seul côté a bougé → premier arrivé gagne (inchangé). Les deux ont bougé,
+  différemment → **le prof a le dernier mot** (plus « le serveur gagne » : ce
+  n'était qu'une course entre deux pushs).
+- Type/classification (cours, exo, prise de notes, corrections) : même règle,
+  dans `src/sync/typeReconciliation.ts`.
+- Carte présente localement et absente du distant (ou l'inverse) : toujours
   transformée en carte volante automatiquement par `src/sync/cardMerge.ts`,
   jamais perdue.
 - Contenu modifié des deux côtés depuis la dernière synchro (même `id` de
-  fichier, contenus divergents) : couvert par `isConflict`
-  (`src/sync/syncService.ts`) + la boîte de résolution de
-  `src/sync/conflictResolution.ts`, voir
-  `docs/superpowers/specs/2026-09-14-resolution-de-conflits-design.md`. Le
-  contenu local est capturé dans le signalement AVANT tout écrasement, donc
-  rien n'est perdu même si le tirage suivant réécrit le fichier local : trois
-  choix ensuite — accepter le serveur, refuser et garder ma version (restaure
-  le contenu local capturé), créer une copie liée (les deux survivent).
-  Résout à l'échelle du fichier la question posée ici à l'échelle de la
-  carte — plus complet qu'une simple carte volante par carte.
+  fichier, contenus divergents) : détecté par `isConflict`
+  (`src/sync/syncService.ts`), toujours signalé (`result.conflicts`, relu par
+  l'interface d'administration via `syncReporting.ts`), mais TRANCHÉ
+  automatiquement dans le même passage — le prof gagne, la version qui cède
+  est archivée dans une copie liée avant d'être remplacée. Il n'y a plus de
+  boîte de dialogue à trois choix (`ConflictResolutionDialog`,
+  `src/sync/conflictResolution.ts` : retirés, devenus inatteignables une fois
+  la règle déterministe) — l'usage réel n'oppose jamais que ces deux rôles
+  fixes, et la réponse est donc toujours la même.

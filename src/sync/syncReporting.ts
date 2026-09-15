@@ -44,6 +44,9 @@ export interface SyncEventDetail {
   merged: { fileId: string; path: string; floatedCount: number }[]
   relocated: number
   reclassified: number
+  published: number
+  localDeleted: number
+  remoteDeleted: number
   /** Ce que les listes ci-dessus ont perdu au plafonnement, pour ne pas mentir par omission. */
   truncated?: number
 }
@@ -74,8 +77,10 @@ export const MAX_DETAIL_ENTRIES = 100
  * La gravité telle qu'un tableau de bord veut la trier.
  *
  * `error` est réservé à un vrai échec de fichier. Un conflit n'est PAS une
- * erreur — c'est une décision en attente, et la confondre avec une panne ferait
- * clignoter en rouge un serveur qui fonctionne parfaitement. Une exécution
+ * erreur — il est déjà résolu au moment où il arrive ici (voir
+ * `2026-09-15-autorite-prof-conflits-design.md`) — et la confondre avec une
+ * panne ferait clignoter en rouge un serveur qui fonctionne parfaitement. Une
+ * exécution
  * interrompue est également un avertissement : rien n'a cassé, mais le dossier
  * n'a pas été parcouru en entier, donc « tout va bien » serait faux.
  */
@@ -108,6 +113,9 @@ export function buildDetail(result: SyncResult): SyncEventDetail {
     merged: merged.kept,
     relocated: result.relocated ?? 0,
     reclassified: result.reclassified ?? 0,
+    published: result.published ?? 0,
+    localDeleted: result.localDeleted ?? 0,
+    remoteDeleted: result.remoteDeleted ?? 0,
     ...(dropped === 0 ? {} : { truncated: dropped }),
   }
 }
@@ -255,11 +263,12 @@ export async function reportSyncRun(
   /**
    * Classe les conflits ouverts que cette exécution n'a PLUS rencontrés.
    *
-   * Un conflit tranché ailleurs — dans la boîte de dialogue de l'application,
-   * ou simplement parce que l'élève a recopié la bonne version — cesse d'être
-   * signalé, mais son enregistrement, lui, resterait `open` pour toujours. La
-   * liste du prof accumulerait alors des fantômes, et deviendrait illisible
-   * exactement là où elle doit être fiable.
+   * Un conflit est désormais TOUJOURS déjà tranché quand il est signalé (voir
+   * `2026-09-15-autorite-prof-conflits-design.md`) : dès le prochain sync, le
+   * contenu ne diverge plus et `isConflict` ne le revoit pas. Sans cette
+   * passe, son enregistrement resterait `open` pour toujours. La liste du
+   * prof accumulerait alors des fantômes, et deviendrait illisible exactement
+   * là où elle doit être fiable.
    *
    * Cette passe ne demande pas COMMENT il a été résolu : elle constate qu'il
    * n'y a plus de désaccord, ce que la synchronisation qui vient de tourner est

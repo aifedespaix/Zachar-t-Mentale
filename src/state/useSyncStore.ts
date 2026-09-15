@@ -4,16 +4,12 @@ import type { UserRole, SyncUser } from '../types/card'
 import { DEFAULT_SYNC_SETTINGS, type SyncSettings } from '../types/syncSettings'
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { loadServerSyncState, saveSyncState, serverStateOf } from '../persistence/syncState'
-import { loadMindMapMeta } from '../persistence/fileStore'
-import { createLinkedCopy } from '../persistence/copyLinkOps'
-import { parentDirOf } from '../persistence/paths'
-import { resolvedStateEntry, type ConflictChoice } from '../sync/conflictResolution'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { logSyncEvent } from '../persistence/syncLog'
 import { createReportingClient, createSyncClient } from '../sync/pocketBaseAdapter'
 import { reportSyncRun } from '../sync/syncReporting'
-import { surveySyncFolder, sync, type SyncResult } from '../sync/syncService'
+import { surveySyncFolder, sync, syncOneFile as syncOneFileTargeted, type SyncResult } from '../sync/syncService'
 import { syncResultLabel } from '../sync/syncResultLabel'
 import { useWorkspaceStore } from './useWorkspaceStore'
 
@@ -92,20 +88,13 @@ interface SyncStoreState {
   logout: () => void
   syncNow: (options?: SyncTriggerOptions) => Promise<void>
   /**
-   * Applique le choix de l'utilisateur sur UN conflit, et le retire de la liste.
-   *
-   * Rien n'est transféré ici : la décision est écrite dans la mémoire du
-   * dernier sync, et c'est la synchronisation suivante qui la joue par ses
-   * chemins habituels — images comprises, cartes locales mises de côté plutôt
-   * que perdues. Voir `resolvedStateEntry` pour le pourquoi de ce détour.
-   *
-   * `copy` écrit d'abord la copie LIÉE (même dossier, nom suffixé « (copie) »),
-   * puis résout comme « accepter le serveur » : les deux versions survivent.
-   *
-   * @returns si la décision a bien été enregistrée. Un échec laisse le conflit
-   * dans la liste — la boîte de dialogue doit rester sur lui, pas enchaîner.
+   * Le sync ciblé — un seul fichier, celui qu'on referme. Voir
+   * `2026-09-15-suppression-publication-auto-sync-ciblee-design.md`, section 3.
+   * Silencieux par nature : pas de compte connecté ou pas de dossier choisi
+   * n'est pas une erreur ici, juste rien à faire — contrairement à `syncNow`
+   * déclenché à la main, ce chemin est TOUJOURS déclenché en arrière-plan.
    */
-  resolveConflict: (fileId: string, choice: ConflictChoice) => Promise<boolean>
+  syncOneFile: (path: string) => Promise<void>
 }
 
 export type SyncStore = UseBoundStore<StoreApi<SyncStoreState>>
@@ -152,6 +141,21 @@ export function createSyncStore(): SyncStore {
   // The run in flight, so `cancelSync` has something to abort. Cleared at the
   // end of every run, which is what keeps a finished one from being cancelled.
   let runningSync: AbortController | null = null
+  // Une seule file pour TOUT ce qui lit puis réécrit `.sync-state.json` —
+  // `syncNow` (le dossier entier) et `syncOneFile` (un seul fichier), qui
+  // peuvent désormais tourner l'un pendant l'autre. Sans elle, deux
+  // « charger, modifier, sauver » entrelacés écraseraient silencieusement
+  // l'un des deux résultats — pas une perte de contenu (le disque, lui, est
+  // toujours à jour), mais une mémoire de sync fausse jusqu'au prochain run.
+  let stateIoQueue: Promise<unknown> = Promise.resolve()
+  function serialized<T>(work: () => Promise<T>): Promise<T> {
+    const run = stateIoQueue.then(work, work)
+    stateIoQueue = run.then(
+      () => undefined,
+      () => undefined
+    )
+    return run
+  }
 
   return create<SyncStoreState>((set, get) => {
     function clientFor(serverUrl: string): PocketBase {
@@ -352,86 +356,6 @@ export function createSyncStore(): SyncStore {
         set({ currentUser: null, pendingCount: null, localOnlyCount: null, localOnlyPaths: [] })
       },
 
-      resolveConflict: async (fileId, choice) => {
-        const { lastResult, currentUser, serverUrl, syncFolderPath } = get()
-        const conflict = lastResult?.conflicts.find(entry => entry.fileId === fileId)
-        const detail = conflict?.detail
-        if (conflict === undefined || detail === undefined) {
-          // Un conflit sans comparatif vient d'un résultat écrit par une version
-          // antérieure : il n'y a rien sur quoi appuyer une décision, et le dire
-          // vaut mieux que d'écrire au hasard dans l'état de synchronisation.
-          set({ error: 'Ce conflit date d’une synchronisation trop ancienne. Relancez une synchronisation.' })
-          return false
-        }
-        if (currentUser === null || syncFolderPath === null) {
-          set({ error: 'Connectez-vous et choisissez un dossier de synchronisation avant de résoudre un conflit.' })
-          return false
-        }
-
-        try {
-          let copyPath: string | null = null
-          if (choice === 'copy') {
-            // La copie D'ABORD : si elle échoue, l'état n'a pas bougé et le
-            // conflit est toujours là, entier, à re-décider. Dans l'autre ordre,
-            // la version locale serait déjà condamnée par un tirage à venir.
-            const created = await createLinkedCopy({
-              sourcePath: detail.localPath,
-              author: currentUser.username,
-              role: currentUser.role,
-            })
-            copyPath = created.path
-          }
-
-          const state = await loadServerSyncState(serverUrl, syncFolderPath)
-          const entries = serverStateOf(state, serverUrl, syncFolderPath).entries
-          const known = entries[fileId]
-          if (known === undefined) {
-            // Sans mémoire de ce fichier, il n'y avait déjà plus de conflit à
-            // proprement parler : la synchronisation suivante décidera seule.
-            set({ error: null })
-          } else {
-            // La date est RELUE sur le disque : le fichier a pu être édité entre
-            // la synchronisation qui a signalé le conflit et cette décision, et
-            // figer l'ancienne ferait repartir un envoi qu'on vient de refuser.
-            const localMeta = await loadMindMapMeta(detail.localPath).catch(() => null)
-            entries[fileId] = resolvedStateEntry({
-              choice,
-              entry: known,
-              localModified: localMeta?.lastModified ?? conflict.localModified,
-              remoteUpdated: conflict.remoteUpdated,
-              remoteContentHash: detail.remoteContentHash,
-            })
-            await saveSyncState(state)
-          }
-
-          await logSyncEvent('info', `conflit résolu (${choice}) : « ${conflict.path} »`, { fileId })
-
-          // Le conflit disparaît de la liste TOUT DE SUITE : la boîte de dialogue
-          // enchaîne sur le suivant, et la synchronisation qui suivra réécrira de
-          // toute façon ce résultat.
-          set(current => ({
-            lastResult:
-              current.lastResult === null
-                ? null
-                : { ...current.lastResult, conflicts: current.lastResult.conflicts.filter(item => item.fileId !== fileId) },
-          }))
-
-          if (copyPath !== null) {
-            // L'arborescence doit montrer la copie immédiatement — c'est la
-            // preuve visible que « garder les deux » a bien gardé les deux.
-            const workspace = useWorkspaceStore.getState()
-            await workspace.refreshFolder(parentDirOf(copyPath))
-            workspace.bumpFileMetaRevision()
-          }
-          return true
-        } catch (error) {
-          const message = `La résolution du conflit a échoué : ${describeSettingsError(error)}`
-          await logSyncEvent('error', message, error)
-          set({ error: message })
-          return false
-        }
-      },
-
       syncNow: async (options?: SyncTriggerOptions) => {
         const trigger: SyncTrigger = options?.trigger ?? 'manual'
         // Three callers reach this now — the sidebar's button, the settings
@@ -469,26 +393,30 @@ export function createSyncStore(): SyncStore {
         )
         try {
           const pb = clientFor(serverUrl)
-          const state = await loadServerSyncState(serverUrl, syncFolderPath)
-          let result: SyncResult
-          try {
-            result = await sync({
-              client: createSyncClient(pb),
-              currentUser: currentUser.username,
-              currentRole: currentUser.role,
-              serverUrl,
-              syncFolderPath,
-              state,
-              openFilePath: useWorkspaceStore.getState().currentFilePath ?? undefined,
-              signal: controller.signal,
-              onProgress: (done, total) => set({ progress: { done, total } }),
-            })
-          } finally {
-            // Whatever ended the run — completion, cancellation or a hard
-            // failure — the per-file cache must keep what did get through, or
-            // the next run would send it all over again.
-            await saveSyncState(state)
-          }
+          // Chargement, synchronisation et sauvegarde de l'état forment une
+          // section critique : `syncOneFile` peut vouloir la même pendant que
+          // celle-ci tourne, voir `serialized`.
+          const result = await serialized(async () => {
+            const state = await loadServerSyncState(serverUrl, syncFolderPath)
+            try {
+              return await sync({
+                client: createSyncClient(pb),
+                currentUser: currentUser.username,
+                currentRole: currentUser.role,
+                serverUrl,
+                syncFolderPath,
+                state,
+                openFilePath: useWorkspaceStore.getState().currentFilePath ?? undefined,
+                signal: controller.signal,
+                onProgress: (done, total) => set({ progress: { done, total } }),
+              })
+            } finally {
+              // Whatever ended the run — completion, cancellation or a hard
+              // failure — the per-file cache must keep what did get through, or
+              // the next run would send it all over again.
+              await saveSyncState(state)
+            }
+          })
 
           await logSyncEvent('info', `synchronisation : ${syncResultLabel(result)}`)
           if (get().verboseLog) {
@@ -567,6 +495,62 @@ export function createSyncStore(): SyncStore {
           // Cleared only if it is still OURS: a run that finished must not
           // disarm the controller of the one that replaced it.
           if (runningSync === controller) runningSync = null
+        }
+      },
+
+      syncOneFile: async (path: string) => {
+        const { serverUrl, syncFolderPath, currentUser } = get()
+        // Silencieux, à dessein : ce chemin part de la fermeture d'un fichier,
+        // que la synchro soit configurée ou non — pas d'un clic qui attend une
+        // explication.
+        if (syncFolderPath === null || currentUser === null) return
+
+        try {
+          const pb = clientFor(serverUrl)
+          const result = await serialized(async () => {
+            const state = await loadServerSyncState(serverUrl, syncFolderPath)
+            try {
+              return await syncOneFileTargeted({
+                client: createSyncClient(pb),
+                currentUser: currentUser.username,
+                currentRole: currentUser.role,
+                serverUrl,
+                syncFolderPath,
+                state,
+                filePath: path,
+                openFilePath: useWorkspaceStore.getState().currentFilePath ?? undefined,
+              })
+            } finally {
+              await saveSyncState(state)
+            }
+          })
+
+          await logSyncEvent('info', `synchronisation ciblée : ${syncResultLabel(result)}`, { path })
+          if (result.errors.length > 0) {
+            await logSyncEvent('error', 'échec de la synchronisation ciblée', result.errors)
+          }
+          // Le dernier résultat visible dans la barre latérale suit le geste le
+          // plus récent — fermer un fichier est aussi une synchronisation.
+          set({ lastResult: result })
+          try {
+            const report = await reportSyncRun(createReportingClient(pb), result, {
+              username: currentUser.username,
+              role: currentUser.role,
+              trigger: 'auto',
+              summary: syncResultLabel(result),
+              device: describeDevice(navigator.userAgent),
+            })
+            if (report.failures.length > 0) {
+              await logSyncEvent('debug', 'compte rendu au serveur partiellement refusé', report.failures)
+            }
+          } catch (error) {
+            await logSyncEvent('debug', 'compte rendu au serveur impossible', error)
+          }
+          await get().refreshPendingCount()
+        } catch (error) {
+          // Jamais de bannière pour ce chemin : voir le commentaire en tête de
+          // fonction. Le journal garde la trace pour qui la cherche.
+          await logSyncEvent('error', `synchronisation ciblée échouée : ${describeSyncStoreError(error)}`, error)
         }
       },
     }

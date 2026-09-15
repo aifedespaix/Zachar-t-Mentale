@@ -585,11 +585,11 @@ describe('FileSidebar', () => {
     expect(tooltip).toHaveTextContent(/dernière synchro il y a 12 min/)
   })
 
-  it('announces a conflict rather than letting an overwrite go unspoken', async () => {
+  it('announces a conflict, already resolved, rather than staying silent about it', async () => {
     useSyncStore.setState({ lastResult: resultWithConflict() })
     render(<FileSidebar onOpenFile={() => {}} />)
 
-    expect(await screen.findByText(/1 conflit\(s\)/)).toBeInTheDocument()
+    expect(await screen.findByText(/1 conflit\(s\) résolu\(s\)/)).toBeInTheDocument()
   })
 
   /** Un résultat de synchronisation portant un conflit complet, comparatif compris. */
@@ -619,30 +619,16 @@ describe('FileSidebar', () => {
     }
   }
 
-  it('puts the way out ON the message that announces the conflict', async () => {
-    const user = userEvent.setup()
-    useSyncStore.setState({ lastResult: resultWithConflict() })
-    render(<FileSidebar onOpenFile={() => {}} />)
-
-    await user.click(await screen.findByRole('button', { name: /Résoudre le conflit/ }))
-
-    // La boîte s'ouvre sur le comparatif, pas sur un renvoi vers les réglages.
-    expect(await screen.findByText(/Conflit 1 sur 1 — chapitre1/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Accepter le changement/ })).toBeInTheDocument()
-  })
-
-  it('keeps a conflict message on screen instead of auto-hiding the only way to resolve it', async () => {
+  it('auto-hides a conflict message like any other result, since nothing is left to decide', async () => {
     vi.useFakeTimers()
     try {
       useSyncStore.setState({ lastResult: resultWithConflict() })
       render(<FileSidebar onOpenFile={() => {}} />)
-      await screen.findByText(/1 conflit\(s\)/)
+      await screen.findByText(/1 conflit\(s\) résolu\(s\)/)
 
-      // Le délai qui efface les messages ordinaires ne doit rien effacer ici :
-      // ce message-là porte une décision à prendre.
       act(() => void vi.advanceTimersByTime(10000))
 
-      expect(screen.getByText(/1 conflit\(s\)/)).toBeInTheDocument()
+      expect(screen.queryByText(/1 conflit\(s\) résolu\(s\)/)).not.toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }
