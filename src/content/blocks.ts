@@ -1,5 +1,15 @@
 import type { Card } from '../types/card'
-import type { CardBlock, CardBlockKind } from '../types/cardBlock'
+import type { CardBlock, CardBlockKind, TableCell } from '../types/cardBlock'
+
+function cellText(cell: TableCell): string {
+  return typeof cell === 'string' ? cell : latexToPlainText(cell.latex)
+}
+function cellIsEmpty(cell: TableCell): boolean {
+  return typeof cell === 'string' ? cell.trim() === '' : cell.latex.trim() === ''
+}
+function cloneCell(cell: TableCell): TableCell {
+  return typeof cell === 'string' ? cell : { ...cell }
+}
 
 /**
  * The block model's pure core: how blocks project down to plain text, and how
@@ -104,7 +114,7 @@ function blockToPlainText(block: CardBlock): string {
       // without trace from an XMind note or a QCM option.
       return `[image : ${block.alt.trim() || block.asset}]`
     case 'table':
-      return [block.header, ...block.rows]
+      return [block.header, ...block.rows.map(row => row.map(cellText))]
         .filter(row => row.length > 0)
         .map(row => row.join(' | '))
         .join('\n')
@@ -124,8 +134,22 @@ function isEmptyBlock(block: CardBlock): boolean {
       // definition claiming a picture that no longer exists.
       return block.asset.trim() === '' || !Number.isFinite(block.width) || !Number.isFinite(block.height)
     case 'table':
-      return ![...block.header, ...block.rows.flat()].some(cell => cell.trim() !== '')
+      return (
+        block.header.every(cell => cell.trim() === '') && block.rows.flat().every(cellIsEmpty)
+      )
   }
+}
+
+/**
+ * Whether two block lists differ, for the "is there anything new to save?"
+ * check that gates autosave and the local undo history alike.
+ *
+ * Structural rather than referential: the editor rebuilds its array on every
+ * keystroke, so identity would report a change the moment a field was touched
+ * at all — including by typing a character and deleting it again.
+ */
+export function blocksDiffer(a: CardBlock[], b: CardBlock[]): boolean {
+  return JSON.stringify(a) !== JSON.stringify(b)
 }
 
 export function blocksToPlainText(blocks: CardBlock[]): string {
@@ -143,7 +167,7 @@ export function blocksToPlainText(blocks: CardBlock[]): string {
  */
 function cloneBlock(block: CardBlock): CardBlock {
   return block.kind === 'table'
-    ? { kind: 'table', header: [...block.header], rows: block.rows.map(row => [...row]) }
+    ? { kind: 'table', header: [...block.header], rows: block.rows.map(row => row.map(cloneCell)) }
     : { ...block }
 }
 
@@ -169,9 +193,10 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
     case 'text':
       return typeof block.text === 'string' ? { kind: 'text', text: block.text } : null
     case 'math':
-      return typeof block.latex === 'string'
-        ? { kind: 'math', latex: block.latex, ...(block.display === true ? { display: true } : {}) }
-        : null
+      // `display` is read from nowhere any more (every math block is its own
+      // line), but an older file may still carry it — dropped silently rather
+      // than rejecting the block over a field that no longer means anything.
+      return typeof block.latex === 'string' ? { kind: 'math', latex: block.latex } : null
     case 'image':
       return typeof block.asset === 'string' &&
         typeof block.alt === 'string' &&
@@ -185,10 +210,26 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
         Number.isFinite(block.height)
         ? { kind: 'image', asset: block.asset, alt: block.alt, width: block.width, height: block.height }
         : null
-    case 'table':
-      return isStringArray(block.header) && Array.isArray(block.rows) && block.rows.every(isStringArray)
-        ? { kind: 'table', header: [...block.header], rows: (block.rows as string[][]).map(row => [...row]) }
-        : null
+    case 'table': {
+      if (!isStringArray(block.header) || !Array.isArray(block.rows)) return null
+      const rows: TableCell[][] = []
+      for (const rawRow of block.rows as unknown[]) {
+        if (!Array.isArray(rawRow)) return null
+        const row: TableCell[] = []
+        for (const rawCell of rawRow) {
+          if (typeof rawCell === 'string') row.push(rawCell)
+          else if (
+            typeof rawCell === 'object' &&
+            rawCell !== null &&
+            typeof (rawCell as Record<string, unknown>).latex === 'string'
+          ) {
+            row.push({ latex: (rawCell as { latex: string }).latex })
+          } else return null
+        }
+        rows.push(row)
+      }
+      return { kind: 'table', header: [...block.header], rows }
+    }
     default: {
       // Unknown kind: keep whatever a human could still read out of it.
       const text = Object.entries(block)

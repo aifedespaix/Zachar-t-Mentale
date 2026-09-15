@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { DescriptionDialog } from './DescriptionDialog'
 import type { CardBlock } from '../types/cardBlock'
 
@@ -16,8 +16,17 @@ vi.mock('mathlive', () => {
 
 const text = (value: string): CardBlock[] => [{ kind: 'text', text: value }]
 
+let cardIdSeq = 0
+/** A fresh id per call: the local undo history is keyed by card id and lives
+ *  at module scope, so reusing one across tests would leak state between them. */
+function nextCardId(): string {
+  cardIdSeq += 1
+  return `card-${cardIdSeq}`
+}
+
 function renderDialog(overrides: Partial<React.ComponentProps<typeof DescriptionDialog>> = {}) {
   const props = {
+    cardId: nextCardId(),
     breadcrumb: ['Nombres relatifs', 'Addition'],
     cardTitle: 'Signes contraires',
     blocks: text('Une définition'),
@@ -31,6 +40,10 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof Description
 }
 
 describe('DescriptionDialog', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('says which card is being edited, ancestors included', () => {
     renderDialog()
 
@@ -65,9 +78,9 @@ describe('DescriptionDialog', () => {
   })
 
   it('opens with the caret already in the text field', () => {
-    // Radix focuses the first tabbable element of a dialog, which here is the
-    // « Texte » mode button: without this the dialog opened on a button and the
-    // first keystroke went nowhere.
+    // Radix focuses the first tabbable element of a dialog, which here is a
+    // panel button: without cancelling it, the dialog opened on a button and
+    // the first keystroke went nowhere.
     renderDialog()
 
     expect(screen.getByRole('textbox', { name: /texte du bloc 1/i })).toHaveFocus()
@@ -101,7 +114,7 @@ describe('DescriptionDialog', () => {
     await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
     await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
     await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
-    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
     // Appended at the caret the dialog opened on (the end of the text), not
     // replacing it: the palette never took focus out of the field. The inverted
@@ -109,97 +122,77 @@ describe('DescriptionDialog', () => {
     expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Como estas¿?' }])
   })
 
-  it('saves the edited blocks and closes', async () => {
+  it('saves the edited blocks on the way out', async () => {
     const user = userEvent.setup()
     const props = renderDialog()
 
     const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
     await user.clear(field)
     await user.type(field, 'Définition modifiée')
-    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
+    // Closing flushes whatever autosave had not gotten to yet — there is
+    // nothing left to lose by leaving, so nothing to confirm either.
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
     expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Définition modifiée' }])
     expect(props.onClose).toHaveBeenCalled()
   })
 
-  it('saves on Ctrl+Enter, which plain Enter cannot do inside a textarea', async () => {
-    const user = userEvent.setup()
+  it('autosaves on its own after a pause in typing, with nothing clicked', async () => {
+    vi.useFakeTimers()
+    const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime })
     const props = renderDialog()
 
-    await user.click(screen.getByRole('textbox', { name: /texte du bloc 1/i }))
-    await user.keyboard('{Control>}{Enter}{/Control}')
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
+    await user.clear(field)
+    await user.type(field, 'Écrit puis on attend')
 
-    expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Une définition' }])
-  })
-
-  it('closes without asking when nothing was changed', async () => {
-    const user = userEvent.setup()
-    const props = renderDialog()
-
-    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
-
-    expect(props.onClose).toHaveBeenCalled()
     expect(props.onSave).not.toHaveBeenCalled()
-  })
+    await vi.advanceTimersByTimeAsync(700)
 
-  it('asks before discarding real work', async () => {
-    // The popover this replaces committed on click-away. That trade is right
-    // for a two-line field and wrong for a surface someone sits in for twenty
-    // minutes, so closing discards — and discarding asks.
-    const user = userEvent.setup()
-    const props = renderDialog()
-
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' modifiée')
-    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
-
+    expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Écrit puis on attend' }])
+    // Autosaving is not closing: the dialog stays open for the next edit.
     expect(props.onClose).not.toHaveBeenCalled()
-    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+  })
 
-    await user.click(screen.getByRole('button', { name: /fermer sans enregistrer/i }))
+  it('closes right away when nothing was changed', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog()
+
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
+
     expect(props.onClose).toHaveBeenCalled()
     expect(props.onSave).not.toHaveBeenCalled()
   })
 
-  it('states the question and the three ways out of the discard prompt', async () => {
-    const user = userEvent.setup()
-    renderDialog()
-
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' modifiée')
-    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
-
-    // The question used to live in `aria-label` only: the panel showed a bare
-    // paragraph and three unexplained buttons, one of which closed the editor.
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('Abandonner les modifications ?')
-
-    for (const name of [/continuer l’édition/i, /fermer sans enregistrer/i, /enregistrer et fermer/i]) {
-      expect(screen.getByRole('button', { name })).toBeInTheDocument()
-    }
-  })
-
-  it('saves from the discard prompt rather than forcing a choice between losing the work and cancelling', async () => {
+  it('treats a change typed and undone as no change at all', async () => {
     const user = userEvent.setup()
     const props = renderDialog()
 
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' modifiée')
-    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
-    await user.click(screen.getByRole('button', { name: /enregistrer et fermer/i }))
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
+    await user.type(field, 'x')
+    await user.keyboard('{Backspace}')
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
-    expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Une définition modifiée' }])
+    // A referential dirty check would have called `onSave` here regardless.
+    expect(props.onSave).not.toHaveBeenCalled()
     expect(props.onClose).toHaveBeenCalled()
   })
 
-  it('keeps the discard choices inside the panel when the labels are too wide for one row', async () => {
-    // jsdom has no layout engine, so the overflow cannot be reproduced by
-    // measuring anything — the guard is the property that fixes it. Without
-    // `flex-wrap` the three labels, which are all `whitespace-nowrap`, painted
-    // their last button past the edge of the panel.
+  it('undoes the last edit with Ctrl+Z, on the description’s own history', async () => {
     const user = userEvent.setup()
-    renderDialog()
+    const props = renderDialog({ blocks: text('Départ') })
 
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' modifiée')
-    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
+    await user.type(field, ' et suite')
+    expect(field).toHaveValue('Départ et suite')
 
-    expect(screen.getByRole('group', { name: /choix possibles/i })).toHaveStyle({ 'flex-wrap': 'wrap' })
+    await user.keyboard('{Control>}z{/Control}')
+    expect(field).toHaveValue('Départ')
+
+    // Undone all the way back to what the card already had: closing now has
+    // nothing new to save.
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
+    expect(props.onSave).not.toHaveBeenCalled()
   })
 
   it('asks before deleting a description that exists, and says what it deletes', async () => {
@@ -215,47 +208,21 @@ describe('DescriptionDialog', () => {
     expect(props.onClose).toHaveBeenCalled()
   })
 
-  it('treats a change typed and undone as no change at all', async () => {
-    const user = userEvent.setup()
-    const props = renderDialog()
-
-    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
-    await user.type(field, 'x')
-    await user.keyboard('{Backspace}')
-    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
-
-    // A referential dirty check would have raised the prompt here.
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(props.onClose).toHaveBeenCalled()
-  })
-
-  it('keeps editing when Escape is pressed on the discard prompt', async () => {
-    const user = userEvent.setup()
-    const props = renderDialog()
-
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' modifiée')
-    await user.click(screen.getByRole('button', { name: /^annuler$/i }))
-    await user.keyboard('{Escape}')
-
-    // Escape must not close THROUGH the very warning it just raised.
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(props.onClose).not.toHaveBeenCalled()
-    expect(screen.getByRole('textbox', { name: /texte du bloc 1/i })).toBeInTheDocument()
-  })
-
-  it('previews the draft with the same renderer the card and the export use', async () => {
+  it('shows a formula typeset with the same renderer the card and the export use', async () => {
+    // Radix renders the dialog into a portal appended to `document.body`, not
+    // into the local render container — so the query below has to search the
+    // whole document, the same way a `screen` query would.
     const user = userEvent.setup()
     renderDialog({ blocks: [] })
 
     await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), 'x^2$$')
 
-    // Typeset, not LaTeX source: the preview IS the result, not a rendition
-    // of it, which is what tells the user the fiche will show the same thing.
-    const preview = screen.getByRole('region', { name: /aperçu/i })
-    expect(preview.querySelector('.katex')).not.toBeNull()
+    // Typeset, not LaTeX source: the live preview under the formula field IS
+    // the result, not a rendition of it.
+    expect(document.querySelector('.katex')).not.toBeNull()
   })
 
-  it('reorders blocks, which the popover editor could not do at all', async () => {
+  it('reorders blocks, which the old popover editor could not do at all', async () => {
     const user = userEvent.setup()
     const props = renderDialog({
       blocks: [
@@ -264,8 +231,9 @@ describe('DescriptionDialog', () => {
       ],
     })
 
-    await user.click(screen.getByRole('button', { name: /monter le bloc 2/i }))
-    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
+    await user.click(screen.getByRole('button', { name: /monter le bloc en cours/i }))
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
     expect(props.onSave).toHaveBeenCalledWith([
       { kind: 'text', text: 'Second' },
@@ -273,7 +241,8 @@ describe('DescriptionDialog', () => {
     ])
   })
 
-  it('cannot move the first block up nor the last one down', () => {
+  it('cannot move the first block up nor the last one down', async () => {
+    const user = userEvent.setup()
     renderDialog({
       blocks: [
         { kind: 'text', text: 'Premier' },
@@ -281,8 +250,11 @@ describe('DescriptionDialog', () => {
       ],
     })
 
-    expect(screen.getByRole('button', { name: /monter le bloc 1/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /descendre le bloc 2/i })).toBeDisabled()
+    // Block 1 is active on open (autofocused), so "up" is already disabled.
+    expect(screen.getByRole('button', { name: /monter le bloc en cours/i })).toBeDisabled()
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
+    expect(screen.getByRole('button', { name: /descendre le bloc en cours/i })).toBeDisabled()
   })
 
   it('resizes an image by its displayed width, keeping its shape', async () => {
@@ -292,7 +264,7 @@ describe('DescriptionDialog', () => {
     })
 
     await user.click(screen.getByRole('button', { name: /^160 pixels$/i }))
-    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
     // 4:3 in, 4:3 out — a resize that drifted the ratio would distort the
     // picture a little more on every click.
@@ -308,12 +280,12 @@ describe('DescriptionDialog', () => {
     // The raw-LaTeX path: MathLive is not loaded in jsdom, so the palette
     // appends rather than inserting at a caret — degraded, never a lost click.
     await user.click(screen.getByRole('button', { name: /^multiplié par$/i }))
-    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
     expect(props.onSave).toHaveBeenCalledWith([{ kind: 'math', latex: 'x\\times ' }])
   })
 
-  it('shows the palette only under the block being edited', async () => {
+  it('shows the palette only for the block being edited', async () => {
     const user = userEvent.setup()
     renderDialog({
       blocks: [
@@ -332,5 +304,33 @@ describe('DescriptionDialog', () => {
     renderDialog({ onPickImage: undefined })
 
     expect(screen.queryByRole('button', { name: /insérer une image/i })).not.toBeInTheDocument()
+  })
+
+  it('shows only the edge arrows for relations that actually exist', () => {
+    renderDialog({
+      parentTarget: { id: 'p', title: 'Chapitre 5' },
+      nextSibling: { id: 'n', title: 'Exercice 13' },
+      onNavigate: vi.fn(),
+    })
+
+    expect(screen.getByRole('button', { name: /aller à « chapitre 5 »/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /aller à « exercice 13 »/i })).toBeInTheDocument()
+    // No parent/child/previous-sibling target was given, so only these two exist.
+    expect(screen.queryAllByRole('button', { name: /aller à/i })).toHaveLength(2)
+  })
+
+  it('navigates to a neighbour, flushing the pending autosave first', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    const props = renderDialog({
+      nextSibling: { id: 'card-next', title: 'Exercice 13' },
+      onNavigate,
+    })
+
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' de plus')
+    await user.click(screen.getByRole('button', { name: /aller à « exercice 13 »/i }))
+
+    expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Une définition de plus' }])
+    expect(onNavigate).toHaveBeenCalledWith('card-next')
   })
 })

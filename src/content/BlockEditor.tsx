@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Type, Sigma, Table2, Plus, Trash2, ImagePlus, ChevronUp, ChevronDown } from 'lucide-react'
-import type { CardBlock, CardBlockKind } from '../types/cardBlock'
+import type { CardBlock, CardBlockKind, TableCell } from '../types/cardBlock'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle } from './MathFieldEditor'
 import { MathPalette } from './MathPalette'
@@ -22,6 +22,12 @@ const MODES: { kind: Exclude<CardBlockKind, 'image'>; icon: typeof Type; label: 
 /** The widths the image control offers, as a share of the definition's width. */
 const IMAGE_WIDTH_STEPS = [160, 240, 320, 480, 640] as const
 
+type TableBlock = Extract<CardBlock, { kind: 'table' }>
+
+function tableCellText(cell: TableCell): string {
+  return typeof cell === 'string' ? cell : cell.latex
+}
+
 /** The string a block carries, used to move content across a mode change. */
 function sourceOf(block: CardBlock): string {
   switch (block.kind) {
@@ -34,7 +40,7 @@ function sourceOf(block: CardBlock): string {
     case 'table':
       // Header included: dropping it loses a row of the user's data, and a
       // header is text like any other cell once flattened.
-      return [block.header, ...block.rows]
+      return [block.header, ...block.rows.map(row => row.map(tableCellText))]
         .filter(row => row.length > 0)
         .map(row => row.join('\t'))
         .join('\n')
@@ -102,6 +108,71 @@ export function resizeImageBlock(
   return { ...block, width, height: Math.max(1, Math.round(width * ratio)) }
 }
 
+/** Every row (and the header) squared to `count` columns, padding with `blank`. */
+function withColumns<T>(count: number, cells: T[], blank: T): T[] {
+  return Array.from({ length: count }, (_, i) => cells[i] ?? blank)
+}
+
+function tableColumnCount(block: TableBlock): number {
+  return Math.max(block.header.length, ...block.rows.map(row => row.length), 1)
+}
+
+/**
+ * The table's own pure edits, alongside `moveBlock`/`convertBlock` above.
+ *
+ * Exported so the side panel — which acts on "whichever block is active",
+ * not on a `TableField` instance it does not have a handle to — can call the
+ * exact same functions the table's own row/column buttons use.
+ */
+export function addTableRow(block: TableBlock, afterRow: number): TableBlock {
+  const cols = tableColumnCount(block)
+  const rows = [...block.rows]
+  rows.splice(afterRow + 1, 0, withColumns<TableCell>(cols, [], ''))
+  return { ...block, rows }
+}
+export function removeTableRow(block: TableBlock, rowIndex: number): TableBlock {
+  return block.rows.length <= 1 ? block : { ...block, rows: block.rows.filter((_, i) => i !== rowIndex) }
+}
+export function addTableColumn(block: TableBlock): TableBlock {
+  const cols = tableColumnCount(block) + 1
+  return {
+    ...block,
+    header: withColumns<string>(cols, block.header, ''),
+    rows: block.rows.map(row => withColumns<TableCell>(cols, row, '')),
+  }
+}
+export function removeTableColumn(block: TableBlock, cellIndex: number): TableBlock {
+  const cols = tableColumnCount(block)
+  if (cols <= 1) return block
+  return {
+    ...block,
+    header: withColumns<string>(cols, block.header, '').filter((_, i) => i !== cellIndex),
+    rows: block.rows.map(row => withColumns<TableCell>(cols, row, '').filter((_, i) => i !== cellIndex)),
+  }
+}
+export function setTableCell(block: TableBlock, rowIndex: number, cellIndex: number, cell: TableCell): TableBlock {
+  const cols = tableColumnCount(block)
+  return {
+    ...block,
+    rows: block.rows.map((row, i) =>
+      i === rowIndex
+        ? withColumns<TableCell>(cols, row, '').map((existing, j) => (j === cellIndex ? cell : existing))
+        : withColumns<TableCell>(cols, row, '')
+    ),
+  }
+}
+export function setTableHeaderCell(block: TableBlock, cellIndex: number, value: string): TableBlock {
+  const cols = tableColumnCount(block)
+  return { ...block, header: withColumns<string>(cols, block.header, '').map((c, i) => (i === cellIndex ? value : c)) }
+}
+/** Text ↔ formula for one cell, carrying its content across the same way `convertBlock` does. */
+export function toggleTableCellKind(block: TableBlock, rowIndex: number, cellIndex: number): TableBlock {
+  const cols = tableColumnCount(block)
+  const cell = withColumns<TableCell>(cols, block.rows[rowIndex] ?? [], '')[cellIndex] ?? ''
+  const next: TableCell = typeof cell === 'string' ? { latex: cell } : cell.latex
+  return setTableCell(block, rowIndex, cellIndex, next)
+}
+
 export interface BlockEditorProps {
   blocks: CardBlock[]
   onChange: (blocks: CardBlock[]) => void
@@ -137,11 +208,18 @@ export function BlockEditor({
   onError,
   autoFocusField = false,
 }: BlockEditorProps) {
-  // Which block the header's mode selector acts on. Kept here rather than
-  // derived from DOM focus so the selector still shows the right mode while
-  // the user is clicking the selector itself (which takes focus away).
+  // Which block the panel's tools act on. Kept here rather than derived from
+  // DOM focus so the panel still shows the right tools while the user is
+  // clicking the panel itself (which takes focus away from the block).
   const [activeIndex, setActiveIndex] = useState(0)
   const active = blocks[activeIndex] ?? blocks[blocks.length - 1]
+
+  // The active math block's live handle, so the panel's palette can insert
+  // into it. Every math block registers itself here on mount regardless of
+  // whether it is active — cheap, and it means the palette is ready the
+  // instant a block becomes active rather than one render late.
+  const [mathFields, setMathFields] = useState<Record<number, MathFieldHandle | null>>({})
+  const activeField = mathFields[activeIndex] ?? null
 
   // The special-character palette: which language it is helping with, and
   // whether it is showing at all. Local to the editor on purpose — it is a
@@ -150,11 +228,11 @@ export function BlockEditor({
   const [languageHelpOpen, setLanguageHelpOpen] = useState(false)
 
   const editorRef = useRef<HTMLDivElement>(null)
-  // Set by an insert, consumed by the effect below once the new text has been
-  // committed: a caret placed before that commit is thrown away with the old
-  // value, which is what made the palette's characters land but leave the
-  // cursor at the start of the field.
+  // Set by an insert or a new block, consumed by the effect below once the
+  // change has been committed and re-rendered: a caret placed before that
+  // commit is thrown away with the old value.
   const pendingCaret = useRef<{ index: number; position: number } | null>(null)
+  const pendingFocusSelector = useRef<string | null>(null)
 
   /** The text field of block `index`, looked up in the DOM it is rendered in. */
   function textFieldAt(index: number): HTMLTextAreaElement | null {
@@ -165,11 +243,18 @@ export function BlockEditor({
   // caused, and the ref makes every other run a no-op.
   useEffect(() => {
     const pending = pendingCaret.current
-    if (pending === null) return
-    pendingCaret.current = null
-    const field = textFieldAt(pending.index)
-    field?.focus()
-    field?.setSelectionRange(pending.position, pending.position)
+    if (pending !== null) {
+      pendingCaret.current = null
+      const field = textFieldAt(pending.index)
+      field?.focus()
+      field?.setSelectionRange(pending.position, pending.position)
+    }
+
+    const selector = pendingFocusSelector.current
+    if (selector !== null) {
+      pendingFocusSelector.current = null
+      editorRef.current?.querySelector<HTMLElement>(selector)?.focus()
+    }
   })
 
   useEffect(() => {
@@ -193,6 +278,22 @@ export function BlockEditor({
     onChange(blocks.map((existing, i) => (i === index ? block : existing)))
   }
 
+  /** Focuses the first field of block `index` once it exists in the DOM. */
+  function focusBlockLater(index: number) {
+    pendingFocusSelector.current =
+      `[data-row-index="${index}"] textarea, ` +
+      `[data-row-index="${index}"] input, ` +
+      `[data-row-index="${index}"] math-field, ` +
+      `[data-row-index="${index}"] [contenteditable="true"]`
+  }
+
+  /** A new block right after `index` — the shape every "Entrée" handler shares. */
+  function insertBlockAfter(index: number, block: CardBlock) {
+    onChange([...blocks.slice(0, index + 1), block, ...blocks.slice(index + 1)])
+    setActiveIndex(index + 1)
+    focusBlockLater(index + 1)
+  }
+
   // Read at call time, never from the closure: the native picker can stay open
   // for a minute while the user keeps typing, and appending to the block list
   // as it was when the dialog opened would revert everything typed since.
@@ -203,6 +304,7 @@ export function BlockEditor({
     const current = blocksRef.current
     onChange([...current, block])
     setActiveIndex(current.length)
+    focusBlockLater(current.length)
   }
 
   /** Shared by paste, drop and the picker: one place decides what a failure looks like. */
@@ -277,192 +379,264 @@ export function BlockEditor({
     )
   }
 
-  function removeAt(index: number) {
+  function removeActive() {
+    if (blocks.length <= 1) return
+    const index = activeIndex
     onChange(blocks.filter((_, i) => i !== index))
     setActiveIndex(current => Math.max(0, current - (index <= current ? 1 : 0)))
   }
 
   /** Keeps the moved block selected, so a run of clicks walks it up the list. */
-  function move(index: number, to: number) {
-    const next = moveBlock(blocks, index, to)
+  function move(to: number) {
+    const next = moveBlock(blocks, activeIndex, to)
     if (next === blocks) return
     onChange(next)
     setActiveIndex(to)
   }
 
+  function setActiveMathField(index: number, handle: MathFieldHandle | null) {
+    setMathFields(prev => (prev[index] === handle ? prev : { ...prev, [index]: handle }))
+  }
+
+  // One stable callback per index, cached rather than built fresh in the
+  // `.map()` below. `ref` props are re-invoked (detach then attach) whenever
+  // their OWN identity changes, not just when the underlying instance does —
+  // a fresh arrow function on every render would detach-and-reattach on every
+  // render, which calls `setActiveMathField`, which re-renders `BlockEditor`,
+  // which makes a fresh arrow function again: an infinite loop, not a subtle
+  // slowdown.
+  const fieldSetters = useRef(new Map<number, (handle: MathFieldHandle | null) => void>())
+  function fieldSetterFor(index: number): (handle: MathFieldHandle | null) => void {
+    let setter = fieldSetters.current.get(index)
+    if (setter === undefined) {
+      setter = handle => setActiveMathField(index, handle)
+      fieldSetters.current.set(index, setter)
+    }
+    return setter
+  }
+
   return (
     <div
       ref={editorRef}
-      style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
+      style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 280px', gap: 16, height: '100%', minHeight: 0 }}
       onPaste={handlePaste}
     >
-      {/* A row of its own, of fixed height, so CHANGING mode never moves the
-          content below it (règle anti-décalage 8). */}
-      <div
-        role="group"
-        aria-label="Mode de saisie"
-        style={{
-          display: 'flex',
-          gap: 4,
-          alignItems: 'center',
-          paddingBottom: 8,
-          borderBottom: '1px solid var(--border)',
-        }}
-      >
-        {MODES.map(({ kind, icon: Icon, label }) => {
-          const selected = active?.kind === kind
-          return (
-            <button
-              key={kind}
-              type="button"
-              aria-label={label}
-              aria-pressed={selected}
-              // An image block has no text form to convert to, so the selector
-              // is inert on one rather than silently dropping the picture.
-              disabled={active?.kind === 'image'}
-              onClick={() => {
-                if (blocks.length === 0) onChange([convertBlock({ kind: 'text', text: '' }, kind)])
-                else replace(activeIndex, convertBlock(blocks[activeIndex], kind))
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '5px 10px',
-                fontSize: 13,
-                borderRadius: 6,
-                cursor: 'pointer',
-                border: '1px solid var(--border)',
-                background: selected ? 'var(--accent, rgba(0,0,0,0.08))' : 'transparent',
-                color: 'inherit',
-                opacity: active?.kind === 'image' ? 0.4 : 1,
-              }}
-            >
-              <Icon size={14} />
-              {label}
-            </button>
-          )
-        })}
-        {onPickImage !== undefined && (
-          <button
-            type="button"
-            aria-label="Insérer une image"
-            onClick={() => insert(onPickImage)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', paddingRight: 2 }}>
+        {blocks.map((block, index) => (
+          <div
+            key={index}
+            data-row-index={index}
+            onFocus={() => setActiveIndex(index)}
+            onMouseDown={() => setActiveIndex(index)}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '5px 10px',
-              fontSize: 13,
-              borderRadius: 6,
-              cursor: 'pointer',
-              border: '1px solid var(--border)',
-              background: 'transparent',
-              color: 'inherit',
+              padding: '10px 12px',
+              borderRadius: 8,
+              border: `1px solid ${index === activeIndex ? 'var(--accent, currentColor)' : 'var(--border)'}`,
+              borderLeft: `3px solid ${index === activeIndex ? 'var(--accent, currentColor)' : 'var(--border)'}`,
+              background:
+                index === activeIndex ? 'color-mix(in oklch, var(--border), transparent 85%)' : 'transparent',
             }}
           >
-            <ImagePlus size={14} />
-            Image
-          </button>
-        )}
-
-        {/* The keyboard help for a language course: the accents and inverted
-            punctuation a French keyboard cannot produce. In the mode row
-            because it is one more writing tool, next to the maths palette the
-            formula block already has. */}
-        <LanguageHelpButton
-          language={language}
-          open={languageHelpOpen}
-          disabled={languageTargetIndex < 0}
-          onToggle={() => setLanguageHelpOpen(open => !open)}
-        />
-      </div>
-
-      {/* Below the mode row rather than floating over the description: it stays
-          open while several characters are inserted, and a popover would cover
-          the very sentence being written. */}
-      {languageHelpOpen && (
-        <LanguageHelpPanel language={language} onChooseLanguage={setLanguage} onInsert={insertText} />
-      )}
-
-      {blocks.map((block, index) => (
-        <div
-          key={index}
-          style={{
-            display: 'flex',
-            gap: 6,
-            alignItems: 'flex-start',
-            padding: 6,
-            borderRadius: 6,
-            border: `1px solid ${index === activeIndex ? 'var(--border)' : 'transparent'}`,
-            background: index === activeIndex ? 'color-mix(in oklch, var(--border), transparent 80%)' : 'transparent',
-          }}
-        >
-          {/* Reordering is a permanent gutter rather than a drag handle: a
-              definition is a short list read top to bottom, and two buttons
-              are reachable by keyboard, which a drag never is. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 2 }}>
-            <IconButton
-              label={`Monter le bloc ${index + 1}`}
-              disabled={index === 0}
-              onClick={() => move(index, index - 1)}
-            >
-              <ChevronUp size={13} />
-            </IconButton>
-            <IconButton
-              label={`Descendre le bloc ${index + 1}`}
-              disabled={index === blocks.length - 1}
-              onClick={() => move(index, index + 1)}
-            >
-              <ChevronDown size={13} />
-            </IconButton>
-          </div>
-
-          <div style={{ flex: 1, minWidth: 0 }} onFocus={() => setActiveIndex(index)}>
             <BlockField
               block={block}
               index={index}
-              isActive={index === activeIndex}
               resolveAsset={resolveAsset}
               onChange={next => replace(index, next)}
+              onEnterBlock={() => insertBlockAfter(index, { kind: 'text', text: '' })}
+              onFieldChange={fieldSetterFor(index)}
             />
           </div>
+        ))}
 
-          {blocks.length > 1 && (
-            <IconButton label={`Supprimer le bloc ${index + 1}`} onClick={() => removeAt(index)}>
-              <Trash2 size={13} />
-            </IconButton>
-          )}
-        </div>
-      ))}
+        {/* A permanent gutter, never a toolbar revealed on hover: a control that
+            appears on hover shifts whatever sits under it (règle 7). */}
+        <button
+          type="button"
+          aria-label="Ajouter un bloc"
+          onClick={() => append({ kind: 'text', text: '' })}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            padding: '6px 0',
+            fontSize: 12,
+            opacity: 0.55,
+            border: '1px dashed var(--border)',
+            borderRadius: 6,
+            background: 'none',
+            color: 'inherit',
+            cursor: 'pointer',
+          }}
+        >
+          <Plus size={13} />
+        </button>
+      </div>
 
-      {/* A permanent gutter, never a toolbar revealed on hover: a control that
-          appears on hover shifts whatever sits under it (règle 7). */}
-      <button
-        type="button"
-        aria-label="Ajouter un bloc"
-        onClick={() => {
-          onChange([...blocks, { kind: 'text', text: '' }])
-          setActiveIndex(blocks.length)
-        }}
+      <aside
+        aria-label="Actions du bloc en cours"
         style={{
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 6,
-          padding: '6px 0',
-          fontSize: 12,
-          opacity: 0.55,
-          border: '1px dashed var(--border)',
-          borderRadius: 6,
-          background: 'none',
-          color: 'inherit',
-          cursor: 'pointer',
+          flexDirection: 'column',
+          gap: 14,
+          overflowY: 'auto',
+          paddingLeft: 14,
+          borderLeft: '1px solid var(--border)',
         }}
       >
-        <Plus size={13} />
-      </button>
+        <div role="group" aria-label="Mode de saisie" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {MODES.map(({ kind, icon: Icon, label }) => {
+              const selected = active?.kind === kind
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  aria-label={label}
+                  aria-pressed={selected}
+                  // An image block has no text form to convert to, so the selector
+                  // is inert on one rather than silently dropping the picture.
+                  disabled={active?.kind === 'image'}
+                  onClick={() => {
+                    if (blocks.length === 0) onChange([convertBlock({ kind: 'text', text: '' }, kind)])
+                    else replace(activeIndex, convertBlock(blocks[activeIndex], kind))
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '5px 10px',
+                    fontSize: 13,
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    border: '1px solid var(--border)',
+                    background: selected ? 'var(--accent, rgba(0,0,0,0.08))' : 'transparent',
+                    color: 'inherit',
+                    opacity: active?.kind === 'image' ? 0.4 : 1,
+                  }}
+                >
+                  <Icon size={14} />
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <IconButton label="Monter le bloc en cours" disabled={activeIndex === 0} onClick={() => move(activeIndex - 1)}>
+              <ChevronUp size={14} />
+            </IconButton>
+            <IconButton
+              label="Descendre le bloc en cours"
+              disabled={activeIndex === blocks.length - 1}
+              onClick={() => move(activeIndex + 1)}
+            >
+              <ChevronDown size={14} />
+            </IconButton>
+            {blocks.length > 1 && (
+              <IconButton label={`Supprimer le bloc ${activeIndex + 1}`} onClick={removeActive}>
+                <Trash2 size={14} />
+              </IconButton>
+            )}
+            {onPickImage !== undefined && (
+              <IconButton label="Insérer une image" onClick={() => insert(onPickImage)}>
+                <ImagePlus size={14} />
+              </IconButton>
+            )}
+          </div>
+        </div>
+
+        {/* Reordering has moved from a per-row gutter to these two buttons: with
+            the block itself now the thing that is highlighted, "move" reads as
+            an action on the current block rather than on a specific row. */}
+        {active?.kind === 'math' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <SectionLabel>Structures et symboles</SectionLabel>
+            <MathPalette field={activeField} />
+          </div>
+        )}
+
+        {active?.kind === 'table' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <SectionLabel>Tableau</SectionLabel>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <SmallButton
+                label="Ajouter une ligne"
+                onClick={() => replace(activeIndex, addTableRow(active as TableBlock, (active as TableBlock).rows.length - 1))}
+              />
+              <SmallButton label="Ajouter une colonne" onClick={() => replace(activeIndex, addTableColumn(active as TableBlock))} />
+            </div>
+            <p style={{ margin: 0, fontSize: 12, opacity: 0.65, lineHeight: 1.4 }}>
+              Chaque cellule bascule texte ↔ formule avec le bouton « fx » à côté d’elle. La colonne la plus longue
+              impose sa largeur.
+            </p>
+          </div>
+        )}
+
+        {/* Reachable regardless of the active block's kind — switching to a
+            formula or a table must not hide the only way back to the language
+            palette when the description also has prose in it. Disabled, never
+            hidden, when there is no text block anywhere to insert into. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <SectionLabel>Caractères spéciaux</SectionLabel>
+          <LanguageHelpButton
+            language={language}
+            open={languageHelpOpen}
+            disabled={languageTargetIndex < 0}
+            onToggle={() => setLanguageHelpOpen(open => !open)}
+          />
+          {languageHelpOpen && (
+            <LanguageHelpPanel language={language} onChooseLanguage={setLanguage} onInsert={insertText} />
+          )}
+        </div>
+
+        <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 10 }}>
+          <SectionLabel>Raccourcis</SectionLabel>
+          <ShortcutRow keys="Entrée" label="Nouveau bloc" />
+          <ShortcutRow keys="Maj + Entrée" label="Retour à la ligne" />
+          <ShortcutRow keys="Ctrl/Cmd + Z" label="Annuler" />
+          <ShortcutRow keys="Ctrl/Cmd + Maj + Z" label="Rétablir" />
+        </div>
+      </aside>
     </div>
+  )
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p style={{ margin: 0, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.6 }}>
+      {children}
+    </p>
+  )
+}
+
+function ShortcutRow({ keys, label }: { keys: string; label: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, opacity: 0.7 }}>
+      <span>{label}</span>
+      <kbd style={{ font: 'inherit', border: '1px solid var(--border)', borderRadius: 4, padding: '0 5px' }}>{keys}</kbd>
+    </div>
+  )
+}
+
+function SmallButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      style={{
+        fontSize: 12,
+        padding: '4px 10px',
+        cursor: 'pointer',
+        background: 'none',
+        border: '1px solid var(--border)',
+        borderRadius: 999,
+        color: 'inherit',
+      }}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -488,14 +662,14 @@ function IconButton({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 20,
-        height: 20,
+        width: 26,
+        height: 26,
         padding: 0,
-        borderRadius: 4,
+        borderRadius: 6,
         background: 'none',
-        border: 'none',
+        border: '1px solid var(--border)',
         color: 'inherit',
-        opacity: disabled ? 0.25 : 0.6,
+        opacity: disabled ? 0.3 : 0.75,
         cursor: disabled ? 'default' : 'pointer',
       }}
     >
@@ -507,10 +681,12 @@ function IconButton({
 interface BlockFieldProps {
   block: CardBlock
   index: number
-  /** Drives the per-block tooling that would be noise on every block at once. */
-  isActive: boolean
   resolveAsset: (asset: string) => string
   onChange: (block: CardBlock) => void
+  /** Plain Enter anywhere in the block — inserts a new block right after this one. */
+  onEnterBlock: () => void
+  /** Reports the block's live math handle, for the side panel's palette. Called with `null` when the block is not a formula (or unmounts as one). */
+  onFieldChange: (handle: MathFieldHandle | null) => void
 }
 
 const FIELD_STYLE = {
@@ -525,7 +701,7 @@ const FIELD_STYLE = {
   color: 'inherit',
 }
 
-function BlockField({ block, index, isActive, resolveAsset, onChange }: BlockFieldProps) {
+function BlockField({ block, index, resolveAsset, onChange, onEnterBlock, onFieldChange }: BlockFieldProps) {
   switch (block.kind) {
     case 'text':
       return (
@@ -550,12 +726,17 @@ function BlockField({ block, index, isActive, resolveAsset, onChange }: BlockFie
             }
             onChange({ kind: 'text', text })
           }}
+          onKeyDown={event => {
+            if (event.key !== 'Enter' || event.shiftKey) return
+            event.preventDefault()
+            onEnterBlock()
+          }}
           style={{ ...FIELD_STYLE, minHeight: 72, resize: 'vertical' }}
         />
       )
 
     case 'math':
-      return <MathBlockField block={block} index={index} isActive={isActive} onChange={onChange} />
+      return <MathBlockField block={block} index={index} onChange={onChange} onEnterBlock={onEnterBlock} onFieldChange={onFieldChange} />
 
     case 'image':
       return <ImageBlockField block={block} index={index} resolveAsset={resolveAsset} onChange={onChange} />
@@ -568,29 +749,29 @@ function BlockField({ block, index, isActive, resolveAsset, onChange }: BlockFie
 function MathBlockField({
   block,
   index,
-  isActive,
   onChange,
+  onEnterBlock,
+  onFieldChange,
 }: {
   block: Extract<CardBlock, { kind: 'math' }>
   index: number
-  isActive: boolean
   onChange: (block: CardBlock) => void
+  onEnterBlock: () => void
+  onFieldChange: (handle: MathFieldHandle | null) => void
 }) {
-  // Held in state, not a ref: the palette must re-render once the handle
-  // exists, and a ref assignment alone would leave its buttons disabled until
-  // something else happened to re-render.
-  const [field, setField] = useState<MathFieldHandle | null>(null)
-
   return (
     <div>
       {/* WYSIWYG when MathLive is available, the raw LaTeX field until
           then — and permanently if it never loads. Both edit the same
           string, so neither is a dead end: someone who knows LaTeX can
-          still type it, and someone who does not never has to. */}
+          still type it, and someone who does not never has to. Its live
+          handle is reported up so the side panel's palette — shown only
+          for the block currently being worked on — can insert into it. */}
       <MathFieldEditor
-        ref={setField}
+        ref={onFieldChange}
         latex={block.latex}
         onChange={latex => onChange({ ...block, latex })}
+        onEnter={onEnterBlock}
         ariaLabel={`Formule du bloc ${index + 1}`}
         fallback={
           <textarea
@@ -600,38 +781,24 @@ function MathBlockField({
             aria-label={`Formule du bloc ${index + 1} (LaTeX)`}
             value={block.latex}
             onChange={event => onChange({ ...block, latex: event.target.value })}
+            onKeyDown={event => {
+              if (event.key !== 'Enter' || event.shiftKey) return
+              event.preventDefault()
+              onEnterBlock()
+            }}
             spellCheck={false}
             style={{ ...FIELD_STYLE, minHeight: 44, resize: 'vertical', fontFamily: 'monospace', fontSize: 13 }}
           />
         }
       />
 
-      {/* Only under the block being edited. Showing every formula's palette at
-          once would put three identical toolbars on screen and bury the
-          formulas between them. */}
-      {isActive && (
-        <div style={{ padding: '6px 0' }}>
-          <MathPalette field={field} />
-        </div>
-      )}
-
-      {/* Live preview, rendered synchronously so it cannot reflow after
-          paint. It is what makes raw LaTeX usable at all until MathLive
-          lands on top of this same block. */}
+      {/* Every formula is its own block, hence its own line — always
+          typeset centred, the way `BlockView` renders it. */}
       <div
         data-testid={`math-preview-${index}`}
         style={{ minHeight: 24, padding: '2px 0', overflowX: 'auto' }}
-        dangerouslySetInnerHTML={{ __html: renderMathToHtml(block.latex, false) }}
+        dangerouslySetInnerHTML={{ __html: renderMathToHtml(block.latex, true) }}
       />
-
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: 0.75 }}>
-        <input
-          type="checkbox"
-          checked={block.display === true}
-          onChange={event => onChange({ ...block, display: event.target.checked })}
-        />
-        Formule centrée sur sa propre ligne
-      </label>
     </div>
   )
 }
@@ -728,85 +895,148 @@ function TableField({
   index,
   onChange,
 }: {
-  block: Extract<CardBlock, { kind: 'table' }>
+  block: TableBlock
   index: number
   onChange: (block: CardBlock) => void
 }) {
-  const columnCount = Math.max(block.header.length, ...block.rows.map(row => row.length), 1)
-
-  /** Every row keeps the same length as the header — a ragged table renders wrong. */
-  function withColumns(count: number, cells: string[]): string[] {
-    return Array.from({ length: count }, (_, i) => cells[i] ?? '')
-  }
-
-  /** `rowIndex === -1` addresses the header row, which is displayed above the body. */
-  function setCell(rowIndex: number, cellIndex: number, value: string) {
-    const edited = (cells: string[]) =>
-      withColumns(columnCount, cells).map((cell, i) => (i === cellIndex ? value : cell))
-
-    if (rowIndex === -1) {
-      onChange({ ...block, header: edited(block.header) })
-      return
-    }
-    // Every row is squared to the current width on the way through, so a
-    // ragged table arriving from a file cannot stay ragged once touched.
-    onChange({
-      ...block,
-      rows: block.rows.map((row, i) => (i === rowIndex ? edited(row) : withColumns(columnCount, row))),
-    })
-  }
+  const columnCount = tableColumnCount(block)
+  const headerCells = withColumns<string>(columnCount, block.header, '')
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+        <thead>
+          <tr>
+            <th style={{ width: 18 }} />
+            {headerCells.map((cell, cellIndex) => (
+              <th key={cellIndex} style={{ padding: 1, position: 'relative' }}>
+                <input
+                  aria-label={`En-tête ${cellIndex + 1} du tableau ${index + 1}`}
+                  value={cell}
+                  onChange={event => onChange(setTableHeaderCell(block, cellIndex, event.target.value))}
+                  style={{ ...FIELD_STYLE, fontSize: 13, fontWeight: 600 }}
+                />
+                {columnCount > 1 && (
+                  <IconButton
+                    label={`Supprimer la colonne ${cellIndex + 1} du tableau ${index + 1}`}
+                    onClick={() => onChange(removeTableColumn(block, cellIndex))}
+                  >
+                    <Trash2 size={11} />
+                  </IconButton>
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
         <tbody>
-          {[block.header, ...block.rows].map((row, displayIndex) => {
-            const rowIndex = displayIndex - 1
+          {block.rows.map((row, rowIndex) => {
+            const cells = withColumns<TableCell>(columnCount, row, '')
             return (
-              <tr key={displayIndex}>
-                {withColumns(columnCount, row).map((cell, cellIndex) => (
-                  <td key={cellIndex} style={{ padding: 1 }}>
-                    <input
-                      aria-label={
-                        rowIndex === -1
-                          ? `En-tête ${cellIndex + 1} du tableau ${index + 1}`
-                          : `Ligne ${rowIndex + 1} colonne ${cellIndex + 1} du tableau ${index + 1}`
-                      }
-                      value={cell}
-                      onChange={event => setCell(rowIndex, cellIndex, event.target.value)}
-                      style={{ ...FIELD_STYLE, fontSize: 13, fontWeight: rowIndex === -1 ? 600 : 400 }}
-                    />
-                  </td>
+              <tr key={rowIndex} data-table-row={rowIndex}>
+                <td style={{ padding: 1, verticalAlign: 'top' }}>
+                  {block.rows.length > 1 && (
+                    <IconButton
+                      label={`Supprimer la ligne ${rowIndex + 1} du tableau ${index + 1}`}
+                      onClick={() => onChange(removeTableRow(block, rowIndex))}
+                    >
+                      <Trash2 size={11} />
+                    </IconButton>
+                  )}
+                </td>
+                {cells.map((cell, cellIndex) => (
+                  <TableCellField
+                    key={cellIndex}
+                    cell={cell}
+                    label={`Ligne ${rowIndex + 1} colonne ${cellIndex + 1} du tableau ${index + 1}`}
+                    onChange={next => onChange(setTableCell(block, rowIndex, cellIndex, next))}
+                    onToggleKind={() => onChange(toggleTableCellKind(block, rowIndex, cellIndex))}
+                    onEnter={() => onChange(addTableRow(block, rowIndex))}
+                  />
                 ))}
               </tr>
             )
           })}
         </tbody>
       </table>
-      <div style={{ display: 'flex', gap: 4 }}>
-        <button
-          type="button"
-          aria-label="Ajouter une ligne"
-          onClick={() => onChange({ ...block, rows: [...block.rows, withColumns(columnCount, [])] })}
-          style={{ fontSize: 12, padding: '2px 8px', cursor: 'pointer', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'inherit' }}
-        >
-          + ligne
-        </button>
-        <button
-          type="button"
-          aria-label="Ajouter une colonne"
-          onClick={() =>
-            onChange({
-              ...block,
-              header: withColumns(columnCount + 1, block.header),
-              rows: block.rows.map(row => withColumns(columnCount + 1, row)),
-            })
-          }
-          style={{ fontSize: 12, padding: '2px 8px', cursor: 'pointer', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'inherit' }}
-        >
-          + colonne
-        </button>
-      </div>
     </div>
+  )
+}
+
+/** One table cell, in either of its two modes. */
+function TableCellField({
+  cell,
+  label,
+  onChange,
+  onToggleKind,
+  onEnter,
+}: {
+  cell: TableCell
+  label: string
+  onChange: (cell: TableCell) => void
+  onToggleKind: () => void
+  onEnter: () => void
+}) {
+  const isMath = typeof cell !== 'string'
+  return (
+    <td style={{ padding: 1, position: 'relative' }}>
+      {isMath ? (
+        <MathFieldEditor
+          ref={() => {}}
+          latex={cell.latex}
+          onChange={latex => onChange({ latex })}
+          onEnter={onEnter}
+          ariaLabel={label}
+          fallback={
+            <input
+              aria-label={`${label} (LaTeX)`}
+              value={cell.latex}
+              onChange={event => onChange({ latex: event.target.value })}
+              onKeyDown={event => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                onEnter()
+              }}
+              spellCheck={false}
+              style={{ ...FIELD_STYLE, fontSize: 13, fontFamily: 'monospace' }}
+            />
+          }
+        />
+      ) : (
+        <input
+          aria-label={label}
+          value={cell}
+          onChange={event => onChange(event.target.value)}
+          onKeyDown={event => {
+            if (event.key !== 'Enter') return
+            event.preventDefault()
+            onEnter()
+          }}
+          style={{ ...FIELD_STYLE, fontSize: 13 }}
+        />
+      )}
+      <button
+        type="button"
+        aria-label={isMath ? `Passer « ${label} » en texte` : `Passer « ${label} » en formule`}
+        title={isMath ? 'Passer en texte' : 'Passer en formule'}
+        onClick={onToggleKind}
+        style={{
+          position: 'absolute',
+          top: -7,
+          right: -2,
+          fontSize: 9,
+          fontWeight: 700,
+          lineHeight: 1,
+          padding: '2px 4px',
+          borderRadius: 999,
+          border: '1px solid var(--border)',
+          background: 'var(--background)',
+          color: 'inherit',
+          opacity: 0.7,
+          cursor: 'pointer',
+        }}
+      >
+        {isMath ? 'Aa' : 'fx'}
+      </button>
+    </td>
   )
 }
