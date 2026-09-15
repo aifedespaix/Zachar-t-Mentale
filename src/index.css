@@ -269,6 +269,41 @@
 }
 
 /*
+ * The drag handle and the options button both wear their card's own level
+ * colour as `color` (set inline), so a shared `currentColor` background tint
+ * on hover is what makes either one read as "you're about to grab/open this"
+ * without hard-coding a colour here that would drift from the level palette.
+ */
+.card-drag-handle,
+.card-options-btn {
+  transition: background-color 120ms ease;
+}
+.card-drag-handle:hover:not([aria-disabled="true"]),
+.card-options-btn:hover {
+  background-color: color-mix(in oklch, currentColor, transparent 82%);
+}
+
+/*
+ * The description dialog's title field, styled like the card it edits (same
+ * border/background, set inline via `--chip-accent`) so the dialog reads as
+ * "this card, opened up" rather than a generic form. The pencil only shows up
+ * once the chip is actually interactive — a read-only chip (no card to write
+ * back to) never implies it can be clicked.
+ */
+.description-dialog-title-chip.is-editable:hover,
+.description-dialog-title-chip.is-editable:focus-within {
+  background-color: color-mix(in oklch, var(--chip-accent), transparent 88%);
+}
+.description-dialog-title-chip .title-chip-pencil {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.description-dialog-title-chip.is-editable:hover .title-chip-pencil,
+.description-dialog-title-chip.is-editable:focus-within .title-chip-pencil {
+  opacity: 0.55;
+}
+
+/*
  * The view dock in the bottom-right corner: the zoom / 100 % / fit commands
  * stacked directly over the minimap. They are one flex column, so the buttons
  * always sit exactly above the map whatever its height, rather than two

@@ -15,7 +15,6 @@ import {
   PenLine,
   Plus,
   Scissors,
-  Sparkles,
   Trash2,
   Unlink,
 } from 'lucide-react'
@@ -90,7 +89,6 @@ export function CardContextMenu({ cardId, disabled = false, children }: CardCont
 
         <CommandMenuItem command="card.openFiche" icon={BookOpen} label="Ouvrir la fiche" />
         <CommandMenuItem command="card.editDescription" icon={FileText} label="Modifier la description" />
-        <CommandMenuItem command="card.pickIcon" icon={Sparkles} label="Choisir une icône" />
         <ContextMenuSeparator />
 
         <CommandMenuItem command="edit.copy" icon={Copy} label="Copier" />

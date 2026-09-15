@@ -36,7 +36,6 @@ describe('CardDetailPanel — survol croisé carte ↔ fiche', () => {
     localStorage.clear()
     resetStore([root, branch, leaf, bare])
     useCardDetailStore.getState().closeAll()
-    useCardDetailStore.setState({ stackMode: true })
     useCardHoverStore.getState().reset()
   })
 

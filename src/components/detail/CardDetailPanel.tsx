@@ -10,12 +10,9 @@ import {
   ChevronDown,
   ChevronRight,
   Eraser,
-  Layers,
   PanelRightClose,
   PanelRightOpen,
   Pencil,
-  Pin,
-  PinOff,
   Plus,
   Search,
   Trash2,
@@ -76,43 +73,32 @@ const KEYBOARD_RESIZE_STEP = 16
  * canvas goes back to being what it is: a title and a place in the tree.
  *
  * Several fiches can be open at once, which is the point: comparing two or
- * three cards is how a revision actually goes. Only one of them is a PREVIEW
- * (replaced by the next card opened); the others were pinned deliberately.
+ * three cards is how a revision actually goes — the panel is always a stack,
+ * every fiche opened joins the others rather than replacing one.
  */
 /**
- * The two panel-wide commands — mode pile and « vider la liste ».
+ * The one panel-wide command — « tout fermer ».
  *
  * Rendered in the panel's own context menu AND in each fiche's, because a
  * right-click on a fiche is still a right-click in the panel: the fiche's menu
- * adds its card-specific actions on top, it does not replace these.
+ * adds its card-specific actions on top, it does not replace this one.
  */
 function PanelMenuCommands() {
-  const stackMode = useCardDetailStore(s => s.stackMode)
-  const toggleStackMode = useCardDetailStore(s => s.toggleStackMode)
-  const clearUnpinned = useCardDetailStore(s => s.clearUnpinned)
+  const closeAll = useCardDetailStore(s => s.closeAll)
   return (
-    <>
-      <ContextMenuItem onSelect={toggleStackMode}>
-        <Layers size={14} /> {stackMode ? 'Désactiver le mode pile' : 'Activer le mode pile'}
-      </ContextMenuItem>
-      <ContextMenuItem onSelect={clearUnpinned}>
-        <Eraser size={14} /> Vider la liste
-      </ContextMenuItem>
-    </>
+    <ContextMenuItem onSelect={closeAll}>
+      <Eraser size={14} /> Tout fermer
+    </ContextMenuItem>
   )
 }
 
 export function CardDetailPanel() {
   const openEntries = useCardDetailStore(s => s.open)
   const editingCardId = useCardDetailStore(s => s.editingCardId)
-  const stackMode = useCardDetailStore(s => s.stackMode)
-  const pin = useCardDetailStore(s => s.pin)
-  const unpin = useCardDetailStore(s => s.unpin)
   const close = useCardDetailStore(s => s.close)
   const toggleCollapsed = useCardDetailStore(s => s.toggleCollapsed)
   const setEditing = useCardDetailStore(s => s.setEditing)
-  const toggleStackMode = useCardDetailStore(s => s.toggleStackMode)
-  const clearUnpinned = useCardDetailStore(s => s.clearUnpinned)
+  const closeAll = useCardDetailStore(s => s.closeAll)
   const cards = useCardsStore(s => s.history.present)
 
   const [width, setWidth] = useState(loadCardDetailWidth)
@@ -293,8 +279,8 @@ export function CardDetailPanel() {
 
   /**
    * The search is a VIEW over the open fiches, never a mutation of them: it
-   * never touches `collapsed` or `pinned`, so a fiche that only matches
-   * through its description stays exactly as folded as it was.
+   * never touches `collapsed`, so a fiche that only matches through its
+   * description stays exactly as folded as it was.
    */
   const query = search.trim()
   const searching = query !== ''
@@ -409,10 +395,7 @@ export function CardDetailPanel() {
                     key={entry.cardId}
                     card={card}
                     cards={cards}
-                    pinned={entry.pinned}
                     collapsed={entry.collapsed}
-                    onPin={() => pin(card.id)}
-                    onUnpin={() => unpin(card.id)}
                     onClose={() => close(card.id)}
                     onToggleCollapsed={() => toggleCollapsed(card.id)}
                     onEdit={() => setEditing(card.id)}
@@ -446,35 +429,13 @@ export function CardDetailPanel() {
               <span className="toolbar-separator" aria-hidden />
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant={stackMode ? 'secondary' : 'ghost'}
-                    size="icon-sm"
-                    aria-label={stackMode ? 'Désactiver le mode pile' : 'Activer le mode pile'}
-                    aria-pressed={stackMode}
-                    onClick={toggleStackMode}
-                  >
-                    <Layers size={16} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {stackMode ? 'Désactiver le mode pile' : 'Activer le mode pile'}
-                  <span style={{ opacity: 0.7, marginLeft: 8 }}>Une fiche reste affichée quand une autre s’ouvre</span>
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Vider la liste des fiches"
-                    onClick={clearUnpinned}
-                  >
+                  <Button variant="ghost" size="icon-sm" aria-label="Tout fermer" onClick={closeAll}>
                     <Eraser size={16} />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  Vider la liste
-                  <span style={{ opacity: 0.7, marginLeft: 8 }}>Ferme toutes les fiches non épinglées</span>
+                  Tout fermer
+                  <span style={{ opacity: 0.7, marginLeft: 8 }}>Ferme toutes les fiches ouvertes</span>
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -498,10 +459,7 @@ export function CardDetailPanel() {
 function CardFiche({
   card,
   cards,
-  pinned,
   collapsed,
-  onPin,
-  onUnpin,
   onClose,
   onToggleCollapsed,
   onEdit,
@@ -509,10 +467,7 @@ function CardFiche({
 }: {
   card: Card
   cards: Card[]
-  pinned: boolean
   collapsed: boolean
-  onPin: () => void
-  onUnpin: () => void
   onClose: () => void
   onToggleCollapsed: () => void
   onEdit: () => void
@@ -635,33 +590,6 @@ function CardFiche({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={
-                    pinned
-                      ? `Désépingler la fiche de ${card.title}`
-                      : `Épingler la fiche de ${card.title}`
-                  }
-                  // Pinned reads as "belongs to this branch", so it borrows the
-                  // fiche's own level colour (the same one on the left band)
-                  // rather than a generic accent — a glance down the panel
-                  // tells which pins came from which colour without reading
-                  // the breadcrumb.
-                  style={pinned ? { color: toCss(colors.border) } : undefined}
-                  onClick={pinned ? onUnpin : onPin}
-                >
-                  <Pin />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {pinned
-                  ? 'Désépingler : la fiche redevient un aperçu'
-                  : 'Épingler : la fiche reste ouverte quand une autre est consultée'}
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
                   aria-label={`Fermer la fiche de ${card.title}`}
                   onClick={onClose}
                 >
@@ -734,9 +662,6 @@ function CardFiche({
             <Trash2 size={14} /> Supprimer
           </ContextMenuItem>
         )}
-        <ContextMenuItem onSelect={pinned ? onUnpin : onPin}>
-          {pinned ? <PinOff size={14} /> : <Pin size={14} />} {pinned ? 'Désépingler' : 'Épingler'}
-        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )
@@ -751,12 +676,17 @@ function CardFiche({
  */
 function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onClose: () => void }) {
   const updateContent = useCardsStore(s => s.updateContent)
+  const updateTitle = useCardsStore(s => s.updateTitle)
   // A description written from the editor joins the panel immediately: the
   // card had nothing to read a second ago, so nothing was opened for it, and
   // saving it is exactly the moment the fiche becomes worth showing.
   const show = useCardDetailStore(s => s.show)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
+  const theme = useResolvedTheme()
+  const level = clampCardLevel(card.level)
+  const levelAppearance = useAppearanceSettingsStore(s => s.levels[level])
+  const colors = card.detached === true ? detachedColors[theme] : levelAppearance.color[theme]
 
   return (
     <DescriptionDialog
@@ -768,6 +698,11 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
         if (blocks.length > 0) show(card.id)
       }}
       onClose={onClose}
+      // The dialog's title field mirrors the card's own — same colours, same
+      // rename — so "the biggest, most present place to work on this card" is
+      // recognisably the same card, not a bare form.
+      onRenameTitle={title => updateTitle(card.id, title)}
+      titleColors={{ bg: toCss(colors.bg), border: toCss(colors.border), text: toCss(colors.text) }}
       resolveAsset={currentFilePath === null ? () => '' : asset => assetSrc(currentFilePath, asset)}
       // Gated on there being an open file: assets live in a sidecar named
       // after it, so with none there is nowhere to store one and the

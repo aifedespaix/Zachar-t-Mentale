@@ -42,7 +42,6 @@ describe('CardDetailPanel', () => {
     localStorage.clear()
     resetStore([root, branch, leaf, bare])
     useCardDetailStore.getState().closeAll()
-    useCardDetailStore.setState({ stackMode: true })
   })
 
   it('renders nothing at all when no fiche is open', () => {
@@ -107,20 +106,6 @@ describe('CardDetailPanel', () => {
     // Reading still works — that is the whole point of a separate panel.
     expect(screen.getByText(/on garde le signe/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^modifier$/i })).not.toBeInTheDocument()
-  })
-
-  it('pins a fiche so the next card opens beside it instead of replacing it', async () => {
-    const user = userEvent.setup()
-    useCardDetailStore.getState().show(leaf.id)
-    render(<CardDetailPanel />)
-
-    await user.click(screen.getByRole('button', { name: /épingler la fiche de signes contraires/i }))
-    // Through `act`: this stands in for a click on another card's button,
-    // which happens outside this component.
-    act(() => useCardDetailStore.getState().show(bare.id))
-
-    expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
-    expect(screen.getByLabelText('Fiche de Sans description')).toBeInTheDocument()
   })
 
   it('collapses a fiche to its header, keeping the badges that say what is inside', async () => {
@@ -232,28 +217,15 @@ describe('CardDetailPanel', () => {
     expect(screen.getByLabelText('Fiche de Sans description')).toBeInTheDocument()
   })
 
-  it('toggles stack mode off, so a newly opened card replaces the unpinned preview again', async () => {
+  it('closes every fiche from the "tout fermer" button', async () => {
     const user = userEvent.setup()
     useCardDetailStore.getState().show(leaf.id)
-    render(<CardDetailPanel />)
-
-    await user.click(screen.getByRole('button', { name: /désactiver le mode pile/i }))
-    act(() => useCardDetailStore.getState().show(bare.id))
-
-    expect(screen.queryByLabelText('Fiche de Signes contraires')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Fiche de Sans description')).toBeInTheDocument()
-  })
-
-  it('clears unpinned fiches from the "vider la liste" button, keeping the pinned ones', async () => {
-    const user = userEvent.setup()
-    useCardDetailStore.getState().show(leaf.id)
-    useCardDetailStore.getState().pin(leaf.id)
     useCardDetailStore.getState().show(bare.id)
     render(<CardDetailPanel />)
 
-    await user.click(screen.getByRole('button', { name: /vider la liste/i }))
+    await user.click(screen.getByRole('button', { name: 'Tout fermer' }))
 
-    expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Fiche de Signes contraires')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Fiche de Sans description')).not.toBeInTheDocument()
   })
 
@@ -263,8 +235,7 @@ describe('CardDetailPanel', () => {
 
     fireEvent.contextMenu(screen.getByLabelText('Fiches de cartes'))
 
-    expect(await screen.findByRole('menuitem', { name: /désactiver le mode pile/i })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: /vider la liste/i })).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: /tout fermer/i })).toBeInTheDocument()
     // No card under the cursor: nothing card-specific is offered.
     expect(screen.queryByRole('menuitem', { name: /^modifier$/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /^supprimer$/i })).not.toBeInTheDocument()
@@ -276,11 +247,9 @@ describe('CardDetailPanel', () => {
 
     fireEvent.contextMenu(screen.getByLabelText('Fiche de Signes contraires'))
 
-    expect(await screen.findByRole('menuitem', { name: /désactiver le mode pile/i })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: /vider la liste/i })).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: /tout fermer/i })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /^modifier$/i })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /^supprimer$/i })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: /^épingler$/i })).toBeInTheDocument()
   })
 
   it('opens the editor from the fiche’s context menu', async () => {
@@ -306,62 +275,26 @@ describe('CardDetailPanel', () => {
     expect(useCardsStore.getState().history.present.find(c => c.id === leaf.id)?.definition).toBeUndefined()
   })
 
-  it('pins and unpins from the fiche’s context menu, without closing it', async () => {
-    const user = userEvent.setup()
-    useCardDetailStore.getState().show(leaf.id)
-    render(<CardDetailPanel />)
-
-    fireEvent.contextMenu(screen.getByLabelText('Fiche de Signes contraires'))
-    await user.click(await screen.findByRole('menuitem', { name: /^épingler$/i }))
-    expect(useCardDetailStore.getState().open.find(entry => entry.cardId === leaf.id)?.pinned).toBe(true)
-
-    fireEvent.contextMenu(screen.getByLabelText('Fiche de Signes contraires'))
-    await user.click(await screen.findByRole('menuitem', { name: /^désépingler$/i }))
-
-    expect(useCardDetailStore.getState().open.find(entry => entry.cardId === leaf.id)?.pinned).toBe(false)
-    expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
-  })
-
-  it('hides the editing actions from a locked map’s fiche menu, keeping épingler', async () => {
+  it('hides the editing actions from a locked map’s fiche menu', async () => {
     useCardsStore.setState({ locked: true })
     useCardDetailStore.getState().show(leaf.id)
     render(<CardDetailPanel />)
 
     fireEvent.contextMenu(screen.getByLabelText('Fiche de Signes contraires'))
 
-    expect(await screen.findByRole('menuitem', { name: /^épingler$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: /tout fermer/i })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /^modifier$/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /^supprimer$/i })).not.toBeInTheDocument()
   })
 
-  it('explains the pile toggle in a tooltip', async () => {
+  it('explains « tout fermer » in a tooltip', async () => {
     const user = userEvent.setup()
     useCardDetailStore.getState().show(leaf.id)
     render(<CardDetailPanel />)
 
-    await user.hover(screen.getByRole('button', { name: /activer le mode pile/i }))
+    await user.hover(screen.getByRole('button', { name: 'Tout fermer' }))
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/reste affichée quand une autre s’ouvre/i)
-  })
-
-  it('explains « vider la liste » in a tooltip', async () => {
-    const user = userEvent.setup()
-    useCardDetailStore.getState().show(leaf.id)
-    render(<CardDetailPanel />)
-
-    await user.hover(screen.getByRole('button', { name: 'Vider la liste des fiches' }))
-
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/ferme toutes les fiches non épinglées/i)
-  })
-
-  it('explains the épingler button in a tooltip', async () => {
-    const user = userEvent.setup()
-    useCardDetailStore.getState().show(leaf.id)
-    render(<CardDetailPanel />)
-
-    await user.hover(screen.getByRole('button', { name: /épingler la fiche de signes contraires/i }))
-
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/reste ouverte quand une autre est consultée/i)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/ferme toutes les fiches ouvertes/i)
   })
 
   it('explains the fermer button in a tooltip', async () => {
@@ -432,10 +365,9 @@ describe('CardDetailPanel', () => {
       expect(screen.getByLabelText('Fiche de Signes contraires')).toBeInTheDocument()
     })
 
-    it('never touches a fiche’s own collapsed or pinned state', async () => {
+    it('never touches a fiche’s own collapsed state', async () => {
       const user = userEvent.setup()
       useCardDetailStore.getState().show(leaf.id)
-      useCardDetailStore.getState().pin(leaf.id)
       useCardDetailStore.getState().toggleCollapsed(leaf.id)
       render(<CardDetailPanel />)
 
@@ -443,7 +375,6 @@ describe('CardDetailPanel', () => {
       await user.clear(screen.getByRole('textbox', { name: /rechercher dans les fiches/i }))
 
       const entry = useCardDetailStore.getState().open.find(e => e.cardId === leaf.id)
-      expect(entry?.pinned).toBe(true)
       expect(entry?.collapsed).toBe(true)
     })
   })

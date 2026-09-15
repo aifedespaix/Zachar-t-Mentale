@@ -187,7 +187,6 @@ export function useCanvasCommands({
     () => selected && requestAction(selected.id, 'detach'),
     editable && selected !== null && !isRootCard(selected) && selected.detached !== true
   )
-  useCommand('card.pickIcon', () => selected && requestAction(selected.id, 'icon'), editable)
   useCommand(
     'card.editDescription',
     () => selected && requestAction(selected.id, 'description'),

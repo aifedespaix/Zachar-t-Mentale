@@ -10,7 +10,7 @@ import { create } from 'zustand'
  * confirmations with two wordings, drifting apart. Instead the keyboard, the
  * context menu and the card's own buttons all end up in the same code.
  */
-export type CardRequestAction = 'rename' | 'delete' | 'detach' | 'icon' | 'description'
+export type CardRequestAction = 'rename' | 'delete' | 'detach' | 'description'
 
 export interface CardRequest {
   cardId: string

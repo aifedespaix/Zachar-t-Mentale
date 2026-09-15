@@ -5,15 +5,15 @@ import {
   Plus,
   ArrowRight,
   GripVertical,
-  FlipHorizontal2,
+  EllipsisVertical,
   Unlink,
   Trash2,
   Check,
   X,
+  Eye,
   PenLine,
   Pencil,
   ListChecks,
-  Sparkles,
   BookOpen,
   type LucideIcon,
 } from 'lucide-react'
@@ -31,13 +31,11 @@ import { useAppearanceSettingsStore } from '../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../hooks/useResolvedTheme'
 import { toCss } from '../colors/contrast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
-import { CardIconBadge } from './CardIconBadge'
-import { IconPickerDialog } from './IconPickerDialog'
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from './ui/dropdown-menu'
 import { QcmDialog } from './quiz/QcmDialog'
 import { RecallDialog } from './quiz/RecallDialog'
-import { FlipCard } from './FlipCard'
 import { useCardDetailStore } from '../state/useCardDetailStore'
 import { useCardSelectionStore } from '../state/useCardSelectionStore'
 import { useCardHoverStore } from '../state/useCardHoverStore'
@@ -129,16 +127,16 @@ const TITLE_ZONE_STYLE: CSSProperties = {
 }
 
 /**
- * The action row height, and the reason it is a constant: EVERY card renders
- * the slot, even a quiz card that has nothing to show in it, so all cards keep
- * exactly the same height whatever state they are in.
+ * The bottom row height, and the reason it is a constant: EVERY card renders
+ * the slot — the quiz "Répondre" row, the empty/filled description action
+ * row — so all cards keep exactly the same height whatever state they are in.
  */
 const ACTION_SLOT_STYLE: CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   gap: "0.25rem",
-  height: 28,
+  height: 36,
 }
 
 const TITLE_BOX_STYLE: CSSProperties = {
@@ -221,54 +219,48 @@ function EdgeButton({ label, icon: Icon, color, disabled, onActivate, position }
 }
 
 /**
- * The card's one door into its fiche — a fixed-size badge, not a text
- * preview: `règle anti-décalage 1` (a card's footprint never depends on its
- * content) is easier to keep with NO content-dependent sizing at all than
- * with an ellipsed line.  * Position and colour read as an ACTION (bottom-right, the card own level
- * colour), the counterpart of the identity icon now sitting in the card
- * bottom-left corner and distinct from the action row centred above it.
+ * The card's whole bottom row — its one door into the description, filled or
+ * empty. `règle anti-décalage 1` (a card's footprint never depends on its
+ * content) is why this is a fixed-height row (`ACTION_SLOT_STYLE`, shared with
+ * the quiz "Répondre" row) rather than text sized by whatever it holds.
  *
- * On an editable map it always opens the EDITOR, filled or empty. Reading no
- * longer needs it — clicking the card itself shows the definition in the right
- * panel (see `handleCardClick`) — so the badge keeps the one job that has
- * nowhere else to live: getting into the description to change it. Trying to
- * read here was the trap: the card with nothing in it opened the editor and the
- * card with a definition opened a panel, so the same button did two different
- * things depending on content the user had not looked at yet.
+ * On an editable map it always opens the EDITOR, filled or empty — reading no
+ * longer needs a click on the card body (see `handleCardClick`), and a second,
+ * icon-only button shows the description in the right panel WITHOUT opening
+ * the editor, for a glance that does not risk an accidental edit.
  *
- * On a LOCKED map it goes back to reading: the editor would write to a file the
- * user may not write, so there is only one thing the button can honestly do.
+ * On a LOCKED map there is nothing to write, so the row goes back to reading:
+ * one full-width button, and no eye button since there is no separate "just
+ * open the editor" action to spare it from.
  */
-function FicheBadge({
+function DescriptionAction({
   card,
   locked,
-  active,
+  ficheOpen,
   borderColor,
-  onActivate,
+  onEdit,
+  onView,
 }: {
   card: Card
   locked: boolean
-  active: boolean
+  ficheOpen: boolean
   borderColor: string
-  onActivate: () => void
+  /** Opens the fiche and, unless locked, its editor. */
+  onEdit: () => void
+  /** Shows the fiche without ever opening the editor. */
+  onView: () => void
 }) {
   const blocks = contentOf(card)
   const hasContent = blocks.length > 0
   // A locked map cannot write, so a card with nothing to read has nothing the
-  // badge can honestly offer — showing a disabled "add" button dangled an
-  // action nobody could take. No badge is the correct badge here.
+  // row can honestly offer.
   if (locked && !hasContent) return null
-  // The glyphs for READING, used on a locked map: the content kind when the
-  // description leads with something other than text, an open book for plain
-  // text, a pen when there is nothing to read. Not gated on
-  // `card.kind === 'media'`: a plain definition can still lead with a formula,
-  // table or image block, and the badge should say so the same way a media card
-  // does — `nonTextKinds` already reads the actual blocks, independent of the
-  // card's own kind field.
+
   const dominant = nonTextKinds(blocks)[0]
-  const readIcon = dominant ? CONTENT_KIND_ICONS[dominant].icon : hasContent ? BookOpen : PenLine
-  // The glyphs for WRITING, one verb each: a pencil for "go and change what is
-  // written", a pen for "there is nothing written yet".
+  // The glyph for READING, used on a locked map: the content kind when the
+  // description leads with something other than text, an open book for plain
+  // text.
+  const readIcon = dominant ? CONTENT_KIND_ICONS[dominant].icon : BookOpen
   const Icon = locked ? readIcon : hasContent ? Pencil : PenLine
   // `locked` reaches this point only with content (see the early return
   // above), so there is no "add" case to account for here.
@@ -281,44 +273,71 @@ function FicheBadge({
       : 'Ajouter une description'
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={label}
-          aria-pressed={active}
-          onClick={event => {
-            event.stopPropagation()
-            onActivate()
-          }}
-          style={{
-            position: 'absolute',
-            bottom: 6,
-            right: 6,
-            width: 24,
-            height: 24,
-            borderRadius: '9999px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: `1.5px solid ${borderColor}`,
-                        // Always fully opaque: the badge used to be translucent so an
-            // unfilled card looked unfilled, but it also straddled the
-            // card border (bottom/right: -9), which a translucent
-            // background let show through. It now sits inside the corner,
-            // and the "not filled in yet" cue lives in the icon choice and
-            // the dimmer icon below.
-            background: 'var(--background)',
-            color: borderColor,
-            boxShadow: hasContent ? '0 1px 3px rgba(0, 0, 0, 0.15)' : 'none',
-            cursor: 'pointer',
-          }}
-        >
-          <Icon size={13} strokeWidth={2.3} style={{ opacity: hasContent ? 1 : 0.6 }} />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <div className="card-footer" style={ACTION_SLOT_STYLE}>
+      <button
+        type="button"
+        aria-label={label}
+        onClick={event => {
+          event.stopPropagation()
+          onEdit()
+        }}
+        style={{
+          flex: 1,
+          height: '100%',
+          borderRadius: 8,
+          border: 'none',
+          background: borderColor,
+          color: 'var(--background)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
+          fontSize: 12.5,
+          fontWeight: 600,
+          cursor: 'pointer',
+        }}
+      >
+        <Icon size={14} strokeWidth={2.3} />
+        {label}
+      </button>
+
+      {/* Editable AND already filled only: the one way to view the
+          description without risking an edit. Empty has nothing to view,
+          locked has no separate edit action to spare it from. */}
+      {!locked && hasContent && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="Afficher dans le panneau"
+                aria-pressed={ficheOpen}
+                onClick={event => {
+                  event.stopPropagation()
+                  onView()
+                }}
+                style={{
+                  flexShrink: 0,
+                  width: 36,
+                  height: '100%',
+                  borderRadius: 8,
+                  border: `1.5px solid ${borderColor}`,
+                  background: 'var(--background)',
+                  color: borderColor,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
+              >
+                <Eye size={16} strokeWidth={2.3} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Afficher dans le panneau</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+    </div>
   )
 }
 
@@ -407,7 +426,6 @@ export function CardNode({ data }: CardNodeProps) {
   }, [quiz])
 
   const updateTitle = useCardsStore(s => s.updateTitle)
-  const updateIcon = useCardsStore(s => s.updateIcon)
   const allCards = useCardsStore(s => s.history.present)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   // ONE resolver for every read path of this card. Assets live in a sidecar
@@ -436,7 +454,6 @@ export function CardNode({ data }: CardNodeProps) {
   const [draftTitle, setDraftTitle] = useState(card.title)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmDetachOpen, setConfirmDetachOpen] = useState(false)
-  const [flipped, setFlipped] = useState(false)
   const showFiche = useCardDetailStore(s => s.show)
   const editFiche = useCardDetailStore(s => s.setEditing)
   const ficheOpen = useCardDetailStore(s => s.open.some(entry => entry.cardId === card.id))
@@ -453,7 +470,6 @@ export function CardNode({ data }: CardNodeProps) {
   // "what the keyboard/commands act on", and the two must stay tellable apart
   // when they land on different cards at once.
   const selected = useCardSelectionStore(s => s.selectedCardId === card.id)
-  const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const isDetached = card.detached === true
   // A floating card is painted grey whatever level it last had: its level is
   // vestigial once it leaves the hierarchy (see the `detached` field), so
@@ -468,9 +484,6 @@ export function CardNode({ data }: CardNodeProps) {
   const childColors = !isDetached && childLevelAppearance ? childLevelAppearance.color[theme] : null
 
   const isRoot = isRootCard(card)
-  // Read once: it drives the card's own click (nothing to read, nothing to
-  // open) and the cursor that advertises it.
-  const hasContent = contentOf(card).length > 0
   // Add-actions that cannot apply here are removed outright, not greyed: a
   // root has no siblings to add above/below, and a card at level 4 (where
   // there is no level 5) has nowhere for a new "->" child to go. Only the
@@ -492,9 +505,6 @@ export function CardNode({ data }: CardNodeProps) {
   // action only makes sense while it still has descendants to empty out.
   const deleteDisabled = isRoot && !hasChildren(card.id)
   const canDetach = !isRoot && !isDetached
-  // The icon slot is only a control while the map can actually be edited; on a
-  // locked map or mid-quiz it degrades to a plain, unclickable badge.
-  const iconSlotInteractive = !locked && !quizActive
 
   // A freshly created card opens its title editor straight away, so the
   // "prise de notes en direct" flow is type -> Entrée -> next card. The field
@@ -525,26 +535,14 @@ export function CardNode({ data }: CardNodeProps) {
   }
 
   /**
-   * Reading a card is a click on the card.
-   *
-   * The fiche badge is a 24px target in a corner; making the user find it to
-   * read a definition they are looking straight at is the wrong trade, so the
-   * card's own body opens its fiche. Its controls (arrows, drag handle, footer,
-   * badge) keep their own actions and stop the click on the way up.
-   *
-   * A card with NO description does nothing here: there is nothing to read, and
-   * an empty panel is a click spent on nothing — its badge opens the editor.
+   * The card's own body has exactly one job left: standing in for the answer
+   * while a quiz question is pending. Reading and writing the description both
+   * moved to the bottom row's own buttons (`DescriptionAction`) — a click on
+   * the card elsewhere does nothing, so the eye button is the only way a
+   * description reaches the right panel.
    */
   function handleCardClick() {
-    if (isPending) {
-      setAnswerOpen(true)
-      return
-    }
-    // The fiche panel is not even mounted during a quiz (App hides it), so a
-    // click here must not queue a fiche that would appear once the quiz ends.
-    if (quizActive) return
-    if (!hasContent) return
-    showFiche(card.id)
+    if (isPending) setAnswerOpen(true)
   }
 
   function handleTitleFocus() {
@@ -638,9 +636,9 @@ export function CardNode({ data }: CardNodeProps) {
    *
    * They land here rather than being re-implemented at canvas level because
    * each one ends in UI that belongs to the card: the inline title editor, the
-   * icon picker, the "supprimer cette carte et ses N descendants ?" dialog with
-   * its « détacher les enfants » alternative. One implementation, reached three
-   * ways, is what keeps those wordings from drifting apart.
+   * "supprimer cette carte et ses N descendants ?" dialog with its « détacher
+   * les enfants » alternative. One implementation, reached three ways, is what
+   * keeps those wordings from drifting apart.
    */
   const request = useCardSelectionStore(s => s.request)
   useEffect(() => {
@@ -658,9 +656,6 @@ export function CardNode({ data }: CardNodeProps) {
       case 'detach':
         handleDetachClick()
         break
-      case 'icon':
-        setIconPickerOpen(true)
-        break
       case 'description':
         openDescription()
         break
@@ -675,7 +670,6 @@ export function CardNode({ data }: CardNodeProps) {
     <CardContextMenu cardId={card.id} disabled={quizActive || locked}>
     <motion.div
       data-testid={`card-${card.id}`}
-      data-flipped={flipped}
       data-reparent-target={isReparentTarget}
       data-detached={isDetached}
       data-hovered={hovered}
@@ -731,9 +725,9 @@ export function CardNode({ data }: CardNodeProps) {
         // `.card-drag-handle`, it does not restyle the rest of the node) —
         // an explicit cursor here overrides that for every part of the card
         // that is not itself interactive (buttons/handle/input set their own).
-        // A card that responds to a click says so: pending (to answer) or
-        // holding a definition (to read).
-        cursor: isPending || (!quizActive && hasContent) ? 'pointer' : 'default',
+        // A card that responds to a click says so: only a pending quiz
+        // question does, now that reading/writing moved to the bottom row.
+        cursor: isPending ? 'pointer' : 'default',
         // The card half of the cross-highlight: a level-coloured halo drawn
         // with box-shadow, never a thicker border or a scale — the card's
         // footprint must not move because the pointer entered it (règle
@@ -777,80 +771,68 @@ export function CardNode({ data }: CardNodeProps) {
           position: 'absolute',
           top: 4,
           left: 4,
+          width: 24,
+          height: 24,
           display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: '9999px',
           cursor: locked ? 'default' : 'grab',
           color: toCss(colors.border),
           visibility: locked ? 'hidden' : 'visible',
           pointerEvents: locked ? 'none' : 'auto',
         }}
       >
-        <GripVertical size={14} />
+        <GripVertical size={18} />
       </span>
 
-            {/*
-        The mnemonic icon, pinned to the card BOTTOM-LEFT corner.
-
-        Three states in one slot: a card that HAS an icon always shows it —
-        including while locked and during a quiz, where the picture is exactly
-        the memory hook the card is meant to trigger — and only becomes
-        clickable (to change or remove it) when the map is editable. A card
-        with no icon shows a faint placeholder instead, and only while editing:
-        an empty affordance is clutter on a locked map and noise during a quiz.
-
-        It is the counterpart of the description badge in the opposite corner:
-        the two badges share the card bottom edge, clear of both the title zone
-        and the action row centred under it.
+      {/*
+        The one menu that used to be a whole row of ghost icon buttons pinned
+        to the card's bottom edge: destructive/structural actions on a card
+        that is mostly a title now live behind one corner button, so the
+        bottom row is free for the description (see `DescriptionAction`).
+        Hidden outright during a quiz, like the rest of the editing chrome —
+        never rendered greyed, since the map is locked anyway for the whole
+        quiz.
       */}
-      {iconSlotInteractive ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                data-testid="card-icon-button"
-                aria-label={card.icon ? 'Changer l’icône' : 'Ajouter une icône'}
-                onClick={event => {
-                  event.stopPropagation()
-                  setIconPickerOpen(true)
-                }}
-                style={{
-                  position: 'absolute',
-                  bottom: 6,
-                  left: 6,
-                  display: 'flex',
-                  padding: 0,
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  // A card with no icon yet only hints at the slot; picking one
-                  // is an option, not something the card is asking for.
-                  opacity: card.icon ? 1 : 0.4,
-                  lineHeight: 0,
-                }}
-              >
-                <CardIconBadge name={card.icon} fallback={Sparkles} border={colors.border} theme={theme} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{card.icon ? 'Changer l’icône' : 'Ajouter une icône'}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : (
-        card.icon !== undefined && (
-          <span style={{ position: 'absolute', bottom: 6, left: 6, lineHeight: 0 }}>
-            <CardIconBadge name={card.icon} border={colors.border} theme={theme} />
-          </span>
-        )
-      )}
-
-      {iconPickerOpen && (
-        <IconPickerDialog
-          open
-          onOpenChange={setIconPickerOpen}
-          current={card.icon}
-          border={colors.border}
-          theme={theme}
-          onSelect={icon => updateIcon(card.id, icon)}
-        />
+      {!quizActive && !isPending && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="card-options-btn"
+              aria-label="Options"
+              onClick={event => event.stopPropagation()}
+              style={{
+                position: 'absolute',
+                top: 4,
+                right: 4,
+                width: 24,
+                height: 24,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '9999px',
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                color: toCss(colors.border),
+              }}
+            >
+              <EllipsisVertical size={16} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
+            {canDetach && (
+              <DropdownMenuItem disabled={locked} onSelect={handleDetachClick}>
+                <Unlink size={14} /> Détacher
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem variant="destructive" disabled={locked || deleteDisabled} onSelect={handleDeleteClick}>
+              <Trash2 size={14} /> Supprimer
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       {canAddSibling && (
@@ -930,56 +912,40 @@ export function CardNode({ data }: CardNodeProps) {
             {displayMasked ? (blankPreview ?? '? ? ?') : card.title}
           </div>
         ) : (
-          <FlipCard
-            flipped={flipped}
-            front={
-              <textarea
-                ref={titleInputRef}
-                aria-label="Titre"
-                rows={1}
-                readOnly={locked}
-                value={titleFocused ? draftTitle : card.title}
-                onFocus={handleTitleFocus}
-                onChange={e => setDraftTitle(e.target.value)}
-                onBlur={commitTitle}
-                // Stops the right-click from reaching the canvas's context menu
-                // (MindMapCanvas.tsx wraps the whole ReactFlow surface in one),
-                // so a right-click here still opens the WebView's native
-                // Cut/Copy/Paste menu instead of "Créer une carte volante".
-                onContextMenu={e => e.stopPropagation()}
-                onKeyDown={e => {
-                  // The title has no manual line breaks — it wraps by width alone,
-                  // same as the export's plain block text — so Enter still commits
-                  // instead of inserting a newline.
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    titleInputRef.current?.blur()
-                  }
-                  if (e.key === 'Escape') cancelTitle()
-                }}
-                style={{
-                  ...TITLE_BOX_STYLE,
-                  resize: 'none',
-                  color: 'inherit',
-                  background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
-                  border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
-                  outline: 'none',
-                  cursor: 'text',
-                  transition: 'background 0.15s ease, border-color 0.15s ease',
-                }}
-              />
-            }
-            back={
-              <div
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  minHeight: '1.4rem',
-                  borderRadius: 4,
-                  background: toCss(colors.border),
-                }}
-              />
-            }
+          <textarea
+            ref={titleInputRef}
+            aria-label="Titre"
+            rows={1}
+            readOnly={locked}
+            value={titleFocused ? draftTitle : card.title}
+            onFocus={handleTitleFocus}
+            onChange={e => setDraftTitle(e.target.value)}
+            onBlur={commitTitle}
+            // Stops the right-click from reaching the canvas's context menu
+            // (MindMapCanvas.tsx wraps the whole ReactFlow surface in one), so
+            // a right-click here still opens the WebView's native Cut/Copy/Paste
+            // menu instead of "Créer une carte volante".
+            onContextMenu={e => e.stopPropagation()}
+            onKeyDown={e => {
+              // The title has no manual line breaks — it wraps by width alone,
+              // same as the export's plain block text — so Enter still commits
+              // instead of inserting a newline.
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                titleInputRef.current?.blur()
+              }
+              if (e.key === 'Escape') cancelTitle()
+            }}
+            style={{
+              ...TITLE_BOX_STYLE,
+              resize: 'none',
+              color: 'inherit',
+              background: titleFocused ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+              border: `2px solid ${titleFocused ? toCss(colors.border) : 'transparent'}`,
+              outline: 'none',
+              cursor: 'text',
+              transition: 'background 0.15s ease, border-color 0.15s ease',
+            }}
           />
         )}
       </div>
@@ -1092,13 +1058,12 @@ export function CardNode({ data }: CardNodeProps) {
       )}
 
       {/*
-        The editing toolbar is hidden outright during a quiz, on every card —
-        not just the drawn ones. Add, detach, delete and flip are all edits,
-        the map is locked anyway, and a row of dead-looking icons under a
-        question is exactly the clutter that made it unclear what the card
-        wanted. What remains is the question and the way to answer it.
+        The bottom row is hidden outright during a quiz, on every card — not
+        just the drawn ones — and replaced by the answer prompt. Both branches
+        share `ACTION_SLOT_STYLE`/`.card-footer`, so a card mid-quiz and the
+        same card back in edit mode keep exactly the same height.
       */}
-            {(quizActive || isPending) ? (
+      {(quizActive || isPending) ? (
         /* The action slot, rendered on every card as soon as a quiz is on, so
            a card that has already been answered keeps the same height as one
            that is still asking. */
@@ -1118,76 +1083,14 @@ export function CardNode({ data }: CardNodeProps) {
           )}
         </div>
       ) : (
-      <TooltipProvider>
-        <FicheBadge card={card} locked={locked} active={ficheOpen} borderColor={toCss(colors.border)} onActivate={openDescription} />
-
-        {/* Centred under the title zone, not pinned to the bottom of the card:
-          the badges own the bottom corners, and a fixed-height slot is
-          what keeps every card the same height whatever it holds. */}
-        <div className="card-footer" style={ACTION_SLOT_STYLE}>
-          {canDetach && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Détacher"
-                  disabled={locked}
-                  onClick={event => {
-                    // Footer controls act on the card; they are not a click ON
-                    // the card, which would open its fiche.
-                    event.stopPropagation()
-                    handleDetachClick()
-                  }}
-                >
-                  <Unlink />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Détacher (carte volante)</TooltipContent>
-            </Tooltip>
-          )}
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Retourner"
-                onClick={event => {
-                  event.stopPropagation()
-                  setFlipped(v => !v)
-                }}
-              >
-                <FlipHorizontal2 />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Retourner</TooltipContent>
-          </Tooltip>
-
-          {/* Destructive action last in the row, and greyed rather than removed
-              on the root: the root is an existing card that cannot be deleted,
-              not a slot for something that cannot exist. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Supprimer"
-                disabled={locked || deleteDisabled}
-                onClick={event => {
-                  event.stopPropagation()
-                  handleDeleteClick()
-                }}
-              >
-                <Trash2 />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {isRoot ? 'Supprimer les descendants' : 'Supprimer'}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </TooltipProvider>
+        <DescriptionAction
+          card={card}
+          locked={locked}
+          ficheOpen={ficheOpen}
+          borderColor={toCss(colors.border)}
+          onEdit={openDescription}
+          onView={() => showFiche(card.id)}
+        />
       )}
 
       {isQcmPending && (

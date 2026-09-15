@@ -34,10 +34,28 @@ describe('DescriptionDialog', () => {
   it('says which card is being edited, ancestors included', () => {
     renderDialog()
 
-    expect(screen.getByText('Signes contraires')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /titre de la carte/i })).toHaveValue('Signes contraires')
     // The breadcrumb is what makes the card unambiguous when the editor opens
     // over a canvas of near-identical boxes.
     expect(screen.getByText('Nombres relatifs › Addition')).toBeInTheDocument()
+  })
+
+  it('renames the card from the title field when a rename handler is given', async () => {
+    const user = userEvent.setup()
+    const onRenameTitle = vi.fn()
+    renderDialog({ onRenameTitle })
+
+    const title = screen.getByRole('textbox', { name: /titre de la carte/i })
+    await user.clear(title)
+    await user.type(title, 'Nouveau titre{Enter}')
+
+    expect(onRenameTitle).toHaveBeenCalledWith('Nouveau titre')
+  })
+
+  it('leaves the title read-only with no rename handler', () => {
+    renderDialog()
+
+    expect(screen.getByRole('textbox', { name: /titre de la carte/i })).toHaveAttribute('readonly')
   })
 
   it('opens an empty card on a field to type in rather than on nothing', () => {
