@@ -94,6 +94,60 @@ L'arborescence de `.cartes-mentales/` est : `<matière>/<chapitre>/<fichier>.zma
   ajoutée depuis l'interface — hors périmètre de cette skill (cf. « Pas de
   bloc image » plus bas).
 
+## Fraîcheur d'un fichier `corrections`
+
+Un fichier `corrections` (voir l'exception de nommage ci-dessus) peut
+devenir incomplet si l'exercice qu'il corrige gagne ou perd des cartes
+après coup. Deux champs de `meta`, réservés à cette skill (l'app ne les
+affiche ni ne les modifie jamais), permettent de le détecter :
+
+```ts
+correctsId?: string             // meta.id de l'exo corrigé
+correctsSnapshot?: CardCounts   // compte de cartes de l'exo, capturé ici
+```
+
+`CardCounts` est le type de `src/sync/cardCounts.ts` :
+`{ total, byLevel, detached }`. Le compter à la main sur les `cards` de
+l'exo lié (un objet, incrémenté par carte, séparant les cartes volantes
+— `detached: true` — du reste) plutôt que d'en approximer un.
+
+### À la création ou régénération d'un fichier `corrections`
+
+Lire le `meta.id` de l'exo corrigé (déjà identifié par son nom de
+fichier/dossier : `influences.zmap` → `influences-corrections.zmap`),
+compter ses cartes, et écrire les deux champs dans le `meta` de la
+correction :
+
+```json
+"meta": {
+  "id": "…",
+  "author": "aife",
+  "role": "prof",
+  "lastModified": "…",
+  "type": "corrections",
+  "correctsId": "<meta.id de influences.zmap>",
+  "correctsSnapshot": { "total": 5, "byLevel": { "1": 1, "2": 2, "3": 1, "4": 1 }, "detached": 0 }
+}
+```
+
+### En reprenant un chantier de maintenance
+
+Quand on demande à cette skill de vérifier ou mettre à jour des
+corrections existantes, pour chaque fichier `corrections` portant un
+`correctsId` : relire l'exo correspondant (le retrouver par son
+`meta.id`, pas par son nom — un renommage ne casse pas le lien),
+recompter ses cartes, comparer à `correctsSnapshot`. Tout écart sur
+`total` — à la hausse comme à la baisse — signale que la correction est
+à revoir avant d'être considérée à jour ; ne comparer que le nombre de
+cartes, pas leur contenu.
+
+**Backfill** : un fichier `corrections` déjà existant sans `correctsId`
+n'est pas une erreur. Chercher `<même nom sans le suffixe
+-corrections>.zmap` dans le même dossier de chapitre ; si trouvé, poser
+`correctsId` et amorcer `correctsSnapshot` avec le compte actuel avant de
+continuer la vérification. Si rien n'est trouvé (correction orpheline),
+laisser le fichier tel quel — pas de lien à forcer.
+
 ## Définition ou média : la carte est l'un OU l'autre
 
 Une carte est `kind: 'media'` quand son contenu n'énonce pas un fait ou une
