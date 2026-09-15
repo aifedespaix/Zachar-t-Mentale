@@ -122,16 +122,24 @@ Aucun fichier de type `corrections` n'existe aujourd'hui dans
       classé à tort comme déterminant par l'élève, c'est un pronom
       personnel COD ; réponse manquante pour "grande" (adjectif qualificatif)
       complétée
-- [x] `francais/mots-invariables.zmap` — 5 classes, 16 cartes source.
+- [x] `francais/mots-invariables.zmap` — 5 classes, 14 cartes source.
       Restructuré : le contenu était écrit en `title` de cartes filles au
       lieu de `definition` (aucune carte n'avait de `definition`), en plus
       d'être très fautif. Correction = une définition propre par classe
-      grammaticale, structure aplatie (plus de niveaux 3/4 redondants)
+      grammaticale, structure aplatie (plus de niveaux 3/4 redondants).
+      **Correctif du 2026-09-15** : le fichier de correction avait été écrit
+      sous le nom `mots-invariables-cours.zmap` (`type: "cours"`) au lieu de
+      `mots-invariables-corrections.zmap` (`type: "corrections"`) — renommé
+      et retypé pour respecter la convention de la skill ; `correctsId`/
+      `correctsSnapshot` posés au passage (sous-projet 4)
 - [x] `francais/mots-variables.zmap` — 5 classes, 16 cartes source. Même
       problème de structure que ci-dessus, avec en plus deux erreurs de fond
       chez l'élève (pronom présenté comme modifiant "le genre du verbe" au
       lieu de remplacer un nom ; déterminant réduit à "déterminer le genre").
-      Correction = définitions propres et aplaties
+      Correction = définitions propres et aplaties. **Correctif du
+      2026-09-15** : même erreur de nommage que ci-dessus
+      (`mots-variables-cours.zmap` → `mots-variables-corrections.zmap`,
+      `type: "corrections"`), corrigée de la même façon
 - [x] `histoire-geo/guerre-totale.zmap` — 4 cartes source. Même problème
       structurel que les fichiers `francais/mots-*` (contenu en `title`, pas
       de `definition`) : restructuré en 4 dimensions de la guerre totale
