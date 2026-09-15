@@ -1,12 +1,12 @@
 import { exists, mkdir, readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
-import { loadMindMap, loadMindMapMeta, setMindMapType } from '../persistence/fileStore'
+import { loadMindMap, loadMindMapMeta, setMindMapType, stampMindMapSyncMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
-import { renamePath } from '../persistence/fileOps'
-import { archiveRemoteAsLinkedCopy, createLinkedCopy } from '../persistence/copyLinkOps'
+import { deletePath, renamePath } from '../persistence/fileOps'
+import { archiveRemoteAsLinkedCopy, createLinkedCopy, unlinkIfAlone } from '../persistence/copyLinkOps'
 import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
 import { serializeMindMap, deserializeMindMap } from '../persistence/serialization'
-import { fileNameOf, isSameFilePath, parentDirOf, separatorOf } from '../persistence/paths'
+import { fileNameOf, isInsideFolder, isSameFilePath, parentDirOf, separatorOf } from '../persistence/paths'
 import type { FileTreeNode } from '../types/workspace'
 import type { MindMapMeta, SyncUser, UserRole } from '../types/card'
 import { serverStateOf, type SyncState, type SyncStateEntry } from '../persistence/syncState'
@@ -65,6 +65,10 @@ export interface MindMapsApi {
     data: { path?: string; content?: string; type?: string },
     options?: RequestOptions
   ): Promise<RemoteMindMapRecord>
+  /** `undefined` quand l'enregistrement n'existe pas (jamais publié, ou déjà supprimé) — jamais une erreur. */
+  getOne(fileId: string, options?: RequestOptions): Promise<RemoteMindMapRecord | undefined>
+  /** Un 404 est un succès pour l'appelant : voir chaque point d'appel. */
+  delete(id: string, options?: RequestOptions): Promise<void>
 }
 
 export interface AssetsApi {
@@ -139,20 +143,33 @@ export interface SyncConflictDetail {
 }
 
 /**
- * A file both sides changed since the last sync. Reported here for the
- * record — this is what `syncReporting.ts` sends to `sync_conflicts` — but
- * always already resolved by the time it lands in this list: the prof wins,
- * and the losing side is archived in a linked copy first. Never left open
- * for a local decision (see `2026-09-15-autorite-prof-conflits-design.md`).
+ * `content` : les deux ont changé le contenu — `detail` est alors renseigné.
+ * `deleted-remote` : l'enregistrement a disparu et le fichier local a changé
+ * depuis (ou est ouvert dans le canevas) — rien à comparer, `detail` absent.
+ * `deleted-local` : une tombstone locale existe et le contenu distant a
+ * changé depuis — `detail` absent aussi.
+ */
+export type SyncConflictKind = 'content' | 'deleted-remote' | 'deleted-local'
+
+/**
+ * A file both sides changed — or disagreed about deleting — since the last
+ * sync. Reported here for the record — this is what `syncReporting.ts` sends
+ * to `sync_conflicts` — but always already resolved by the time it lands in
+ * this list: the prof wins, and the losing side is archived in a linked copy
+ * first when there is content worth archiving. Never left open for a local
+ * decision (see `2026-09-15-autorite-prof-conflits-design.md` and
+ * `2026-09-15-suppression-publication-auto-sync-ciblee-design.md`).
  */
 export interface SyncConflict {
+  /** Absent = `content`, pour les littéraux de test écrits avant ce champ. */
+  kind?: SyncConflictKind
   fileId: string
   path: string
   /** The local file's own `meta.lastModified`. */
   localModified: string
-  /** The server record's `updated`. */
+  /** The server record's `updated` — le dernier connu, pour `deleted-remote`. */
   remoteUpdated: string
-  /** Tout ce qu'une résolution demande — toujours renseigné par `sync()`. */
+  /** Tout ce qu'un comparatif de CONTENU demande — absent pour un conflit de suppression. */
   detail?: SyncConflictDetail
 }
 
@@ -195,11 +212,22 @@ export interface SyncResult {
   merged?: { fileId: string; path: string; floatedCount: number }[]
   /** Combien de dossiers vides décidés ailleurs ont été créés localement. */
   foldersCreated?: number
+  /** Une suppression distante propagée : le fichier local a disparu avec elle. */
+  localDeleted?: number
+  /** Une tombstone locale appliquée : l'enregistrement distant a disparu avec elle. */
+  remoteDeleted?: number
+  /** Un fichier `local-only` (jamais publié) publié tout seul par ce passage. */
+  published?: number
 }
 
-/** Le résultat tel que `sync()` le construit : déplacements, notices et reclassements y sont toujours renseignés. */
+/** Le résultat tel que `sync()` le construit : ces champs y sont toujours renseignés. */
 type SyncRunResult = SyncResult &
-  Required<Pick<SyncResult, 'relocated' | 'moved' | 'notices' | 'reclassified' | 'merged'>>
+  Required<
+    Pick<
+      SyncResult,
+      'relocated' | 'moved' | 'notices' | 'reclassified' | 'merged' | 'localDeleted' | 'remoteDeleted' | 'published'
+    >
+  >
 
 export interface SyncParams {
   client: SyncClient
@@ -227,6 +255,11 @@ export interface SyncParams {
 /** The PocketBase SDK flags a cancelled request this way (`ClientResponseError.isAbort`). */
 function isAbortError(error: unknown): boolean {
   return error !== null && typeof error === 'object' && (error as { isAbort?: unknown }).isAbort === true
+}
+
+/** Un DELETE sur un enregistrement déjà absent : un succès, jamais une erreur à signaler. */
+function isNotFoundError(error: unknown): boolean {
+  return error !== null && typeof error === 'object' && (error as { status?: unknown }).status === 404
 }
 
 export interface PushPlan {
@@ -626,6 +659,9 @@ export async function sync({
     notices: [],
     reclassified: 0,
     merged: [],
+    localDeleted: 0,
+    remoteDeleted: 0,
+    published: 0,
   }
 
   const remoteRecords = await client.mindMaps.getFullList({ signal })
@@ -649,6 +685,29 @@ export async function sync({
   server.syncFolderPath = syncFolderPath
 
   const scans = await scanLocalMaps(syncFolderPath)
+
+  // ── Publication automatique ──────────────────────────────────────────
+  //
+  // Un fichier « local-only » (lisible comme carte mentale, sans `meta`) —
+  // qu'il vienne d'être créé, dupliqué, importé ou déposé directement dans le
+  // dossier — obtient son identité de sync ICI, avant tout le reste, et
+  // traverse ensuite exactement le même chemin qu'un fichier déjà publié.
+  // « Tous les fichiers sont synchronisés, pas de fichier pas synchronisé » —
+  // voir `2026-09-15-suppression-publication-auto-sync-ciblee-design.md`.
+  for (let i = 0; i < scans.length; i += 1) {
+    const scan = scans[i]
+    if (scan === undefined || scan.kind !== 'local-only') continue
+    try {
+      await stampMindMapSyncMeta(scan.path, viewer.username, viewer.role)
+      const meta = await loadMindMapMeta(scan.path)
+      if (meta === null) continue // ne devrait pas arriver ; laissé tel quel, retenté au prochain sync
+      scans[i] = { path: scan.path, kind: 'map', meta }
+      result.published += 1
+    } catch (error) {
+      // Laissé `local-only` : retenté au prochain sync, comme un push qui échoue.
+      result.errors.push({ fileId: scan.path, message: describeSyncError(error) })
+    }
+  }
 
   async function reconcileOne(scan: MapScan): Promise<void> {
     const entry = entries[scan.meta.id]
@@ -771,9 +830,188 @@ export async function sync({
     if (scan.kind === 'map') await reconcileOne(scan)
   }
 
+  // ── Passe 2 : propagation des suppressions distantes ────────────────────
+  //
+  // Un `file_id` connu (une entrée existe) qui n'est plus dans la liste
+  // distante a été supprimé — par son auteur, par un prof, ou depuis
+  // l'administration. Propager est le cas normal. Un désaccord réel (le
+  // fichier a changé ici depuis, ou est ouvert) devient un conflit tranché
+  // par rôle, jamais par un dialogue — voir
+  // `2026-09-15-autorite-prof-conflits-design.md`.
+  const locallyDeletedFileIds = new Set<string>()
+
+  async function propagateRemoteDeletion(fileId: string, entry: SyncStateEntry): Promise<void> {
+    // Retrouvé parmi les scans DÉJÀ faits — jamais par `entry.lastSyncedPath`,
+    // qui peut être périmé (un fichier déplacé localement avant qu'un
+    // enregistrement distant n'existe pour le réconcilier). Chercher par
+    // `meta.id` distingue « vraiment introuvable » de « juste ailleurs ».
+    const localScan = scans.find((scan): scan is MapScan => scan.kind === 'map' && scan.meta.id === fileId)
+    if (localScan === undefined) {
+      delete entries[fileId]
+      return
+    }
+    const relPath = relativeTo(syncFolderPath, localScan.path)
+
+    // Le fichier ouvert dans le canevas n'est jamais supprimé sous les pieds
+    // de qui édite, quel que soit `lastModified` : c'est un désaccord, pas
+    // un cas simple.
+    const isOpen = isSameFilePath(localScan.path, openFilePath ?? '')
+    if (!isOpen && localScan.meta.lastModified <= entry.lastSyncedModified) {
+      try {
+        const link = localScan.meta.copyLink
+        await deletePath(localScan.path, false)
+        if (link !== undefined) await unlinkIfAlone(parentDirOf(localScan.path), link.groupId).catch(() => {})
+        delete entries[fileId]
+        locallyDeletedFileIds.add(fileId)
+        result.localDeleted += 1
+      } catch (error) {
+        result.errors.push({ fileId, message: describeSyncError(error) })
+      }
+      return
+    }
+
+    result.conflicts.push({
+      kind: 'deleted-remote',
+      fileId,
+      path: relPath,
+      localModified: localScan.meta.lastModified,
+      remoteUpdated: entry.lastSyncedUpdated,
+    })
+    if (currentRole === 'prof') {
+      // Le prof a le dernier mot : rien n'est touché ici, sa version repart
+      // au serveur par le push normal qui suit (`remote` absent → `create`).
+      result.notices.push({
+        fileId,
+        message: `« ${relPath} » avait été supprimé côté serveur, mais votre version a changé depuis — elle repart au serveur`,
+      })
+      return
+    }
+    try {
+      const archived = await createLinkedCopy({ sourcePath: localScan.path, author: viewer.username, role: viewer.role })
+      await deletePath(localScan.path, false)
+      delete entries[fileId]
+      locallyDeletedFileIds.add(fileId)
+      result.localDeleted += 1
+      result.notices.push({
+        fileId,
+        message: `« ${relPath} » a été supprimé côté serveur — votre version, qui avait changé, a été gardée dans « ${fileNameOf(archived.path)} »`,
+      })
+    } catch (error) {
+      result.errors.push({ fileId, message: describeSyncError(error) })
+    }
+  }
+
+  for (const [fileId, entry] of Object.entries(entries)) {
+    if (aborted()) {
+      result.cancelled = true
+      break
+    }
+    if (remoteByFileId.has(fileId)) continue
+    await propagateRemoteDeletion(fileId, entry)
+  }
+
+  // ── Passe 3 : application des tombstones ─────────────────────────────────
+  //
+  // `remoteRecords`/`remoteByFileId` sont un INSTANTANÉ pris au tout début de
+  // `sync()` : un `mindMaps.delete` réussi ici ne les met pas à jour. Sans
+  // cet ensemble, le tirage qui suit reverrait le même enregistrement dans
+  // cet instantané et le retélécharger ait — ressuscitant ce qu'on vient de
+  // supprimer, dans le MÊME passage.
+  const remoteDeletedThisRun = new Set<string>()
+
+  async function applyTombstone(fileId: string): Promise<void> {
+    const recreatedLocally = scans.some(
+      scan => scan.kind === 'map' && scan.meta.id === fileId && !locallyDeletedFileIds.has(fileId)
+    )
+    if (recreatedLocally) {
+      server.tombstones = server.tombstones.filter(id => id !== fileId)
+      return
+    }
+
+    const remote = remoteByFileId.get(fileId)
+    if (remote === undefined) {
+      server.tombstones = server.tombstones.filter(id => id !== fileId)
+      delete entries[fileId]
+      return
+    }
+
+    const entry = entries[fileId]
+    let changed: boolean
+    if (entry === undefined) {
+      changed = false
+    } else if (entry.lastSyncedContentHash !== undefined) {
+      changed = entry.lastSyncedContentHash !== (await hashContent(remote.content))
+    } else {
+      changed = remote.updated > entry.lastSyncedUpdated
+    }
+
+    async function deleteRemoteRecord(): Promise<boolean> {
+      try {
+        await client.mindMaps.delete(remote!.id, { signal })
+        return true
+      } catch (error) {
+        if (isNotFoundError(error)) return true
+        result.errors.push({ fileId, message: describeSyncError(error) })
+        return false
+      }
+    }
+
+    if (!changed) {
+      if (!(await deleteRemoteRecord())) return
+      server.tombstones = server.tombstones.filter(id => id !== fileId)
+      delete entries[fileId]
+      remoteDeletedThisRun.add(fileId)
+      result.remoteDeleted += 1
+      return
+    }
+
+    result.conflicts.push({
+      kind: 'deleted-local',
+      fileId,
+      path: remote.path,
+      localModified: entry?.lastSyncedModified ?? remote.updated,
+      remoteUpdated: remote.updated,
+    })
+    if (currentRole === 'prof') {
+      if (!(await deleteRemoteRecord())) return
+      server.tombstones = server.tombstones.filter(id => id !== fileId)
+      delete entries[fileId]
+      remoteDeletedThisRun.add(fileId)
+      result.remoteDeleted += 1
+      result.notices.push({
+        fileId,
+        message: `« ${remote.path} » supprimé malgré une modification depuis votre demande — vous avez le dernier mot`,
+      })
+      return
+    }
+    // L'élève cède : la suppression est annulée, l'entrée reste en retard sur
+    // la révision distante — le tirage qui suit, dans ce même passage,
+    // retélécharge normalement la version plus récente.
+    server.tombstones = server.tombstones.filter(id => id !== fileId)
+    result.notices.push({
+      fileId,
+      message: `« ${remote.path} » : vous l'aviez supprimé, mais il a changé depuis — la version du serveur est restaurée`,
+    })
+  }
+
+  for (const fileId of [...server.tombstones]) {
+    if (aborted()) {
+      result.cancelled = true
+      break
+    }
+    await applyTombstone(fileId)
+  }
+
+  // Rien de plus n'a pu être décidé une fois annulé — un scan mal formé
+  // (jamais réel, seulement un double de test incomplet) ne doit pas non
+  // plus faire échouer ce filtre pour autant.
+  const scansAfterDeletion = aborted()
+    ? scans
+    : scans.filter(scan => scan.kind !== 'map' || !locallyDeletedFileIds.has(scan.meta.id))
+
   // Both halves are known up front, so the caller can show « 4/12 » from the
   // first file rather than a spinner with no end in sight.
-  const total = scans.length + remoteRecords.length
+  const total = scansAfterDeletion.length + remoteRecords.length
   let done = 0
   const report = () => {
     done += 1
@@ -957,7 +1195,7 @@ export async function sync({
     }
   }
 
-  for (const scan of scans) {
+  for (const scan of scansAfterDeletion) {
     if (aborted()) {
       result.cancelled = true
       break
@@ -1078,7 +1316,11 @@ export async function sync({
       result.cancelled = true
       break
     }
-    await pullOne(record)
+    // Un enregistrement que la passe 3 vient de supprimer est encore dans cet
+    // instantané — le retirer avant le tirage évite de ressusciter, dans ce
+    // même passage, ce qu'on vient de supprimer. `report()` compte quand même :
+    // `total` a été fixé sur la taille de cet instantané.
+    if (!remoteDeletedThisRun.has(record.file_id)) await pullOne(record)
     report()
   }
 
@@ -1122,4 +1364,293 @@ export async function sync({
     }
     return created
   }
+}
+
+export interface SyncOneFileParams {
+  client: SyncClient
+  currentUser: string
+  currentRole: UserRole
+  serverUrl: string
+  syncFolderPath: string
+  state: SyncState
+  /** Le chemin ABSOLU du fichier qu'on referme — c'est lui, et lui seul, qui est synchronisé. */
+  filePath: string
+  /** Le fichier actuellement chargé dans le canevas, s'il y en a un : jamais réécrit par un tirage. */
+  openFilePath?: string
+  signal?: AbortSignal
+}
+
+/**
+ * Le même raisonnement que `sync()` — réconciliation, publication
+ * automatique, conflit tranché par rôle — pour UN SEUL fichier : celui qu'on
+ * vient de refermer. Voir la décision de cadrage n°4 de
+ * `2026-09-15-suppression-publication-auto-sync-ciblee-design.md`.
+ *
+ * Ce qu'elle NE paie PAS : `scanFolder` (le dossier entier) et
+ * `mindMaps.getFullList()` (tous les enregistrements, contenu compris) — un
+ * seul enregistrement est demandé, filtré par `file_id`. `assets.getFullList()`
+ * reste appelé : ce ne sont que des triplets `{id, hash, extension}`, pas les
+ * images elles-mêmes, et c'est ce qui permet de savoir lesquelles tirer.
+ *
+ * Ce qu'elle ne fait PAS DU TOUT, délibérément : réconcilier les AUTRES
+ * fichiers, propager une suppression, appliquer une tombstone, publier un
+ * AUTRE fichier local-only, descendre les dossiers vides. Ces passes ont
+ * besoin de la vue d'ensemble — le lancement et l'intervalle (`sync()`,
+ * inchangée) continuent de s'en charger.
+ */
+export async function syncOneFile(params: SyncOneFileParams): Promise<SyncResult> {
+  const { client, currentUser, currentRole, serverUrl, syncFolderPath, state, filePath, openFilePath, signal } = params
+  const result: SyncRunResult = {
+    pushed: 0,
+    pulled: 0,
+    errors: [],
+    cancelled: false,
+    conflicts: [],
+    transferred: [],
+    relocated: 0,
+    moved: [],
+    notices: [],
+    reclassified: 0,
+    merged: [],
+    localDeleted: 0,
+    remoteDeleted: 0,
+    published: 0,
+  }
+
+  // Hors du dossier de synchronisation : ce chemin n'existe pas pour `sync()`
+  // non plus, il n'y a rien à faire.
+  if (!isInsideFolder(filePath, syncFolderPath)) return result
+
+  const viewer: SyncUser = { username: currentUser, role: currentRole }
+  const server = serverStateOf(state, serverUrl, syncFolderPath)
+  const entries = server.entries
+
+  let meta = await loadMindMapMeta(filePath).catch(() => null)
+  if (meta === null) {
+    // Publication automatique — même geste que dans `sync()`, pour ce seul
+    // fichier : le cas le plus courant d'un fichier qu'on vient de créer puis
+    // de refermer.
+    try {
+      await stampMindMapSyncMeta(filePath, viewer.username, viewer.role)
+      meta = await loadMindMapMeta(filePath)
+      if (meta !== null) result.published += 1
+    } catch (error) {
+      result.errors.push({ fileId: filePath, message: describeSyncError(error) })
+      return result
+    }
+  }
+  if (meta === null) return result // pas une carte mentale : rien à synchroniser
+
+  let remote: RemoteMindMapRecord | undefined
+  try {
+    remote = await client.mindMaps.getOne(meta.id, { signal })
+  } catch (error) {
+    result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+    return result
+  }
+
+  const relPath = relativeTo(syncFolderPath, filePath)
+  const entry = entries[meta.id]
+  let currentPath = filePath
+  const iAmProf = currentRole === 'prof'
+
+  // ── Réconciliation de chemin et de type, pour ce fichier seul ───────────
+  if (entry !== undefined) {
+    const lastSyncedPath = seedLastSyncedPath({
+      lastSyncedPath: entry.lastSyncedPath,
+      rootChanged: false,
+      relPath,
+      remotePath: remote?.path,
+    })
+    entry.lastSyncedPath = lastSyncedPath
+
+    const seededType = seedLastSyncedType(entry.lastSyncedType)
+    entry.lastSyncedType = seededType
+    const typeAction = reconcileType({
+      localType: mapTypeOf(meta.type),
+      lastSyncedType: seededType,
+      remoteType: remote === undefined ? undefined : (remote.type ?? ''),
+      iAmProf,
+    })
+    if (typeAction.kind === 'adopt') {
+      try {
+        await setMindMapType(currentPath, typeAction.to)
+        meta = { ...meta, type: typeAction.to }
+        entry.lastSyncedType = typeAction.to
+        result.reclassified += 1
+      } catch (error) {
+        result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+      }
+    }
+    if (remote !== undefined && mapTypeOf(remote.type) === mapTypeOf(meta.type)) {
+      entry.lastSyncedType = mapTypeOf(remote.type)
+    }
+
+    const pathAction = reconcilePath({ relPath, lastSyncedPath, remotePath: remote?.path, iAmProf })
+    if (remote !== undefined && remote.path === relPath) entry.lastSyncedPath = remote.path
+    if (pathAction.kind === 'relocate' && isSafeRelativePath(pathAction.to)) {
+      try {
+        const destination = await join(syncFolderPath, pathAction.to)
+        if (!(await exists(destination)) || isSameFilePath(destination, currentPath)) {
+          await ensureLocalFolder(destination)
+          await renamePath(currentPath, destination)
+          result.moved.push({ fileId: meta.id, from: currentPath, to: destination })
+          currentPath = destination
+          entry.lastSyncedPath = pathAction.to
+          result.relocated += 1
+        }
+      } catch (error) {
+        result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+      }
+    }
+  }
+
+  // ── Contenu : le même plan, le même conflit, la même autorité que `sync()` ──
+  const plan = planPush({ meta, relPath: relativeTo(syncFolderPath, currentPath), currentUser: viewer, entry })
+  const remoteContentHash = plan.content && remote !== undefined ? await hashContent(remote.content) : ''
+  let skipPush = false
+
+  if (plan.content && isConflict(meta, entry, remote, remoteContentHash)) {
+    result.conflicts.push({
+      kind: 'content',
+      fileId: meta.id,
+      path: relativeTo(syncFolderPath, currentPath),
+      localModified: meta.lastModified,
+      remoteUpdated: remote.updated,
+      detail: await conflictDetailOf({ localPath: currentPath, meta, remote, remoteContentHash }),
+    })
+    if (iAmProf) {
+      try {
+        const archived = await archiveRemoteAsLinkedCopy({
+          anchorPath: currentPath,
+          remoteContent: remote.content,
+          author: viewer.username,
+          role: viewer.role,
+        })
+        if (archived !== null) {
+          const remoteAssets = await client.assets.getFullList({ signal })
+          await pullAssetsFor(client, archived.path, referencedAssets(remote.content, remoteAssets), { signal })
+          result.notices.push({
+            fileId: meta.id,
+            message: `« ${relPath} » : modifié des deux côtés — vous avez le dernier mot, l'autre version a été gardée dans « ${fileNameOf(archived.path)} »`,
+          })
+        }
+      } catch (error) {
+        result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+      }
+    } else {
+      try {
+        const archived = await createLinkedCopy({ sourcePath: currentPath, author: viewer.username, role: viewer.role })
+        result.notices.push({
+          fileId: meta.id,
+          message: `« ${relPath} » : modifié des deux côtés — le prof a le dernier mot, votre version a été gardée dans « ${fileNameOf(archived.path)} »`,
+        })
+      } catch (error) {
+        result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+      }
+      skipPush = true
+    }
+  }
+
+  if (!skipPush && (plan.content || plan.path || plan.type) && !(remote === undefined && !plan.content)) {
+    try {
+      let content: string | undefined
+      let contentHash: string | undefined
+      if (plan.content) {
+        const cards = await loadMindMap(currentPath)
+        if (cards === null) throw new Error('carte introuvable')
+        content = serializeMindMap(withoutCopyLink(meta), cards)
+        contentHash = await hashContent(content)
+        const remoteAssets = await client.assets.getFullList({ signal })
+        const knownHashes = new Set(remoteAssets.map(asset => asset.hash))
+        await pushAssetsFor(client, currentPath, knownHashes, { signal })
+      }
+      const sentPath = plan.path || remote === undefined
+      let savedRecord: RemoteMindMapRecord
+      if (remote === undefined) {
+        if (content === undefined) throw new Error('rien à publier')
+        savedRecord = await client.mindMaps.create(
+          { file_id: meta.id, author: meta.author, path: relPath, content, type: mapTypeOf(meta.type) },
+          { signal }
+        )
+      } else {
+        const payload: { path?: string; content?: string; type?: string } = {}
+        if (plan.content) payload.content = content
+        if (plan.path) payload.path = relPath
+        if (plan.type) payload.type = mapTypeOf(meta.type)
+        savedRecord = await client.mindMaps.update(remote.id, payload, { signal })
+      }
+      entries[meta.id] = {
+        lastSyncedModified: plan.content ? meta.lastModified : (entry?.lastSyncedModified ?? meta.lastModified),
+        lastSyncedUpdated: savedRecord.updated,
+        lastSyncedPath: sentPath ? relPath : entry?.lastSyncedPath,
+        lastSyncedType: plan.type || remote === undefined ? mapTypeOf(meta.type) : entry?.lastSyncedType,
+        lastSyncedContentHash: plan.content ? contentHash : entry?.lastSyncedContentHash,
+      }
+      result.pushed += 1
+      result.transferred.push({ fileId: meta.id, path: relPath, direction: 'push' })
+      return result
+    } catch (error) {
+      if (isAbortError(error) || signal?.aborted === true) {
+        result.cancelled = true
+      } else {
+        result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+      }
+      return result
+    }
+  }
+
+  // ── Tirage : seulement si le serveur est plus récent que ce qu'on a vu ──
+  const known = entries[meta.id]
+  if (remote === undefined || (known && known.lastSyncedUpdated >= remote.updated)) return result
+  if (isSameFilePath(currentPath, openFilePath ?? '')) return result // jamais le fichier ouvert
+  if (!isSafeRelativePath(remote.path)) {
+    result.errors.push({ fileId: meta.id, message: 'chemin distant invalide, fichier ignoré' })
+    return result
+  }
+
+  try {
+    const { meta: remoteMeta, cards } = deserializeMindMap(remote.content)
+    const localPath = await join(syncFolderPath, remote.path)
+    const alreadyThere = await exists(localPath)
+    const localMeta = alreadyThere ? await loadMindMapMeta(localPath) : null
+    if (alreadyThere && (localMeta === null || localMeta.id !== meta.id)) {
+      result.errors.push({
+        fileId: meta.id,
+        message: 'un fichier local existe déjà à cet emplacement et n’est pas ce fichier synchronisé',
+      })
+      return result
+    }
+    await ensureLocalFolder(localPath)
+    const localCards = await loadMindMap(localPath)
+    const { cards: mergedCards, floatedCount } = localCards === null ? { cards, floatedCount: 0 } : mergeCards(localCards, cards)
+    if (floatedCount > 0) result.merged.push({ fileId: meta.id, path: remote.path, floatedCount })
+    const applied =
+      remoteMeta === null
+        ? null
+        : {
+            ...remoteMeta,
+            type: mapTypeOf(remote.type),
+            ...(localMeta?.copyLink === undefined ? {} : { copyLink: localMeta.copyLink }),
+          }
+    const serialized = serializeMindMap(applied, mergedCards)
+    await writeTextFile(localPath, serialized)
+    const remoteAssets = await client.assets.getFullList({ signal })
+    await pullAssetsFor(client, localPath, referencedAssets(serialized, remoteAssets), { signal })
+    const comparable = applied === null ? serialized : serializeMindMap(withoutCopyLink(applied), mergedCards)
+    entries[meta.id] = {
+      lastSyncedModified: remoteMeta?.lastModified ?? remote.updated,
+      lastSyncedUpdated: remote.updated,
+      lastSyncedPath: remote.path,
+      lastSyncedType: mapTypeOf(remote.type),
+      lastSyncedContentHash: await hashContent(comparable),
+    }
+    result.pulled += 1
+    result.transferred.push({ fileId: meta.id, path: remote.path, direction: 'pull' })
+  } catch (error) {
+    if (isAbortError(error)) result.cancelled = true
+    else result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+  }
+
+  return result
 }

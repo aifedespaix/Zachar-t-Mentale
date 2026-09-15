@@ -18,8 +18,13 @@ export function syncResultLabel(result: SyncResult): string {
   // Une adoption de type n'est ni un envoi ni une réception : comme un
   // déplacement, elle doit se lire même quand les deux compteurs sont à zéro.
   if ((result.reclassified ?? 0) > 0) parts.push(`${result.reclassified ?? 0} reclassé(s)`)
+  // Une publication automatique n'est pas non plus un envoi : c'est ce qui a
+  // rendu l'envoi possible, un pas de plus qui mérite sa propre ligne.
+  if ((result.published ?? 0) > 0) parts.push(`${result.published ?? 0} publié(s)`)
   const floated = (result.merged ?? []).reduce((sum, entry) => sum + entry.floatedCount, 0)
   if (floated > 0) parts.push(`${floated} carte(s) mise(s) de côté`)
+  if ((result.localDeleted ?? 0) > 0) parts.push(`${result.localDeleted ?? 0} supprimé(s) ici`)
+  if ((result.remoteDeleted ?? 0) > 0) parts.push(`${result.remoteDeleted ?? 0} supprimé(s) sur le serveur`)
   // Un conflit est déjà TRANCHÉ quand `sync()` revient (voir
   // `2026-09-15-autorite-prof-conflits-design.md`) : le mot le dit, pour ne
   // pas laisser croire qu'une décision attend encore quelque part.

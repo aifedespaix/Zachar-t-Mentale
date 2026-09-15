@@ -44,6 +44,9 @@ export interface SyncEventDetail {
   merged: { fileId: string; path: string; floatedCount: number }[]
   relocated: number
   reclassified: number
+  published: number
+  localDeleted: number
+  remoteDeleted: number
   /** Ce que les listes ci-dessus ont perdu au plafonnement, pour ne pas mentir par omission. */
   truncated?: number
 }
@@ -110,6 +113,9 @@ export function buildDetail(result: SyncResult): SyncEventDetail {
     merged: merged.kept,
     relocated: result.relocated ?? 0,
     reclassified: result.reclassified ?? 0,
+    published: result.published ?? 0,
+    localDeleted: result.localDeleted ?? 0,
+    remoteDeleted: result.remoteDeleted ?? 0,
     ...(dropped === 0 ? {} : { truncated: dropped }),
   }
 }

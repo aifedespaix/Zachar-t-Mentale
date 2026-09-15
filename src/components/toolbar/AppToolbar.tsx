@@ -55,7 +55,8 @@ import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsSto
 import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 import { startCircularThemeTransition } from '../../theme/circularReveal'
-import { deletePath, duplicatePath, freeSiblingPath, renamePath } from '../../persistence/fileOps'
+import { duplicatePath, freeSiblingPath, renamePath } from '../../persistence/fileOps'
+import { useDeleteMindMap } from '../../hooks/useDeleteMindMap'
 import { fileNameOf, mindMapBaseName, parentDirOf, separatorOf, withMindMapExtension } from '../../persistence/paths'
 import { quickExport } from '../../export/quickExport'
 import { describeExportError } from '../../export/describeExportError'
@@ -104,6 +105,7 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
   const [naming, setNaming] = useState<PendingNaming | null>(null)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const { deleteEntry } = useDeleteMindMap()
 
   const locked = useCardsStore(s => s.locked)
   // A map that is someone else's is shown locked like any other, but the lock is
@@ -280,13 +282,15 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
     setBusy(true)
     const folder = parentDirOf(filePath)
     try {
-      await deletePath(filePath, false)
+      const { error } = await deleteEntry(filePath, false)
+      if (error !== undefined) {
+        fail(`Impossible de supprimer « ${fileName} » : ${describeError(error)}`)
+        return
+      }
       // Closed BEFORE the tree is re-scanned: leaving the canvas on a file that
       // is gone would let autosave recreate it a keystroke later.
       setCurrentFile(null)
       if (folder) await refreshFolder(folder)
-    } catch (error) {
-      fail(`Impossible de supprimer « ${fileName} » : ${describeError(error)}`)
     } finally {
       setBusy(false)
     }

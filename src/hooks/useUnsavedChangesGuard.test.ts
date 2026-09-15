@@ -18,10 +18,11 @@ vi.mock('@tauri-apps/api/window', () => ({
 }))
 
 vi.mock('../state/useSyncStore', () => ({
-  useSyncStore: { getState: vi.fn(() => ({ syncNow: vi.fn() })) },
+  useSyncStore: { getState: vi.fn(() => ({ syncNow: vi.fn(), syncOneFile: vi.fn() })) },
 }))
 
 import { useSyncStore } from '../state/useSyncStore'
+import { useWorkspaceStore } from '../state/useWorkspaceStore'
 
 import { useUnsavedChangesGuard } from './useUnsavedChangesGuard'
 
@@ -31,6 +32,7 @@ describe('useUnsavedChangesGuard', () => {
     destroy.mockResolvedValue(undefined)
     onCloseRequested.mockClear()
     getCurrentWindowThrows = false
+    useWorkspaceStore.setState({ currentFilePath: '/cours/a.json' })
   })
 
   describe('requestOpenFile', () => {
@@ -84,26 +86,43 @@ describe('useUnsavedChangesGuard', () => {
       expect(setCurrentFile).not.toHaveBeenCalled()
     })
 
-    it('triggers an automatic sync after a successful flush', async () => {
-      const syncNow = vi.fn().mockResolvedValue(undefined)
-      vi.mocked(useSyncStore.getState).mockReturnValue({ syncNow } as any)
+    it('syncs the file it is LEAVING, not the one it is opening, after a successful flush', async () => {
+      const syncOneFile = vi.fn().mockResolvedValue(undefined)
+      vi.mocked(useSyncStore.getState).mockReturnValue({ syncOneFile } as any)
+      useWorkspaceStore.setState({ currentFilePath: '/cours/a.json' })
       const flush = vi.fn().mockResolvedValue(undefined)
       const { result } = renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
 
       act(() => result.current.requestOpenFile('/cours/b.json'))
-      await waitFor(() => expect(syncNow).toHaveBeenCalledWith({ trigger: 'auto' }))
+      await waitFor(() => expect(syncOneFile).toHaveBeenCalledWith('/cours/a.json'))
+    })
+
+    it('syncs nothing when there was no file open to leave', async () => {
+      const syncOneFile = vi.fn().mockResolvedValue(undefined)
+      const syncNow = vi.fn().mockResolvedValue(undefined)
+      vi.mocked(useSyncStore.getState).mockReturnValue({ syncOneFile, syncNow } as any)
+      useWorkspaceStore.setState({ currentFilePath: null })
+      const flush = vi.fn().mockResolvedValue(undefined)
+      const setCurrentFile = vi.fn()
+      const { result } = renderHook(() => useUnsavedChangesGuard(flush, setCurrentFile))
+
+      act(() => result.current.requestOpenFile('/cours/b.json'))
+      await waitFor(() => expect(setCurrentFile).toHaveBeenCalledWith('/cours/b.json'))
+
+      expect(syncOneFile).not.toHaveBeenCalled()
+      expect(syncNow).not.toHaveBeenCalled()
     })
 
     it('does not trigger a sync when the flush fails', async () => {
-      const syncNow = vi.fn().mockResolvedValue(undefined)
-      vi.mocked(useSyncStore.getState).mockReturnValue({ syncNow } as any)
+      const syncOneFile = vi.fn().mockResolvedValue(undefined)
+      vi.mocked(useSyncStore.getState).mockReturnValue({ syncOneFile } as any)
       const flush = vi.fn().mockRejectedValue(new Error('disque plein'))
       const { result } = renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
 
       act(() => result.current.requestOpenFile('/cours/b.json'))
       await waitFor(() => expect(result.current.prompt).not.toBeNull())
 
-      expect(syncNow).not.toHaveBeenCalled()
+      expect(syncOneFile).not.toHaveBeenCalled()
     })
   })
 
@@ -121,16 +140,30 @@ describe('useUnsavedChangesGuard', () => {
       expect(destroy).toHaveBeenCalled()
     })
 
-    it('triggers an automatic sync after a successful flush on close', async () => {
-      const syncNow = vi.fn().mockResolvedValue(undefined)
-      vi.mocked(useSyncStore.getState).mockReturnValue({ syncNow } as any)
+    it('triggers a targeted sync of the still-open file after a successful flush on close', async () => {
+      const syncOneFile = vi.fn().mockResolvedValue(undefined)
+      vi.mocked(useSyncStore.getState).mockReturnValue({ syncOneFile } as any)
+      useWorkspaceStore.setState({ currentFilePath: '/cours/a.json' })
       const flush = vi.fn().mockResolvedValue(undefined)
       renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
       await waitFor(() => expect(onCloseRequested).toHaveBeenCalled())
 
       await act(async () => closeHandler({ preventDefault: vi.fn() }))
 
-      expect(syncNow).toHaveBeenCalledWith({ trigger: 'auto' })
+      expect(syncOneFile).toHaveBeenCalledWith('/cours/a.json')
+    })
+
+    it('triggers no sync on close when no file was open', async () => {
+      const syncOneFile = vi.fn().mockResolvedValue(undefined)
+      vi.mocked(useSyncStore.getState).mockReturnValue({ syncOneFile } as any)
+      useWorkspaceStore.setState({ currentFilePath: null })
+      const flush = vi.fn().mockResolvedValue(undefined)
+      renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
+      await waitFor(() => expect(onCloseRequested).toHaveBeenCalled())
+
+      await act(async () => closeHandler({ preventDefault: vi.fn() }))
+
+      expect(syncOneFile).not.toHaveBeenCalled()
     })
 
     it('prompts instead of closing when the flush fails', async () => {

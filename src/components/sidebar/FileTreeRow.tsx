@@ -6,7 +6,8 @@ import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useTreeDragStore } from '../../state/useTreeDragStore'
-import { renamePath, deletePath, duplicatePath, freeSiblingPath } from '../../persistence/fileOps'
+import { renamePath, duplicatePath, freeSiblingPath } from '../../persistence/fileOps'
+import { useDeleteMindMap } from '../../hooks/useDeleteMindMap'
 import { countDescendants } from '../../persistence/fileTree'
 import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, mindMapExtensionSuffix, withMindMapExtension, isInsideFolder } from '../../persistence/paths'
 import { loadMindMap, mindMapExists, setMindMapType } from '../../persistence/fileStore'
@@ -168,6 +169,7 @@ export function FileTreeRow({
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const rootFolders = useWorkspaceStore(s => s.rootFolders)
   const moveNode = useWorkspaceStore(s => s.moveNode)
+  const { deleteEntry } = useDeleteMindMap()
   // Two booleans, not the drag state itself: subscribing a row to the pointer
   // position would re-render the whole tree on every mouse move.
   const dragging = useTreeDragStore(s => s.source?.path === node.path)
@@ -343,9 +345,8 @@ export function FileTreeRow({
     const separator = separatorOf(node.path)
     // Lu AVANT la suppression : après, il n'y a plus de fichier à interroger.
     const link = meta?.copyLink
-    try {
-      await deletePath(node.path, node.type === 'folder')
-    } catch (error) {
+    const { error } = await deleteEntry(node.path, node.type === 'folder')
+    if (error !== undefined) {
       setWorkspaceError(`Impossible de supprimer « ${node.name} » : ${describeError(error)}`)
       return
     }

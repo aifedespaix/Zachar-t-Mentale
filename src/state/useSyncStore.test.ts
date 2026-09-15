@@ -20,14 +20,14 @@ vi.mock('../sync/pocketBaseAdapter', () => ({
     closeConflict: vi.fn().mockResolvedValue({}),
   }),
 }))
-vi.mock('../sync/syncService', () => ({ sync: vi.fn(), surveySyncFolder: vi.fn() }))
+vi.mock('../sync/syncService', () => ({ sync: vi.fn(), surveySyncFolder: vi.fn(), syncOneFile: vi.fn() }))
 vi.mock('../persistence/syncLog', () => ({ logSyncEvent: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('../persistence/syncStatus', () => ({ loadSyncStatus: vi.fn(), saveSyncStatus: vi.fn() }))
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { DEFAULT_SYNC_SETTINGS } from '../types/syncSettings'
 import { loadServerSyncState, saveSyncState, serverStateOf } from '../persistence/syncState'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
-import { surveySyncFolder, sync } from '../sync/syncService'
+import { surveySyncFolder, sync, syncOneFile } from '../sync/syncService'
 import { logSyncEvent } from '../persistence/syncLog'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { createSyncStore, type SyncStore } from './useSyncStore'
@@ -71,6 +71,7 @@ describe('useSyncStore', () => {
     vi.mocked(saveSyncState).mockReset().mockResolvedValue(undefined)
     vi.mocked(createPocketBaseClient).mockReset()
     vi.mocked(sync).mockReset()
+    vi.mocked(syncOneFile).mockReset()
     vi.mocked(logSyncEvent).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadSyncStatus).mockReset().mockResolvedValue({ lastSuccessAt: null })
     vi.mocked(saveSyncStatus).mockReset().mockResolvedValue(undefined)
@@ -362,6 +363,43 @@ describe('useSyncStore', () => {
     const lines = vi.mocked(logSyncEvent).mock.calls.map(call => `${call[0]} ${call[1]}`)
     expect(lines.some(line => line.startsWith('info') && line.includes('synchronisation demandée'))).toBe(true)
     expect(lines.some(line => line.includes('2 envoyé(s), 1 reçu(s)'))).toBe(true)
+  })
+
+  it('syncOneFile() does nothing, silently, without a folder or a logged-in user', async () => {
+    await store.getState().syncOneFile('/cours/a.zmap')
+    expect(syncOneFile).not.toHaveBeenCalled()
+    expect(store.getState().error).toBeNull()
+  })
+
+  it('syncOneFile() runs the targeted sync for that one file and stores the result', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(syncOneFile).mockResolvedValue({ pushed: 1, pulled: 0, errors: [], cancelled: false, conflicts: [], transferred: [] })
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+
+    await store.getState().syncOneFile('/cours/a.zmap')
+
+    expect(syncOneFile).toHaveBeenCalledWith(
+      expect.objectContaining({ currentUser: 'aife', syncFolderPath: '/cours', filePath: '/cours/a.zmap' })
+    )
+    expect(store.getState().lastResult).toEqual({ pushed: 1, pulled: 0, errors: [], cancelled: false, conflicts: [], transferred: [] })
+    expect(saveSyncState).toHaveBeenCalled()
+    // Un sync ciblé n'occupe jamais l'indicateur du bouton principal.
+    expect(store.getState().status).toBe('idle')
+  })
+
+  it('syncOneFile() never throws to the caller when the run fails — only the journal knows', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    vi.mocked(syncOneFile).mockRejectedValue(new Error('réseau coupé'))
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+
+    await expect(store.getState().syncOneFile('/cours/a.zmap')).resolves.toBeUndefined()
+    expect(store.getState().error).toBeNull()
   })
 
   it('syncNow() logs the raw failure, status included, when the server is unreachable', async () => {

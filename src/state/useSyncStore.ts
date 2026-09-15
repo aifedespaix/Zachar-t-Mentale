@@ -9,7 +9,7 @@ import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { logSyncEvent } from '../persistence/syncLog'
 import { createReportingClient, createSyncClient } from '../sync/pocketBaseAdapter'
 import { reportSyncRun } from '../sync/syncReporting'
-import { surveySyncFolder, sync, type SyncResult } from '../sync/syncService'
+import { surveySyncFolder, sync, syncOneFile as syncOneFileTargeted, type SyncResult } from '../sync/syncService'
 import { syncResultLabel } from '../sync/syncResultLabel'
 import { useWorkspaceStore } from './useWorkspaceStore'
 
@@ -87,6 +87,14 @@ interface SyncStoreState {
   login: (username: string, password: string) => Promise<void>
   logout: () => void
   syncNow: (options?: SyncTriggerOptions) => Promise<void>
+  /**
+   * Le sync ciblé — un seul fichier, celui qu'on referme. Voir
+   * `2026-09-15-suppression-publication-auto-sync-ciblee-design.md`, section 3.
+   * Silencieux par nature : pas de compte connecté ou pas de dossier choisi
+   * n'est pas une erreur ici, juste rien à faire — contrairement à `syncNow`
+   * déclenché à la main, ce chemin est TOUJOURS déclenché en arrière-plan.
+   */
+  syncOneFile: (path: string) => Promise<void>
 }
 
 export type SyncStore = UseBoundStore<StoreApi<SyncStoreState>>
@@ -133,6 +141,21 @@ export function createSyncStore(): SyncStore {
   // The run in flight, so `cancelSync` has something to abort. Cleared at the
   // end of every run, which is what keeps a finished one from being cancelled.
   let runningSync: AbortController | null = null
+  // Une seule file pour TOUT ce qui lit puis réécrit `.sync-state.json` —
+  // `syncNow` (le dossier entier) et `syncOneFile` (un seul fichier), qui
+  // peuvent désormais tourner l'un pendant l'autre. Sans elle, deux
+  // « charger, modifier, sauver » entrelacés écraseraient silencieusement
+  // l'un des deux résultats — pas une perte de contenu (le disque, lui, est
+  // toujours à jour), mais une mémoire de sync fausse jusqu'au prochain run.
+  let stateIoQueue: Promise<unknown> = Promise.resolve()
+  function serialized<T>(work: () => Promise<T>): Promise<T> {
+    const run = stateIoQueue.then(work, work)
+    stateIoQueue = run.then(
+      () => undefined,
+      () => undefined
+    )
+    return run
+  }
 
   return create<SyncStoreState>((set, get) => {
     function clientFor(serverUrl: string): PocketBase {
@@ -370,26 +393,30 @@ export function createSyncStore(): SyncStore {
         )
         try {
           const pb = clientFor(serverUrl)
-          const state = await loadServerSyncState(serverUrl, syncFolderPath)
-          let result: SyncResult
-          try {
-            result = await sync({
-              client: createSyncClient(pb),
-              currentUser: currentUser.username,
-              currentRole: currentUser.role,
-              serverUrl,
-              syncFolderPath,
-              state,
-              openFilePath: useWorkspaceStore.getState().currentFilePath ?? undefined,
-              signal: controller.signal,
-              onProgress: (done, total) => set({ progress: { done, total } }),
-            })
-          } finally {
-            // Whatever ended the run — completion, cancellation or a hard
-            // failure — the per-file cache must keep what did get through, or
-            // the next run would send it all over again.
-            await saveSyncState(state)
-          }
+          // Chargement, synchronisation et sauvegarde de l'état forment une
+          // section critique : `syncOneFile` peut vouloir la même pendant que
+          // celle-ci tourne, voir `serialized`.
+          const result = await serialized(async () => {
+            const state = await loadServerSyncState(serverUrl, syncFolderPath)
+            try {
+              return await sync({
+                client: createSyncClient(pb),
+                currentUser: currentUser.username,
+                currentRole: currentUser.role,
+                serverUrl,
+                syncFolderPath,
+                state,
+                openFilePath: useWorkspaceStore.getState().currentFilePath ?? undefined,
+                signal: controller.signal,
+                onProgress: (done, total) => set({ progress: { done, total } }),
+              })
+            } finally {
+              // Whatever ended the run — completion, cancellation or a hard
+              // failure — the per-file cache must keep what did get through, or
+              // the next run would send it all over again.
+              await saveSyncState(state)
+            }
+          })
 
           await logSyncEvent('info', `synchronisation : ${syncResultLabel(result)}`)
           if (get().verboseLog) {
@@ -468,6 +495,62 @@ export function createSyncStore(): SyncStore {
           // Cleared only if it is still OURS: a run that finished must not
           // disarm the controller of the one that replaced it.
           if (runningSync === controller) runningSync = null
+        }
+      },
+
+      syncOneFile: async (path: string) => {
+        const { serverUrl, syncFolderPath, currentUser } = get()
+        // Silencieux, à dessein : ce chemin part de la fermeture d'un fichier,
+        // que la synchro soit configurée ou non — pas d'un clic qui attend une
+        // explication.
+        if (syncFolderPath === null || currentUser === null) return
+
+        try {
+          const pb = clientFor(serverUrl)
+          const result = await serialized(async () => {
+            const state = await loadServerSyncState(serverUrl, syncFolderPath)
+            try {
+              return await syncOneFileTargeted({
+                client: createSyncClient(pb),
+                currentUser: currentUser.username,
+                currentRole: currentUser.role,
+                serverUrl,
+                syncFolderPath,
+                state,
+                filePath: path,
+                openFilePath: useWorkspaceStore.getState().currentFilePath ?? undefined,
+              })
+            } finally {
+              await saveSyncState(state)
+            }
+          })
+
+          await logSyncEvent('info', `synchronisation ciblée : ${syncResultLabel(result)}`, { path })
+          if (result.errors.length > 0) {
+            await logSyncEvent('error', 'échec de la synchronisation ciblée', result.errors)
+          }
+          // Le dernier résultat visible dans la barre latérale suit le geste le
+          // plus récent — fermer un fichier est aussi une synchronisation.
+          set({ lastResult: result })
+          try {
+            const report = await reportSyncRun(createReportingClient(pb), result, {
+              username: currentUser.username,
+              role: currentUser.role,
+              trigger: 'auto',
+              summary: syncResultLabel(result),
+              device: describeDevice(navigator.userAgent),
+            })
+            if (report.failures.length > 0) {
+              await logSyncEvent('debug', 'compte rendu au serveur partiellement refusé', report.failures)
+            }
+          } catch (error) {
+            await logSyncEvent('debug', 'compte rendu au serveur impossible', error)
+          }
+          await get().refreshPendingCount()
+        } catch (error) {
+          // Jamais de bannière pour ce chemin : voir le commentaire en tête de
+          // fonction. Le journal garde la trace pour qui la cherche.
+          await logSyncEvent('error', `synchronisation ciblée échouée : ${describeSyncStoreError(error)}`, error)
         }
       },
     }
