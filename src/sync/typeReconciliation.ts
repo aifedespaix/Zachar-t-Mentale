@@ -32,19 +32,28 @@ export interface ReconcileTypeParams {
   lastSyncedType: MapType
   /** Le `type` brut de l'enregistrement distant, `undefined` s'il n'y en a pas. */
   remoteType: string | undefined
+  /** Le compte courant a le rôle prof — voir le cas « les deux ont bougé » ci-dessous. */
+  iAmProf: boolean
 }
 
 /**
- * Qui a bougé, et ce qu'il faut en faire. « Premier arrivé gagne, égalité → le
- * serveur » : aucune branche ne dépend du rôle, ce qui rend la règle valable
- * aussi bien pour l'élève dont le prof classe une carte que pour le prof qui
- * vient de classer.
+ * Qui a bougé, et ce qu'il faut en faire.
+ *
+ * Un seul côté bougé : la règle ne dépend pas du rôle, « premier arrivé
+ * gagne » suffit — valable aussi bien pour l'élève dont le prof classe une
+ * carte que pour le prof qui vient de classer.
+ *
+ * Les DEUX ont bougé, vers des types différents : trancher par « égalité → le
+ * serveur » était une course que le classement du PROF pouvait perdre contre
+ * un élève plus rapide à synchroniser. Le prof a le dernier mot, comme pour le
+ * chemin (voir `reconcilePath`) : je pousse mon type si je suis prof, sinon
+ * j'adopte celui du serveur.
  *
  * Le cas « les deux ont bougé vers le MÊME type » rend `none` : l'appelant
  * réamarre l'accord sur la valeur distante, comme la réconciliation de chemins
  * le fait pour un chemin identique des deux côtés.
  */
-export function reconcileType({ localType, lastSyncedType, remoteType }: ReconcileTypeParams): TypeAction {
+export function reconcileType({ localType, lastSyncedType, remoteType, iAmProf }: ReconcileTypeParams): TypeAction {
   // Aucun enregistrement distant : la création enverra le type local, il n'y a
   // rien à réconcilier.
   if (remoteType === undefined) return { kind: 'none' }
@@ -58,5 +67,6 @@ export function reconcileType({ localType, lastSyncedType, remoteType }: Reconci
   if (!iMoved && serverMoved) return { kind: 'adopt', to: remote, bothMoved: false }
   // Les deux ont bougé.
   if (localType === remote) return { kind: 'none' }
+  if (iAmProf) return { kind: 'push-type' }
   return { kind: 'adopt', to: remote, bothMoved: true }
 }

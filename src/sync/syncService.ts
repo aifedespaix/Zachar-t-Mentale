@@ -3,6 +3,7 @@ import { join } from '@tauri-apps/api/path'
 import { loadMindMap, loadMindMapMeta, setMindMapType } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { renamePath } from '../persistence/fileOps'
+import { archiveRemoteAsLinkedCopy, createLinkedCopy } from '../persistence/copyLinkOps'
 import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
 import { serializeMindMap, deserializeMindMap } from '../persistence/serialization'
 import { fileNameOf, isSameFilePath, parentDirOf, separatorOf } from '../persistence/paths'
@@ -112,8 +113,9 @@ export interface SyncConflictDetail {
   remotePath: string
   /**
    * Le contenu distant tel que ce run l'a vu. Il sert au comparatif (compter
-   * les cartes du serveur sans un aller-retour réseau de plus) et à l'empreinte
-   * que « garder ma version » enregistre — voir `resolvedStateEntry`.
+   * les cartes du serveur sans un aller-retour réseau de plus) et, quand
+   * c'est la version locale qui cède, à `archiveRemoteAsLinkedCopy` pour la
+   * mettre à l'abri.
    */
   remoteContent: string
   /** L'empreinte de `remoteContent`, déjà calculée par la détection de conflit. */
@@ -136,7 +138,13 @@ export interface SyncConflictDetail {
   localContent?: string
 }
 
-/** A file both sides changed since the last sync — skipped, never resolved in silence. */
+/**
+ * A file both sides changed since the last sync. Reported here for the
+ * record — this is what `syncReporting.ts` sends to `sync_conflicts` — but
+ * always already resolved by the time it lands in this list: the prof wins,
+ * and the losing side is archived in a linked copy first. Never left open
+ * for a local decision (see `2026-09-15-autorite-prof-conflits-design.md`).
+ */
 export interface SyncConflict {
   fileId: string
   path: string
@@ -160,8 +168,9 @@ export interface SyncResult {
    */
   transferred: { fileId: string; path: string; direction: 'push' | 'pull' }[]
   /**
-   * Files the two sides disagree on. They are NOT pushed and NOT overwritten:
-   * both versions contain work someone did, and only the user can choose.
+   * Files the two sides disagreed on. Already resolved by the time they
+   * appear here — the prof's version wins, the other is archived in a linked
+   * copy — kept for the record (`syncReporting.ts`), not as pending work.
    */
   conflicts: SyncConflict[]
   /**
@@ -585,11 +594,14 @@ async function ensureLocalFolder(path: string): Promise<void> {
  * enregistrements dont on est l'auteur, donc sans elle un fichier que le
  * serveur a déplacé ne reviendrait jamais à sa place.
  *
- * The fork model guarantees a given
- * file is writable server-side by exactly one author, so nothing here
- * resolves a conflict — the newer side (by `meta.lastModified` for a push,
- * by the server's `updated` for a pull) simply wins, and a per-file failure
- * is collected without aborting the rest of the batch.
+ * The fork model guarantees a given file is writable server-side by exactly
+ * one author, so most disagreements resolve themselves: the newer side (by
+ * `meta.lastModified` for a push, by the server's `updated` for a pull)
+ * simply wins. The one case it cannot rule out — both sides changed a shared
+ * file since the last sync — is settled by role, not by timing: the prof
+ * always wins, and whichever side cedes is archived in a linked copy first
+ * (see `2026-09-15-autorite-prof-conflits-design.md`). A per-file failure is
+ * collected without aborting the rest of the batch.
  */
 export async function sync({
   client,
@@ -663,6 +675,7 @@ export async function sync({
       localType: mapTypeOf(scan.meta.type),
       lastSyncedType: seededLastSyncedType,
       remoteType: remote === undefined ? undefined : (remote.type ?? ''),
+      iAmProf: currentRole === 'prof',
     })
     if (typeAction.kind === 'adopt') {
       try {
@@ -693,6 +706,7 @@ export async function sync({
       relPath,
       lastSyncedPath,
       remotePath: remote?.path,
+      iAmProf: currentRole === 'prof',
     })
     // Les deux côtés ont bougé vers le MÊME chemin : `reconcilePath` n'a rien à
     // faire, mais la base doit suivre le chemin distant. Sans ça, un fichier
@@ -800,10 +814,15 @@ export async function sync({
     // rien à envoyer serait un coût pur.
     const remoteContentHash = plan.content && remote !== undefined ? await hashContent(remote.content) : ''
     if (plan.content && isConflict(meta, known, remote, remoteContentHash)) {
-      // Reported, never resolved here: both versions hold work someone did.
+      // Signalé pour le journal et le rapport à l'administration (voir
+      // `syncReporting.ts`), mais TRANCHÉ ici même — le prof a le dernier mot,
+      // voir `2026-09-15-autorite-prof-conflits-design.md`. Rien n'est perdu :
+      // la version qui cède est mise à l'abri dans une copie liée avant d'être
+      // remplacée.
+      const relPath = relativeTo(syncFolderPath, scan.path)
       result.conflicts.push({
         fileId: meta.id,
-        path: relativeTo(syncFolderPath, scan.path),
+        path: relPath,
         localModified: meta.lastModified,
         remoteUpdated: remote.updated,
         // Le comparatif est monté ICI parce que c'est le seul instant où les
@@ -811,7 +830,47 @@ export async function sync({
         // l'enregistrement pour pouvoir seulement compter ses cartes.
         detail: await conflictDetailOf({ localPath: scan.path, meta, remote, remoteContentHash }),
       })
-      return
+
+      if (currentRole !== 'prof') {
+        // L'élève cède : sa version locale part dans une copie liée, et cette
+        // fonction s'arrête là — le tirage qui suit dans ce même passage écrira
+        // la version du prof à sa place, exactement comme il le ferait pour
+        // n'importe quel enregistrement plus récent que ce qu'on a vu.
+        try {
+          const archived = await createLinkedCopy({ sourcePath: scan.path, author: viewer.username, role: viewer.role })
+          result.notices.push({
+            fileId: meta.id,
+            message: `« ${relPath} » : modifié des deux côtés — le prof a le dernier mot, votre version a été gardée dans « ${fileNameOf(archived.path)} »`,
+          })
+        } catch (error) {
+          result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+        }
+        return
+      }
+
+      // Le prof gagne : sa version locale part au serveur comme n'importe quel
+      // push de contenu (la suite de la fonction s'en charge) — mais d'abord,
+      // la version distante qu'elle remplace est mise à l'abri.
+      try {
+        const archived = await archiveRemoteAsLinkedCopy({
+          anchorPath: scan.path,
+          remoteContent: remote.content,
+          author: viewer.username,
+          role: viewer.role,
+        })
+        if (archived !== null) {
+          // Les images que ce contenu référence ne sont pas encore sur cette
+          // machine : sans ce tirage, la copie archivée aurait des images
+          // cassées alors qu'elles existent bel et bien sur le serveur.
+          await pullAssetsFor(client, archived.path, referencedAssets(remote.content, remoteAssets), { signal })
+          result.notices.push({
+            fileId: meta.id,
+            message: `« ${relPath} » : modifié des deux côtés — vous avez le dernier mot, l'autre version a été gardée dans « ${fileNameOf(archived.path)} »`,
+          })
+        }
+      } catch (error) {
+        result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
+      }
     }
 
     try {

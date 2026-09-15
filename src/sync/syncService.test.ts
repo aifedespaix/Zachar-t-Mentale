@@ -17,6 +17,7 @@ vi.mock('../persistence/fileStore', () => ({
   loadMindMap: vi.fn(),
   loadMindMapMeta: vi.fn(),
   setMindMapType: vi.fn(),
+  setMindMapCopyLink: vi.fn(),
 }))
 vi.mock('../persistence/fileTree', () => ({ scanFolder: vi.fn() }))
 vi.mock('../persistence/assets', () => ({
@@ -25,7 +26,7 @@ vi.mock('../persistence/assets', () => ({
   sidecarDirOf: (path: string) => path.replace(/\.zmap$/, '.assets'),
 }))
 
-import { exists, writeTextFile, readDir, rename, mkdir } from '@tauri-apps/plugin-fs'
+import { exists, writeTextFile, readTextFile, readDir, rename, mkdir } from '@tauri-apps/plugin-fs'
 import { loadMindMap, loadMindMapMeta, setMindMapType } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { readAssetBytes, writeAsset } from '../persistence/assets'
@@ -91,6 +92,7 @@ const ELEVE_USER: SyncUser = { username: 'eleve1', role: 'eleve' }
 beforeEach(() => {
   vi.mocked(exists).mockReset().mockResolvedValue(false)
   vi.mocked(writeTextFile).mockReset()
+  vi.mocked(readTextFile).mockReset()
   vi.mocked(readDir).mockReset().mockResolvedValue([])
   vi.mocked(loadMindMap).mockReset()
   vi.mocked(loadMindMapMeta).mockReset()
@@ -723,7 +725,7 @@ describe('sync — conflits', () => {
     }
   }
 
-  it('detects the one case the fork model cannot rule out: both sides moved', async () => {
+  it('reports the one case the fork model cannot rule out — both sides changed — and the prof wins it', async () => {
     localFile('2026-02-01T00:00:00.000Z')
     const client = fakeClient({
       mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
@@ -731,9 +733,8 @@ describe('sync — conflits', () => {
 
     const result = await runSync({ client, state: memory({ ...CACHED }) })
 
-    expect(client.mindMaps.update).not.toHaveBeenCalled()
-    expect(client.mindMaps.create).not.toHaveBeenCalled()
-    expect(result.pushed).toBe(0)
+    // Signalé pour l'audit — inchangé — mais TRANCHÉ dans le même passage : le
+    // courant est prof, sa version part quand même.
     expect(result.conflicts).toEqual([
       {
         fileId: 'file-1',
@@ -747,13 +748,37 @@ describe('sync — conflits', () => {
           remoteContentHash: await hashContent('[]'),
           localCounts: emptyCardCounts(),
           remoteCounts: emptyCardCounts(),
-          // La version locale voyage avec le signalement : c'est la seule copie
-          // qui existe, et sans elle le conflit ne se tranche que devant cette
-          // machine (voir `syncReporting.ts`).
           localContent: serializeMindMap({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z' }, []),
         },
       },
     ])
+    expect(client.mindMaps.update).toHaveBeenCalledTimes(1)
+    expect(result.pushed).toBe(1)
+    // La version distante qu'elle remplace est mise à l'abri avant d'être écrasée.
+    expect(writeTextFile).toHaveBeenCalledWith(expect.stringContaining('a (copie).zmap'), expect.any(String))
+    expect(result.notices?.some(n => n.fileId === 'file-1' && n.message.includes('dernier mot'))).toBe(true)
+  })
+
+  it('an élève cedes a content conflict — no push, the local side is archived instead', async () => {
+    const eleveMeta: MindMapMeta = { id: 'file-1', author: 'eleve1', role: 'eleve', lastModified: '2026-02-01T00:00:00.000Z' }
+    localFile('2026-02-01T00:00:00.000Z')
+    vi.mocked(loadMindMapMeta).mockResolvedValue(eleveMeta)
+    vi.mocked(readTextFile).mockResolvedValue(serializeMindMap(eleveMeta, []))
+    const client = fakeClient({
+      mindMaps: { getFullList: vi.fn().mockResolvedValue([remoteFile('2026-02-01 10:00:00.000Z')]) } as any,
+    })
+
+    const result = await runSync({ client, currentUser: 'eleve1', currentRole: 'eleve', state: memory({ ...CACHED }) })
+
+    expect(result.conflicts).toHaveLength(1)
+    expect(client.mindMaps.update).not.toHaveBeenCalled()
+    expect(client.mindMaps.create).not.toHaveBeenCalled()
+    expect(result.pushed).toBe(0)
+    // Ma version, qui cède, est mise à l'abri…
+    expect(writeTextFile).toHaveBeenCalledWith(expect.stringContaining('a (copie).zmap'), expect.any(String))
+    expect(result.notices?.some(n => n.fileId === 'file-1' && n.message.includes('dernier mot'))).toBe(true)
+    // … et le tirage qui suit, dans ce même passage, écrit la version du prof.
+    expect(result.pulled).toBe(1)
   })
 
   it('carries the comparison a resolution needs: both sides counted, card by card', async () => {
@@ -782,7 +807,7 @@ describe('sync — conflits', () => {
     expect(detail?.remoteCounts).toEqual({ total: 1, byLevel: { 1: 1, 2: 0, 3: 0, 4: 0 }, detached: 0 })
   })
 
-  it('never lets an unreadable side turn a reported conflict into a failed sync', async () => {
+  it('still reports the conflict when a side is unreadable, and fails the push that follows cleanly', async () => {
     vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' }])
     vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, lastModified: '2026-02-01T00:00:00.000Z' })
     vi.mocked(loadMindMap).mockRejectedValue(new Error('disque illisible'))
@@ -799,10 +824,13 @@ describe('sync — conflits', () => {
     expect(result.conflicts).toHaveLength(1)
     expect(result.conflicts[0]?.detail?.localCounts).toEqual(emptyCardCounts())
     expect(result.conflicts[0]?.detail?.remoteCounts).toEqual(emptyCardCounts())
-    // Illisible = pas de pièce jointe, mais le conflit est signalé quand même,
-    // et rien n'a été envoyé par-dessus.
+    // Illisible = pas de pièce jointe, mais le conflit est signalé quand même.
     expect(result.conflicts[0]?.detail?.localContent).toBeUndefined()
+    // Le prof gagne le conflit, mais son propre fichier est illisible : la
+    // tentative de push qui suit échoue proprement, comme n'importe quel push
+    // sur un fichier qu'on ne peut pas lire — rien n'est envoyé.
     expect(client.mindMaps.update).not.toHaveBeenCalled()
+    expect(result.errors).toContainEqual({ fileId: 'file-1', message: 'disque illisible' })
   })
 
   it('is not a conflict when only we moved — that is an ordinary push', async () => {
@@ -858,7 +886,9 @@ describe('sync — conflits', () => {
     const result = await runSync({ client, state: memory({ ...CACHED }) })
 
     expect(result.conflicts).toHaveLength(1)
-    expect(result.pushed).toBe(1) // b.zmap went through
+    // b.zmap allait de toute façon passer ; a.zmap aussi désormais — son
+    // conflit est signalé ET tranché (le prof gagne) dans le même passage.
+    expect(result.pushed).toBe(2)
   })
 })
 
@@ -1248,7 +1278,7 @@ describe('sync — reconciliation des chemins', () => {
     expect(result.relocated).toBe(1)
   })
 
-  it('applies the server path and says so when the two sides moved differently', async () => {
+  it('the prof pushes their own path when the two sides moved differently, rather than relocating', async () => {
     vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'local.zmap', path: '/cours/local.zmap' }])
     vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
     const remote: RemoteMindMapRecord = {
@@ -1264,6 +1294,33 @@ describe('sync — reconciliation des chemins', () => {
 
     const result = await runSync({
       client,
+      state: memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0', lastSyncedPath: 'ancien.zmap' } }),
+    })
+
+    // Le prof a le dernier mot : rien n'est relocalisé localement.
+    expect(rename).not.toHaveBeenCalled()
+    expect(result.notices).toEqual([])
+    expect(client.mindMaps.update).toHaveBeenCalledWith('rec-1', { path: 'local.zmap' }, expect.anything())
+  })
+
+  it('an élève relocates to the server path when the two sides moved differently — the prof already won it there', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'local.zmap', path: '/cours/local.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue({ ...AIFE, author: 'eleve1', role: 'eleve' })
+    const remote: RemoteMindMapRecord = {
+      id: 'rec-1',
+      file_id: 'file-1',
+      author: 'eleve1',
+      path: 'distant.zmap',
+      content: JSON.stringify({ cards: [] }),
+      updated: 'u1',
+      type: '',
+    }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
+
+    const result = await runSync({
+      client,
+      currentUser: 'eleve1',
+      currentRole: 'eleve',
       state: memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0', lastSyncedPath: 'ancien.zmap' } }),
     })
 

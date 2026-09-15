@@ -21,44 +21,62 @@ describe('seedLastSyncedType', () => {
 
 describe('reconcileType', () => {
   it('does nothing when nobody moved', () => {
-    expect(reconcileType({ localType: LOCAL, lastSyncedType: LOCAL, remoteType: LOCAL })).toEqual({ kind: 'none' })
+    expect(reconcileType({ localType: LOCAL, lastSyncedType: LOCAL, remoteType: LOCAL, iAmProf: false })).toEqual({
+      kind: 'none',
+    })
   })
 
   it('pushes when only I moved', () => {
-    expect(reconcileType({ localType: LOCAL, lastSyncedType: 'default', remoteType: 'default' })).toEqual({
+    expect(
+      reconcileType({ localType: LOCAL, lastSyncedType: 'default', remoteType: 'default', iAmProf: false })
+    ).toEqual({
       kind: 'push-type',
     })
   })
 
   it('adopts when only the server moved — the prof classified my card', () => {
-    expect(reconcileType({ localType: 'default', lastSyncedType: 'default', remoteType: LOCAL })).toEqual({
+    expect(
+      reconcileType({ localType: 'default', lastSyncedType: 'default', remoteType: LOCAL, iAmProf: false })
+    ).toEqual({
       kind: 'adopt',
       to: LOCAL,
       bothMoved: false,
     })
   })
 
-  it('gives the server the win when both moved differently', () => {
-    expect(reconcileType({ localType: OTHER, lastSyncedType: 'default', remoteType: LOCAL })).toEqual({
+  it('gives the server the win when both moved differently and I am an élève', () => {
+    expect(reconcileType({ localType: OTHER, lastSyncedType: 'default', remoteType: LOCAL, iAmProf: false })).toEqual({
       kind: 'adopt',
       to: LOCAL,
       bothMoved: true,
     })
   })
 
+  it('gives the prof the win when both moved differently, even though the server already reflects the élève', () => {
+    expect(reconcileType({ localType: OTHER, lastSyncedType: 'default', remoteType: LOCAL, iAmProf: true })).toEqual({
+      kind: 'push-type',
+    })
+  })
+
   it('does nothing when both moved to the same type — the caller re-anchors on the server', () => {
-    expect(reconcileType({ localType: LOCAL, lastSyncedType: 'default', remoteType: LOCAL })).toEqual({ kind: 'none' })
+    expect(reconcileType({ localType: LOCAL, lastSyncedType: 'default', remoteType: LOCAL, iAmProf: false })).toEqual({
+      kind: 'none',
+    })
   })
 
   it('does nothing without a remote record', () => {
-    expect(reconcileType({ localType: LOCAL, lastSyncedType: 'default', remoteType: undefined })).toEqual({
+    expect(
+      reconcileType({ localType: LOCAL, lastSyncedType: 'default', remoteType: undefined, iAmProf: false })
+    ).toEqual({
       kind: 'none',
     })
   })
 
   it('reads an empty remote type as default, exactly like an absent one', () => {
-    expect(reconcileType({ localType: 'default', lastSyncedType: 'default', remoteType: '' })).toEqual({ kind: 'none' })
-    expect(reconcileType({ localType: LOCAL, lastSyncedType: 'default', remoteType: '' })).toEqual({
+    expect(reconcileType({ localType: 'default', lastSyncedType: 'default', remoteType: '', iAmProf: false })).toEqual(
+      { kind: 'none' }
+    )
+    expect(reconcileType({ localType: LOCAL, lastSyncedType: 'default', remoteType: '', iAmProf: false })).toEqual({
       kind: 'push-type',
     })
   })

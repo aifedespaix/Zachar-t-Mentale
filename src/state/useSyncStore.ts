@@ -4,10 +4,6 @@ import type { UserRole, SyncUser } from '../types/card'
 import { DEFAULT_SYNC_SETTINGS, type SyncSettings } from '../types/syncSettings'
 import { loadSyncSettings, saveSyncSettings } from '../persistence/syncSettings'
 import { loadServerSyncState, saveSyncState, serverStateOf } from '../persistence/syncState'
-import { loadMindMapMeta } from '../persistence/fileStore'
-import { createLinkedCopy } from '../persistence/copyLinkOps'
-import { parentDirOf } from '../persistence/paths'
-import { resolvedStateEntry, type ConflictChoice } from '../sync/conflictResolution'
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { logSyncEvent } from '../persistence/syncLog'
@@ -91,21 +87,6 @@ interface SyncStoreState {
   login: (username: string, password: string) => Promise<void>
   logout: () => void
   syncNow: (options?: SyncTriggerOptions) => Promise<void>
-  /**
-   * Applique le choix de l'utilisateur sur UN conflit, et le retire de la liste.
-   *
-   * Rien n'est transféré ici : la décision est écrite dans la mémoire du
-   * dernier sync, et c'est la synchronisation suivante qui la joue par ses
-   * chemins habituels — images comprises, cartes locales mises de côté plutôt
-   * que perdues. Voir `resolvedStateEntry` pour le pourquoi de ce détour.
-   *
-   * `copy` écrit d'abord la copie LIÉE (même dossier, nom suffixé « (copie) »),
-   * puis résout comme « accepter le serveur » : les deux versions survivent.
-   *
-   * @returns si la décision a bien été enregistrée. Un échec laisse le conflit
-   * dans la liste — la boîte de dialogue doit rester sur lui, pas enchaîner.
-   */
-  resolveConflict: (fileId: string, choice: ConflictChoice) => Promise<boolean>
 }
 
 export type SyncStore = UseBoundStore<StoreApi<SyncStoreState>>
@@ -350,86 +331,6 @@ export function createSyncStore(): SyncStore {
         clientFor(get().serverUrl).authStore.clear()
         // Nothing to send on behalf of nobody: the badge goes away with the session.
         set({ currentUser: null, pendingCount: null, localOnlyCount: null, localOnlyPaths: [] })
-      },
-
-      resolveConflict: async (fileId, choice) => {
-        const { lastResult, currentUser, serverUrl, syncFolderPath } = get()
-        const conflict = lastResult?.conflicts.find(entry => entry.fileId === fileId)
-        const detail = conflict?.detail
-        if (conflict === undefined || detail === undefined) {
-          // Un conflit sans comparatif vient d'un résultat écrit par une version
-          // antérieure : il n'y a rien sur quoi appuyer une décision, et le dire
-          // vaut mieux que d'écrire au hasard dans l'état de synchronisation.
-          set({ error: 'Ce conflit date d’une synchronisation trop ancienne. Relancez une synchronisation.' })
-          return false
-        }
-        if (currentUser === null || syncFolderPath === null) {
-          set({ error: 'Connectez-vous et choisissez un dossier de synchronisation avant de résoudre un conflit.' })
-          return false
-        }
-
-        try {
-          let copyPath: string | null = null
-          if (choice === 'copy') {
-            // La copie D'ABORD : si elle échoue, l'état n'a pas bougé et le
-            // conflit est toujours là, entier, à re-décider. Dans l'autre ordre,
-            // la version locale serait déjà condamnée par un tirage à venir.
-            const created = await createLinkedCopy({
-              sourcePath: detail.localPath,
-              author: currentUser.username,
-              role: currentUser.role,
-            })
-            copyPath = created.path
-          }
-
-          const state = await loadServerSyncState(serverUrl, syncFolderPath)
-          const entries = serverStateOf(state, serverUrl, syncFolderPath).entries
-          const known = entries[fileId]
-          if (known === undefined) {
-            // Sans mémoire de ce fichier, il n'y avait déjà plus de conflit à
-            // proprement parler : la synchronisation suivante décidera seule.
-            set({ error: null })
-          } else {
-            // La date est RELUE sur le disque : le fichier a pu être édité entre
-            // la synchronisation qui a signalé le conflit et cette décision, et
-            // figer l'ancienne ferait repartir un envoi qu'on vient de refuser.
-            const localMeta = await loadMindMapMeta(detail.localPath).catch(() => null)
-            entries[fileId] = resolvedStateEntry({
-              choice,
-              entry: known,
-              localModified: localMeta?.lastModified ?? conflict.localModified,
-              remoteUpdated: conflict.remoteUpdated,
-              remoteContentHash: detail.remoteContentHash,
-            })
-            await saveSyncState(state)
-          }
-
-          await logSyncEvent('info', `conflit résolu (${choice}) : « ${conflict.path} »`, { fileId })
-
-          // Le conflit disparaît de la liste TOUT DE SUITE : la boîte de dialogue
-          // enchaîne sur le suivant, et la synchronisation qui suivra réécrira de
-          // toute façon ce résultat.
-          set(current => ({
-            lastResult:
-              current.lastResult === null
-                ? null
-                : { ...current.lastResult, conflicts: current.lastResult.conflicts.filter(item => item.fileId !== fileId) },
-          }))
-
-          if (copyPath !== null) {
-            // L'arborescence doit montrer la copie immédiatement — c'est la
-            // preuve visible que « garder les deux » a bien gardé les deux.
-            const workspace = useWorkspaceStore.getState()
-            await workspace.refreshFolder(parentDirOf(copyPath))
-            workspace.bumpFileMetaRevision()
-          }
-          return true
-        } catch (error) {
-          const message = `La résolution du conflit a échoué : ${describeSettingsError(error)}`
-          await logSyncEvent('error', message, error)
-          set({ error: message })
-          return false
-        }
       },
 
       syncNow: async (options?: SyncTriggerOptions) => {

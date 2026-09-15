@@ -8,9 +8,6 @@ import { formatRelativeTime } from '../../utils/relativeTime'
 import { formatSyncMoment } from '../../utils/syncMoment'
 import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import { clearSyncLog, openSyncLog, revealSyncLog } from '../../persistence/syncLog'
-import { ConflictResolutionDialog } from '../sync/ConflictResolutionDialog'
-import { ResolveConflictsButton } from '../sync/ResolveConflictsButton'
-import { useWorkspaceStore } from '../../state/useWorkspaceStore'
 import { SettingsSection } from './SettingsSection'
 import { SettingToggle } from './SettingToggle'
 import { Button } from '../ui/button'
@@ -47,8 +44,6 @@ export function SyncSettingsPanel() {
   const settingsProblem = useSyncStore(s => s.settingsProblem)
   const localOnlyCount = useSyncStore(s => s.localOnlyCount)
   const localOnlyPaths = useSyncStore(s => s.localOnlyPaths)
-  const resolveConflict = useSyncStore(s => s.resolveConflict)
-  const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const updateSettings = useSyncStore(s => s.updateSettings)
   const { publishAll } = usePublishMindMap()
   const setServerUrl = useSyncStore(s => s.setServerUrl)
@@ -69,8 +64,6 @@ export function SyncSettingsPanel() {
   const [clearingLog, setClearingLog] = useState(false)
   const [publishingLocal, setPublishingLocal] = useState(false)
   const [publishNotice, setPublishNotice] = useState<string | null>(null)
-  /** La boîte de résolution, ouverte depuis la liste des conflits ci-dessous. */
-  const [resolvingConflicts, setResolvingConflicts] = useState(false)
   useEffect(() => {
     setServerUrlDraft(serverUrl)
   }, [serverUrl])
@@ -295,33 +288,17 @@ export function SyncSettingsPanel() {
           )}
         </div>
         {lastResult && lastResult.conflicts.length > 0 && (
-          <>
-            <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--warning-fg)' }}>
-              {lastResult.conflicts.map(conflict => (
-                <li key={conflict.fileId}>
-                  {conflict.path} : modifié ici le {formatSyncMoment(conflict.localModified)} et sur le serveur le{' '}
-                  {formatSyncMoment(conflict.remoteUpdated)} — rien n’a été écrasé, choisissez la version à garder.
-                </li>
-              ))}
-            </ul>
-            {/* Le même bouton que sur le message de la barre latérale : la
-                liste ci-dessus DIT le problème, lui seul y répond. */}
-            <div style={{ marginTop: 8 }}>
-              <ResolveConflictsButton
-                count={lastResult.conflicts.length}
-                onClick={() => setResolvingConflicts(true)}
-              />
-            </div>
-          </>
-        )}
-        {resolvingConflicts && lastResult && (
-          <ConflictResolutionDialog
-            conflicts={lastResult.conflicts}
-            openFilePath={currentFilePath}
-            onResolve={resolveConflict}
-            onApply={() => syncNow()}
-            onClose={() => setResolvingConflicts(false)}
-          />
+          // Un conflit est déjà TRANCHÉ à ce stade (voir `syncService.ts` :
+          // le prof a le dernier mot, rien n'attend plus de décision) — cette
+          // liste est un journal, pas une file d'attente.
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--muted-foreground)' }}>
+            {lastResult.conflicts.map(conflict => (
+              <li key={conflict.fileId}>
+                {conflict.path} : modifié des deux côtés, résolu automatiquement le{' '}
+                {formatSyncMoment(conflict.remoteUpdated)}.
+              </li>
+            ))}
+          </ul>
         )}
         {lastResult && lastResult.errors.length > 0 && (
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--warning-fg)' }}>

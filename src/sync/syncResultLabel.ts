@@ -20,7 +20,10 @@ export function syncResultLabel(result: SyncResult): string {
   if ((result.reclassified ?? 0) > 0) parts.push(`${result.reclassified ?? 0} reclassé(s)`)
   const floated = (result.merged ?? []).reduce((sum, entry) => sum + entry.floatedCount, 0)
   if (floated > 0) parts.push(`${floated} carte(s) mise(s) de côté`)
-  if (result.conflicts.length > 0) parts.push(`${result.conflicts.length} conflit(s)`)
+  // Un conflit est déjà TRANCHÉ quand `sync()` revient (voir
+  // `2026-09-15-autorite-prof-conflits-design.md`) : le mot le dit, pour ne
+  // pas laisser croire qu'une décision attend encore quelque part.
+  if (result.conflicts.length > 0) parts.push(`${result.conflicts.length} conflit(s) résolu(s)`)
   if ((result.notices ?? []).length > 0) parts.push(`${(result.notices ?? []).length} remarque(s)`)
   if (result.errors.length > 0) parts.push(`${result.errors.length} erreur(s)`)
   // The counts of an interrupted run are partial by definition: the suffix is

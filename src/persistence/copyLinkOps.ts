@@ -1,5 +1,5 @@
 import { exists, readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
-import type { MindMapMeta, UserRole } from '../types/card'
+import type { Card, MindMapMeta, UserRole } from '../types/card'
 import {
   copyLink as makeCopyLink,
   copySuffixFor,
@@ -93,6 +93,30 @@ export async function linkedGroupOf(path: string): Promise<LinkedMember[]> {
 }
 
 /**
+ * Le prochain chemin libre pour une copie de `baseName` dans `folder` — le
+ * cœur commun à `createLinkedCopy` et `archiveRemoteAsLinkedCopy` : trouver un
+ * rang que personne n'occupe déjà, ni parmi les membres connus du groupe, ni
+ * sur le disque (une copie manuelle, un reliquat).
+ */
+async function nextLinkedCopyPath(params: {
+  folder: string
+  baseName: string
+  /** Les rangs déjà pris par les membres connus du groupe. */
+  usedIndexes: readonly number[]
+}): Promise<{ path: string; index: number }> {
+  const { folder, baseName, usedIndexes } = params
+  let used = usedIndexes
+  let index = nextCopyIndex(used)
+  let destPath = joinPath(folder, `${baseName}${copySuffixFor(index)}${MIND_MAP_EXTENSION}`)
+  while (await exists(destPath)) {
+    used = [...used, index]
+    index = nextCopyIndex(used)
+    destPath = joinPath(folder, `${baseName}${copySuffixFor(index)}${MIND_MAP_EXTENSION}`)
+  }
+  return { path: destPath, index }
+}
+
+/**
  * Écrit la copie liée de `sourcePath` et pose le lien des DEUX côtés.
  *
  * C'est le bouton orange de la résolution de conflits : « gardez les deux ».
@@ -128,17 +152,10 @@ export async function createLinkedCopy(params: {
   // Le rang du fichier COPIÉ compte parmi les rangs pris : il est exclu du
   // recensement des voisins (c'est lui qui demande), et l'oublier ferait
   // proposer son propre nom à la copie qu'on est en train de faire de lui.
-  const used = [...siblings, { link: meta.copyLink }].flatMap(member =>
+  const usedIndexes = [...siblings, { link: meta.copyLink }].flatMap(member =>
     member.link?.index === undefined ? [] : [member.link.index]
   )
-  let index = nextCopyIndex(used)
-  let destPath = joinPath(folder, `${baseName}${copySuffixFor(index)}${MIND_MAP_EXTENSION}`)
-  // Un fichier sans lien peut déjà occuper ce nom (une copie manuelle, un
-  // reliquat) : on prend le rang suivant plutôt que d'écraser quoi que ce soit.
-  while (await exists(destPath)) {
-    index = nextCopyIndex([...used, index])
-    destPath = joinPath(folder, `${baseName}${copySuffixFor(index)}${MIND_MAP_EXTENSION}`)
-  }
+  const { path: destPath, index } = await nextLinkedCopyPath({ folder, baseName, usedIndexes })
 
   const link = makeCopyLink(groupId, baseName, index)
   const copyMeta: MindMapMeta = {
@@ -156,6 +173,65 @@ export async function createLinkedCopy(params: {
   // laisserait, si l'écriture échoue, un fichier qui se dit lié à une copie
   // qui n'existe pas.
   if (meta.copyLink === undefined) await setMindMapCopyLink(sourcePath, sourceLink(groupId, baseName))
+
+  return { path: destPath, link }
+}
+
+/**
+ * Met à l'abri, dans une copie liée, un contenu qui n'est PAS sur le disque de
+ * cette machine — le contenu distant qu'un push de prof est sur le point de
+ * remplacer (voir `2026-09-15-autorite-prof-conflits-design.md`).
+ *
+ * Même règle que `createLinkedCopy`, en miroir : c'est `anchorPath` (le
+ * fichier du prof, qui garde SON contenu et part au serveur tel quel) qui
+ * apprend le lien, et `remoteContent` qui devient la copie. Les images que ce
+ * contenu référence ne sont pas encore sur cette machine : c'est à l'appelant
+ * de les tirer une fois le fichier écrit (voir `pullAssetsFor` dans
+ * `syncService.ts`), ce module restant délibérément sans accès réseau.
+ *
+ * `null` si `anchorPath` n'a pas d'identité de synchronisation, ou si
+ * `remoteContent` ne se désérialise pas — mettre en copie un contenu qu'on ne
+ * sait pas lire n'a pas de sens, et ce n'est jamais la faute de l'appelant.
+ */
+export async function archiveRemoteAsLinkedCopy(params: {
+  anchorPath: string
+  remoteContent: string
+  author: string
+  role: UserRole
+}): Promise<{ path: string; link: CopyLink } | null> {
+  const { anchorPath, remoteContent, author, role } = params
+  const anchorMeta = await loadMindMapMeta(anchorPath).catch(() => null)
+  if (anchorMeta === null) return null
+
+  let remote: { meta: MindMapMeta | null; cards: Card[] }
+  try {
+    remote = deserializeMindMap(remoteContent)
+  } catch {
+    return null
+  }
+
+  const folder = parentDirOf(anchorPath)
+  const groupId = anchorMeta.copyLink?.groupId ?? anchorMeta.id
+  const baseName = anchorMeta.copyLink?.baseName ?? mindMapBaseName(anchorPath)
+
+  const siblings = await linkedMembersIn(folder, groupId, anchorPath)
+  const usedIndexes = [...siblings, { link: anchorMeta.copyLink }].flatMap(member =>
+    member.link?.index === undefined ? [] : [member.link.index]
+  )
+  const { path: destPath, index } = await nextLinkedCopyPath({ folder, baseName, usedIndexes })
+
+  const link = makeCopyLink(groupId, baseName, index)
+  const copyMeta: MindMapMeta = {
+    id: crypto.randomUUID(),
+    author,
+    role,
+    lastModified: new Date().toISOString(),
+    copyLink: link,
+  }
+  if (anchorMeta.type !== undefined) copyMeta.type = anchorMeta.type
+  await writeTextFile(destPath, serializeMindMap(copyMeta, remote.cards))
+
+  if (anchorMeta.copyLink === undefined) await setMindMapCopyLink(anchorPath, sourceLink(groupId, baseName))
 
   return { path: destPath, link }
 }

@@ -33,7 +33,7 @@ describe('seedLastSyncedPath', () => {
 })
 
 describe('reconcilePath', () => {
-  const base = { relPath: 'Chimie/atomes.zmap', lastSyncedPath: 'Chimie/atomes.zmap' }
+  const base = { relPath: 'Chimie/atomes.zmap', lastSyncedPath: 'Chimie/atomes.zmap', iAmProf: false }
 
   it('does nothing when nothing moved', () => {
     expect(reconcilePath({ ...base, remotePath: 'Chimie/atomes.zmap' })).toEqual({ kind: 'none' })
@@ -44,22 +44,47 @@ describe('reconcilePath', () => {
   })
 
   it('pushes my path when I am the one who moved', () => {
-    expect(reconcilePath({ relPath: 'Chimie/atomes 2.zmap', lastSyncedPath: 'Chimie/atomes.zmap', remotePath: 'Chimie/atomes.zmap' }))
-      .toEqual({ kind: 'push-path' })
+    expect(
+      reconcilePath({
+        relPath: 'Chimie/atomes 2.zmap',
+        lastSyncedPath: 'Chimie/atomes.zmap',
+        remotePath: 'Chimie/atomes.zmap',
+        iAmProf: false,
+      })
+    ).toEqual({ kind: 'push-path' })
   })
 
   it('relocates locally when the server is the one that moved', () => {
-    expect(reconcilePath({ relPath: 'Chimie/atomes.zmap', lastSyncedPath: 'Chimie/atomes.zmap', remotePath: 'Chimie/atomes du carbone.zmap' }))
-      .toEqual({ kind: 'relocate', to: 'Chimie/atomes du carbone.zmap', bothMoved: false })
+    expect(
+      reconcilePath({
+        relPath: 'Chimie/atomes.zmap',
+        lastSyncedPath: 'Chimie/atomes.zmap',
+        remotePath: 'Chimie/atomes du carbone.zmap',
+        iAmProf: false,
+      })
+    ).toEqual({ kind: 'relocate', to: 'Chimie/atomes du carbone.zmap', bothMoved: false })
   })
 
   it('says nothing when both sides moved to the SAME path', () => {
-    expect(reconcilePath({ relPath: 'Chimie/atomes 2.zmap', lastSyncedPath: 'Chimie/atomes.zmap', remotePath: 'Chimie/atomes 2.zmap' }))
-      .toEqual({ kind: 'none' })
+    expect(
+      reconcilePath({
+        relPath: 'Chimie/atomes 2.zmap',
+        lastSyncedPath: 'Chimie/atomes.zmap',
+        remotePath: 'Chimie/atomes 2.zmap',
+        iAmProf: false,
+      })
+    ).toEqual({ kind: 'none' })
   })
 
-  it('lets the server win when both sides moved differently, and says so', () => {
-    expect(reconcilePath({ relPath: 'Chimie/a.zmap', lastSyncedPath: 'Chimie/atomes.zmap', remotePath: 'Chimie/b.zmap' }))
-      .toEqual({ kind: 'relocate', to: 'Chimie/b.zmap', bothMoved: true })
+  it('lets the server win when both sides moved differently and I am an élève', () => {
+    expect(
+      reconcilePath({ relPath: 'Chimie/a.zmap', lastSyncedPath: 'Chimie/atomes.zmap', remotePath: 'Chimie/b.zmap', iAmProf: false })
+    ).toEqual({ kind: 'relocate', to: 'Chimie/b.zmap', bothMoved: true })
+  })
+
+  it('lets the prof win when both sides moved differently, even though the server already reflects the élève', () => {
+    expect(
+      reconcilePath({ relPath: 'Chimie/a.zmap', lastSyncedPath: 'Chimie/atomes.zmap', remotePath: 'Chimie/b.zmap', iAmProf: true })
+    ).toEqual({ kind: 'push-path' })
   })
 })
