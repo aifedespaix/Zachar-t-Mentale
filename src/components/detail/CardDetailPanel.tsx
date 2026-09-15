@@ -27,7 +27,7 @@ import { useWorkspaceStore } from '../../state/useWorkspaceStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 import { useCommand } from '../../hooks/useCommand'
-import { ancestorTitles } from '../../state/cardsReducer'
+import { ancestorTitles, siblingsOf, childrenOf } from '../../state/cardsReducer'
 import { clampCardLevel, detachedColors } from '../../colors/levelColors'
 import { toCss } from '../../colors/contrast'
 import { contentOf, blocksToPlainText } from '../../content/blocks'
@@ -444,7 +444,13 @@ export function CardDetailPanel() {
                 fiche: two dialogs for the same card must be impossible, and the
                 store already holds which card is being edited. */}
             {editingCard !== undefined && (
-              <FicheEditor card={editingCard} cards={cards} onClose={() => setEditing(null)} />
+              // Keyed by card id: the edge arrows inside the dialog navigate
+              // by asking the store to edit a different card, which changes
+              // `editingCard` without unmounting this call site on its own —
+              // the key is what forces a fresh `DescriptionDialog` (and a
+              // fresh draft seeded from the new card) rather than reusing the
+              // old instance with the new card's props stapled onto it.
+              <FicheEditor key={editingCard.id} card={editingCard} cards={cards} onClose={() => setEditing(null)} />
             )}
           </aside>
         </ContextMenuTrigger>
@@ -681,6 +687,7 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
   // card had nothing to read a second ago, so nothing was opened for it, and
   // saving it is exactly the moment the fiche becomes worth showing.
   const show = useCardDetailStore(s => s.show)
+  const setEditing = useCardDetailStore(s => s.setEditing)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const theme = useResolvedTheme()
@@ -688,8 +695,21 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
   const levelAppearance = useAppearanceSettingsStore(s => s.levels[level])
   const colors = card.detached === true ? detachedColors[theme] : levelAppearance.color[theme]
 
+  // The edge arrows' targets: the parent above, the first child below (with
+  // a count when there is more than one), and this card's neighbours at the
+  // same level on either side. `siblingsOf` includes the card itself, sorted
+  // in display order, so its own position in that list is where the left/
+  // right split falls.
+  const parent = card.parentId === null ? undefined : cards.find(c => c.id === card.parentId)
+  const children = childrenOf(cards, card.id)
+  const siblings = siblingsOf(cards, card.id)
+  const ownIndex = siblings.findIndex(sibling => sibling.id === card.id)
+  const prevSibling = ownIndex > 0 ? siblings[ownIndex - 1] : undefined
+  const nextSibling = ownIndex >= 0 && ownIndex < siblings.length - 1 ? siblings[ownIndex + 1] : undefined
+
   return (
     <DescriptionDialog
+      cardId={card.id}
       breadcrumb={ancestorTitles(cards, card.id)}
       cardTitle={card.title}
       blocks={contentOf(card)}
@@ -698,6 +718,11 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
         if (blocks.length > 0) show(card.id)
       }}
       onClose={onClose}
+      parentTarget={parent && { id: parent.id, title: parent.title }}
+      childTarget={children[0] && { id: children[0].id, title: children[0].title, count: children.length }}
+      prevSibling={prevSibling && { id: prevSibling.id, title: prevSibling.title }}
+      nextSibling={nextSibling && { id: nextSibling.id, title: nextSibling.title }}
+      onNavigate={setEditing}
       // The dialog's title field mirrors the card's own — same colours, same
       // rename — so "the biggest, most present place to work on this card" is
       // recognisably the same card, not a bare form.

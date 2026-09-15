@@ -138,9 +138,7 @@ describe('BlockView — degenerate data from a shared file', () => {
 
   it('wraps every block in a horizontal scroller, so wide content cannot widen the popover', () => {
     // KaTeX display math is `white-space: nowrap` and ships no scroller.
-    const { container } = render(
-      <BlockView blocks={[{ kind: 'math', latex: 'x', display: true }]} resolveAsset={resolve} />
-    )
+    const { container } = render(<BlockView blocks={[{ kind: 'math', latex: 'x' }]} resolveAsset={resolve} />)
     expect(container.querySelector('[style*="overflow-x"]')).not.toBeNull()
   })
 

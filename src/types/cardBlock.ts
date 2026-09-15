@@ -13,10 +13,24 @@
  * XMind `notes.plain.content`, `salvage()` — keeps working on a degraded but
  * never empty value, instead of being rewritten all at once.
  */
+/**
+ * A table cell holding either plain text or a formula.
+ *
+ * A plain string is text — the shape every table on disk already has, so no
+ * migration is needed: a `string[][]` is already a valid `TableCell[][]`.
+ * `{ latex }` is deliberately the only other shape, one field, easy to tell
+ * apart from text at a glance in the JSON and impossible to confuse with a
+ * future richer cell kind.
+ */
+export type TableCell = string | { latex: string }
+
 export type CardBlock =
   | { kind: 'text'; text: string }
-  /** `display` centres the formula on its own line, as opposed to inline in a sentence. */
-  | { kind: 'math'; latex: string; display?: boolean }
+  /**
+   * Every math block is its own line by construction — the block list IS the
+   * line breaks — so there is no "inline in a sentence" case left to toggle.
+   */
+  | { kind: 'math'; latex: string }
   /**
    * `asset` is a file name inside the map's sidecar folder, never an absolute
    * path — an absolute path breaks the moment the workspace is moved or the
@@ -24,6 +38,6 @@ export type CardBlock =
    * insertion so the renderer can reserve the box before the file decodes.
    */
   | { kind: 'image'; asset: string; alt: string; width: number; height: number }
-  | { kind: 'table'; header: string[]; rows: string[][] }
+  | { kind: 'table'; header: string[]; rows: TableCell[][] }
 
 export type CardBlockKind = CardBlock['kind']

@@ -77,7 +77,7 @@ describe('CardDetailPanel', () => {
     const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
     await user.clear(field)
     await user.type(field, 'Réécrite')
-    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
     expect(useCardsStore.getState().history.present.find(c => c.id === leaf.id)?.definition).toBe('Réécrite')
   })
@@ -92,7 +92,7 @@ describe('CardDetailPanel', () => {
 
     await user.click(screen.getByRole('button', { name: /ajouter une description/i }))
     await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), 'On garde le plus grand.')
-    await user.click(screen.getByRole('button', { name: /^enregistrer$/i }))
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
     expect(useCardDetailStore.getState().open.some(entry => entry.cardId === bare.id)).toBe(true)
     expect(screen.getByText(/on garde le plus grand/i)).toBeInTheDocument()

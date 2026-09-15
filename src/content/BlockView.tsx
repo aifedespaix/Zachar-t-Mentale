@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import type { CardBlock } from '../types/cardBlock'
+import type { CardBlock, TableCell } from '../types/cardBlock'
 import { renderMathToHtml } from './renderMath'
 import { renderHighlighted, stripHighlightMarkers } from './highlight'
 
@@ -87,7 +87,9 @@ const BlockItem = memo(function BlockItem({
       )
 
     case 'math': {
-      const html = renderMathToHtml(block.latex, block.display === true)
+      // Every math block is its own line, so it always typesets in display
+      // mode — there is no "inline in a sentence" case left to distinguish.
+      const html = renderMathToHtml(block.latex, true)
       if (html === '') return null
       // Safe: KaTeX escapes the text it emits, and `trust: false` keeps it
       // from building links or embedding resources (see renderMath tests).
@@ -166,7 +168,7 @@ const BlockItem = memo(function BlockItem({
               <tr key={rowIndex}>
                 {row.map((cell, cellIndex) => (
                   <td key={cellIndex} style={{ border: '1px solid currentColor', padding: '2px 6px' }}>
-                    {cell}
+                    <TableCellView cell={cell} />
                   </td>
                 ))}
               </tr>
@@ -176,3 +178,13 @@ const BlockItem = memo(function BlockItem({
       )
   }
 })
+
+/** A table cell in either of its two modes — a formula typesets inline, never centred on its own line the way a standalone math block does: a cell is part of a row, not a paragraph. */
+function TableCellView({ cell }: { cell: TableCell }) {
+  if (typeof cell === 'string') return <>{cell}</>
+  const html = renderMathToHtml(cell.latex, false)
+  if (html === '') return null
+  // Safe: KaTeX escapes the text it emits, and `trust: false` keeps it from
+  // building links or embedding resources (see renderMath tests).
+  return <span dangerouslySetInnerHTML={{ __html: html }} />
+}

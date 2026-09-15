@@ -24,6 +24,13 @@ export interface MathFieldEditorProps {
   ariaLabel: string
   /** Shown until the editor is available, and kept if it never becomes available. */
   fallback: React.ReactNode
+  /**
+   * Plain Enter — never Shift+Enter, which MathLive's own field keeps for
+   * moving between rows of a multi-line construct. A formula is one block, so
+   * Enter is the same "new block below" gesture every other field offers, not
+   * a character this field needs to insert.
+   */
+  onEnter?: () => void
   ref?: React.Ref<MathFieldHandle>
 }
 
@@ -62,7 +69,7 @@ function loadMathLive(): Promise<void> {
  * type, and a field that swaps itself out mid-sentence is worse than one that
  * never upgrades.
  */
-export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, ref }: MathFieldEditorProps) {
+export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter, ref }: MathFieldEditorProps) {
   // Decided ONCE, at mount, and never revisited while this block is open.
   //
   // Reacting to the import resolving would mean the field can be replaced
@@ -77,6 +84,8 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, ref }: M
   // without the effect having to tear the element down and rebuild it.
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const onEnterRef = useRef(onEnter)
+  onEnterRef.current = onEnter
   // Same reason as `onChangeRef`: the handle below is built once, so it must
   // not close over the formula as it was at mount.
   const latexRef = useRef(latex)
@@ -121,6 +130,11 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, ref }: M
     field.style.width = '100%'
     field.value = latex
     field.addEventListener('input', () => onChangeRef.current(field.value))
+    field.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || event.shiftKey) return
+      event.preventDefault()
+      onEnterRef.current?.()
+    })
     host.replaceChildren(field)
     fieldRef.current = field
 
