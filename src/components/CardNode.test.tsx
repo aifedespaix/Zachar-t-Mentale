@@ -90,6 +90,11 @@ function resetQuizStore() {
   })
 }
 
+/** Opens the card's Options menu — where Détacher/Supprimer now live. */
+async function openOptionsMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Options' }))
+}
+
 describe('CardNode', () => {
   beforeEach(() => {
     useCardDetailStore.getState().closeAll()
@@ -187,7 +192,8 @@ describe('CardNode', () => {
   // dessous" never render regardless of lock. This only asserts on the
   // buttons that DO render for a root ("->" and "x") plus the drag handle,
   // which is always present.
-  it('hides the structural buttons and the drag handle (but keeps their space) when the mind map is locked', () => {
+  it('hides the structural buttons and the drag handle (but keeps their space) when the mind map is locked', async () => {
+    const user = userEvent.setup()
     useCardsStore.setState({ locked: true })
     renderCardNode(testCard)
 
@@ -200,17 +206,21 @@ describe('CardNode', () => {
 
     expect(addChildButton).not.toBeVisible()
     expect(screen.getByTestId('drag-handle')).not.toBeVisible()
-    // The footer actions stay in place (they are part of the card's own
-    // layout, not floating chrome) and are disabled instead.
-    expect(screen.getByRole('button', { name: 'Supprimer' })).toBeDisabled()
+    // The Options menu stays in place (it is part of the card's own layout,
+    // not floating chrome) and its items are disabled instead.
+    await openOptionsMenu(user)
+    expect(screen.getByRole('menuitem', { name: 'Supprimer' })).toHaveAttribute('aria-disabled', 'true')
   })
 
-  it('keeps the structural buttons visible when the mind map is unlocked', () => {
+  it('keeps the structural buttons visible when the mind map is unlocked', async () => {
+    const user = userEvent.setup()
     renderCardNode(testCard)
 
     expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Supprimer' })).toBeVisible()
     expect(screen.getByTestId('drag-handle')).toBeVisible()
+
+    await openOptionsMenu(user)
+    expect(screen.getByRole('menuitem', { name: 'Supprimer' })).toBeVisible()
   })
 })
 
@@ -274,13 +284,16 @@ describe('CardNode structural buttons', () => {
     expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toBeInTheDocument()
   })
 
-  it('renders the + and -> buttons for an applicable card', () => {
+  it('renders the + and -> buttons for an applicable card', async () => {
+    const user = userEvent.setup()
     const child: Card = { id: 'child', level: 2, title: 'Enfant', parentId: 'root', order: 0 }
     resetStore([testCard, child])
     renderCardNode(child)
     expect(screen.getByRole('button', { name: /ajouter au-dessus/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /ajouter un enfant/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Supprimer' })).toBeEnabled()
+
+    await openOptionsMenu(user)
+    expect(screen.getByRole('menuitem', { name: 'Supprimer' })).not.toHaveAttribute('aria-disabled', 'true')
   })
 })
 
@@ -295,7 +308,8 @@ describe('CardNode delete', () => {
     resetStore([testCard, child])
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await openOptionsMenu(user)
+    await user.click(screen.getByRole('menuitem', { name: 'Supprimer' }))
     expect(useCardsStore.getState().history.present).toHaveLength(1)
   })
 
@@ -304,7 +318,8 @@ describe('CardNode delete', () => {
     resetStore([testCard, child, grandchild])
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await openOptionsMenu(user)
+    await user.click(screen.getByRole('menuitem', { name: 'Supprimer' }))
     expect(screen.getByText(/supprimer cette carte et ses 1 descendants/i)).toBeInTheDocument()
     for (const name of [/annuler/i, /détacher les enfants/i, /tout supprimer/i]) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument()
@@ -317,7 +332,8 @@ describe('CardNode delete', () => {
     resetStore([testCard, child, grandchild])
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await openOptionsMenu(user)
+    await user.click(screen.getByRole('menuitem', { name: 'Supprimer' }))
     await user.click(screen.getByRole('button', { name: /tout supprimer/i }))
     expect(useCardsStore.getState().history.present.map(c => c.id)).toEqual(['root'])
   })
@@ -327,7 +343,8 @@ describe('CardNode delete', () => {
     resetStore([testCard, child, grandchild])
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await openOptionsMenu(user)
+    await user.click(screen.getByRole('menuitem', { name: 'Supprimer' }))
     await user.click(screen.getByRole('button', { name: /détacher les enfants/i }))
 
     const cards = useCardsStore.getState().history.present
@@ -340,14 +357,17 @@ describe('CardNode delete', () => {
     resetStore([testCard, child, grandchild])
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await openOptionsMenu(user)
+    await user.click(screen.getByRole('menuitem', { name: 'Supprimer' }))
     await user.click(screen.getByRole('button', { name: /annuler/i }))
     expect(useCardsStore.getState().history.present).toHaveLength(3)
   })
 
-  it('disables the delete button on a childless root (nothing to remove)', () => {
+  it('disables the delete item on a childless root (nothing to remove)', async () => {
+    const user = userEvent.setup()
     renderCardNode(testCard)
-    expect(screen.getByRole('button', { name: 'Supprimer' })).toBeDisabled()
+    await openOptionsMenu(user)
+    expect(screen.getByRole('menuitem', { name: 'Supprimer' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('lets the root empty itself, saying the root card is kept', async () => {
@@ -355,7 +375,8 @@ describe('CardNode delete', () => {
     resetStore([testCard, child, grandchild])
     renderCardNode(testCard)
 
-    await user.click(screen.getByRole('button', { name: 'Supprimer' }))
+    await openOptionsMenu(user)
+    await user.click(screen.getByRole('menuitem', { name: 'Supprimer' }))
     expect(screen.getByText(/supprimer les 2 descendants de la carte racine/i)).toBeInTheDocument()
     expect(screen.getByText(/la carte racine ne peut pas être supprimée/i)).toBeInTheDocument()
 
@@ -374,7 +395,8 @@ describe('CardNode detach', () => {
     const user = userEvent.setup()
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: /détacher/i }))
+    await openOptionsMenu(user)
+    await user.click(screen.getByRole('menuitem', { name: /détacher/i }))
     expect(useCardsStore.getState().history.present.find(c => c.id === 'child')).toMatchObject({
       detached: true,
       parentId: null,
@@ -386,7 +408,8 @@ describe('CardNode detach', () => {
     resetStore([testCard, child, grandchild])
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: /détacher/i }))
+    await openOptionsMenu(user)
+    await user.click(screen.getByRole('menuitem', { name: /détacher/i }))
     expect(screen.getByText(/deviendront 2 cartes volantes individuelles/i)).toBeInTheDocument()
     // Nothing happens until the user accepts.
     expect(useCardsStore.getState().history.present.some(c => c.detached)).toBe(false)
@@ -401,20 +424,25 @@ describe('CardNode detach', () => {
     resetStore([testCard, child, grandchild])
     renderCardNode(child)
 
-    await user.click(screen.getByRole('button', { name: /détacher/i }))
+    await openOptionsMenu(user)
+    await user.click(screen.getByRole('menuitem', { name: /détacher/i }))
     await user.click(screen.getByRole('button', { name: /annuler/i }))
     expect(useCardsStore.getState().history.present.some(c => c.detached)).toBe(false)
   })
 
-  it('offers no detach action on the root card', () => {
+  it('offers no detach action on the root card', async () => {
+    const user = userEvent.setup()
     renderCardNode(testCard)
-    expect(screen.queryByRole('button', { name: /détacher/i })).not.toBeInTheDocument()
+    await openOptionsMenu(user)
+    expect(screen.queryByRole('menuitem', { name: /détacher/i })).not.toBeInTheDocument()
   })
 
-  it('disables the detach action while the mind map is locked', () => {
+  it('disables the detach action while the mind map is locked', async () => {
+    const user = userEvent.setup()
     useCardsStore.getState().toggleLock()
     renderCardNode(child)
-    expect(screen.getByRole('button', { name: /détacher/i })).toBeDisabled()
+    await openOptionsMenu(user)
+    expect(screen.getByRole('menuitem', { name: /détacher/i })).toHaveAttribute('aria-disabled', 'true')
   })
 })
 
@@ -429,21 +457,25 @@ describe('CardNode floating (detached) cards', () => {
     expect(screen.getByTestId('card-floating').className).toContain('card-node--detached')
   })
 
-  it('offers no way to give it children or siblings (it is a scratch area)', () => {
+  it('offers no way to give it children or siblings (it is a scratch area)', async () => {
+    const user = userEvent.setup()
     renderCardNode(floating)
     expect(screen.queryByRole('button', { name: /ajouter un enfant/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /ajouter au-dessus/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /ajouter en dessous/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /détacher/i })).not.toBeInTheDocument()
+
+    await openOptionsMenu(user)
+    expect(screen.queryByRole('menuitem', { name: /détacher/i })).not.toBeInTheDocument()
   })
 
   it('can still be deleted — it is not the root, despite having no parent', async () => {
     const user = userEvent.setup()
     renderCardNode(floating)
 
-    const deleteButton = screen.getByRole('button', { name: 'Supprimer' })
-    expect(deleteButton).toBeEnabled()
-    await user.click(deleteButton)
+    await openOptionsMenu(user)
+    const deleteItem = screen.getByRole('menuitem', { name: 'Supprimer' })
+    expect(deleteItem).not.toHaveAttribute('aria-disabled', 'true')
+    await user.click(deleteItem)
     expect(useCardsStore.getState().history.present.map(c => c.id)).toEqual(['root'])
   })
 })
@@ -460,94 +492,6 @@ describe('CardNode drag handle', () => {
     useCardsStore.getState().toggleLock()
     renderCardNode(testCard)
     expect(screen.getByTestId('drag-handle')).toHaveAttribute('aria-disabled', 'true')
-  })
-})
-
-describe('CardNode mnemonic icon', () => {
-  const cardWithIcon: Card = { ...testCard, icon: 'Brain' }
-
-  beforeEach(() => {
-    useCardDetailStore.getState().closeAll()
-    resetStore([testCard])
-    resetQuizStore()
-  })
-
-  it('offers an empty icon slot on a card that has none', () => {
-    renderCardNode(testCard)
-    expect(screen.getByRole('button', { name: 'Ajouter une icône' })).toBeInTheDocument()
-    expect(screen.getByTestId('card-icon-badge')).not.toHaveAttribute('data-icon')
-  })
-
-  it('shows the card’s icon, and offers to change it', () => {
-    renderCardNode(cardWithIcon)
-    expect(screen.getByTestId('card-icon-badge')).toHaveAttribute('data-icon', 'Brain')
-    expect(screen.getByRole('button', { name: 'Changer l’icône' })).toBeInTheDocument()
-  })
-
-  it('renders nothing at all for an icon name it does not know', () => {
-    // A card written by a later version of the app, or hand-edited: the name
-    // is unusable, the card still renders.
-    renderCardNode({ ...testCard, icon: 'PasUneIcone' })
-    expect(screen.getByTestId('card-icon-badge')).not.toHaveAttribute('data-icon')
-  })
-
-  it('picks an icon from the dialog and stores it on the card', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard)
-
-    await user.click(screen.getByRole('button', { name: 'Ajouter une icône' }))
-    await user.type(screen.getByRole('searchbox', { name: 'Rechercher une icône' }), 'cerveau')
-    await user.click(await screen.findByRole('option', { name: 'brain' }))
-
-    expect(useCardsStore.getState().history.present[0].icon).toBe('Brain')
-    // The choice closes the dialog: there is nothing else to do in it.
-    expect(screen.queryByText('Choisir une icône')).not.toBeInTheDocument()
-  })
-
-  it('removes the icon from the dialog, leaving no key behind', async () => {
-    const user = userEvent.setup()
-    resetStore([cardWithIcon])
-    renderCardNode(cardWithIcon)
-
-    await user.click(screen.getByRole('button', { name: 'Changer l’icône' }))
-    await user.click(screen.getByRole('button', { name: 'Retirer l’icône' }))
-
-    expect('icon' in useCardsStore.getState().history.present[0]).toBe(false)
-  })
-
-  it('offers nothing to remove on a card that has no icon', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard)
-
-    await user.click(screen.getByRole('button', { name: 'Ajouter une icône' }))
-
-    expect(screen.queryByRole('button', { name: 'Retirer l’icône' })).not.toBeInTheDocument()
-  })
-
-  it('keeps showing the icon on a locked map, but not as a button', () => {
-    resetStore([cardWithIcon])
-    useCardsStore.getState().toggleLock()
-    renderCardNode(cardWithIcon)
-
-    // The picture is the memory hook the card exists for — it stays. Changing
-    // it is an edit, and the map is locked.
-    expect(screen.getByTestId('card-icon-badge')).toHaveAttribute('data-icon', 'Brain')
-    expect(screen.queryByRole('button', { name: 'Changer l’icône' })).not.toBeInTheDocument()
-  })
-
-  it('drops the empty slot entirely on a locked map', () => {
-    useCardsStore.getState().toggleLock()
-    renderCardNode(testCard)
-    expect(screen.queryByTestId('card-icon-badge')).not.toBeInTheDocument()
-  })
-
-  it('keeps the icon during a quiz, without the button', () => {
-    resetStore([cardWithIcon])
-    useQuizStore.setState({ active: true })
-    renderCardNode(cardWithIcon)
-
-    expect(screen.getByTestId('card-icon-badge')).toHaveAttribute('data-icon', 'Brain')
-    expect(screen.queryByRole('button', { name: 'Changer l’icône' })).not.toBeInTheDocument()
   })
 })
 
@@ -584,21 +528,13 @@ describe('CardNode footer', () => {
     expect(empty).not.toBe('')
   })
 
-  it('flips the card visually when the flip icon is clicked, without altering any card data', async () => {
+  it('describes the "view in panel" eye button with a tooltip', async () => {
     const user = userEvent.setup()
-    renderCardNode(testCard)
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
 
-    await user.click(screen.getByRole('button', { name: /retourner/i }))
-    expect(screen.getByTestId(`card-${testCard.id}`)).toHaveAttribute('data-flipped', 'true')
-    expect(useCardsStore.getState().history.present).toEqual([testCard])
-  })
-
-  it('describes each footer icon with a tooltip', async () => {
-    const user = userEvent.setup()
-    renderCardNode(testCard)
-
-    await user.hover(screen.getByRole('button', { name: /retourner/i }))
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Retourner')
+    await user.hover(screen.getByRole('button', { name: /afficher dans le panneau/i }))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Afficher dans le panneau')
   })
 
   it('replaces the title field with the shape of the answer while a recall question is pending', () => {
@@ -690,8 +626,7 @@ describe('CardNode footer', () => {
     useQuizStore.setState({ active: true })
     renderCardNode(testCard)
 
-    expect(screen.queryByRole('button', { name: /supprimer/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /retourner/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument()
   })
 
   it('opens the answer dialog from the Répondre button', async () => {
@@ -803,26 +738,16 @@ describe('CardNode footer', () => {
     expect(useCardDetailStore.getState().editingCardId).toBe(cardWithDefinition.id)
   })
 
-  it('shows the definition in the right panel when the card itself is clicked', async () => {
+  it('opens nothing when the card body is clicked, filled or not — only the eye button opens the fiche', async () => {
     const user = userEvent.setup()
     resetStore([cardWithDefinition])
-    renderCardNode(cardWithDefinition)
+    const { rerenderWith } = renderCardNode(cardWithDefinition)
 
     await user.click(screen.getByTestId(`card-${cardWithDefinition.id}`))
+    expect(useCardDetailStore.getState().open).toEqual([])
 
-    expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([cardWithDefinition.id])
-    // Reading, not writing: the fiche is the destination, the editor is not.
-    expect(useCardDetailStore.getState().editingCardId).toBeNull()
-  })
-
-  it('opens nothing when a card with no description is clicked', async () => {
-    // There is nothing to read, and an empty panel would be a click spent on
-    // nothing — its badge opens the editor instead.
-    const user = userEvent.setup()
-    renderCardNode(testCard)
-
+    rerenderWith(testCard)
     await user.click(screen.getByTestId(`card-${testCard.id}`))
-
     expect(useCardDetailStore.getState().open).toEqual([])
   })
 
@@ -837,29 +762,15 @@ describe('CardNode footer', () => {
     expect(useCardDetailStore.getState().open).toEqual([])
   })
 
-  it('keeps a single fiche when the same card is clicked twice', async () => {
+  it('shows the fiche in the panel from the eye button, without opening the editor', async () => {
     const user = userEvent.setup()
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
 
-    const card = screen.getByTestId(`card-${cardWithDefinition.id}`)
-    await user.click(card)
-    await user.click(card)
+    await user.click(screen.getByRole('button', { name: /afficher dans le panneau/i }))
 
-    expect(useCardDetailStore.getState().open).toHaveLength(1)
-  })
-
-  it('queues no fiche when a card is clicked during a quiz', async () => {
-    // The panel is unmounted for the whole quiz, so a fiche opened here would
-    // only surface after it — long after the click that asked for it.
-    const user = userEvent.setup()
-    useQuizStore.setState({ active: true })
-    resetStore([cardWithDefinition])
-    renderCardNode(cardWithDefinition)
-
-    await user.click(screen.getByTestId(`card-${cardWithDefinition.id}`))
-
-    expect(useCardDetailStore.getState().open).toEqual([])
+    expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([cardWithDefinition.id])
+    expect(useCardDetailStore.getState().editingCardId).toBeNull()
   })
 
   it('marks itself as a reparent drop target when data.isReparentTarget is set', () => {
@@ -1146,17 +1057,26 @@ describe('the fiche corner badge', () => {
     expect(screen.queryByText('Définition existante')).not.toBeInTheDocument()
   })
 
-  it('opens the fiche and its editor when clicked, and reflects the open state via aria-pressed', async () => {
+  it('opens the fiche and its editor when the "modifier" button is clicked', async () => {
     const user = userEvent.setup()
     renderCardNode(cardWithDefinition)
 
-    const badge = screen.getByRole('button', { name: /modifier la description/i })
-    expect(badge).toHaveAttribute('aria-pressed', 'false')
-
-    await user.click(badge)
+    await user.click(screen.getByRole('button', { name: /modifier la description/i }))
 
     expect(useCardDetailStore.getState().open.some(entry => entry.cardId === cardWithDefinition.id)).toBe(true)
     expect(useCardDetailStore.getState().editingCardId).toBe(cardWithDefinition.id)
+  })
+
+  it('reflects the open state on the eye button via aria-pressed', async () => {
+    const user = userEvent.setup()
+    renderCardNode(cardWithDefinition)
+
+    const eye = screen.getByRole('button', { name: /afficher dans le panneau/i })
+    expect(eye).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(eye)
+
+    expect(useCardDetailStore.getState().open.some(entry => entry.cardId === cardWithDefinition.id)).toBe(true)
   })
 })
 
@@ -1230,21 +1150,8 @@ describe('CardNode size', () => {
 
     const row = screen.getByTestId('card-' + testCard.id).querySelector('.card-footer') as HTMLElement
     expect(row.style.justifyContent).toBe('center')
-    expect(row.style.height).toBe('28px')
+    expect(row.style.height).toBe('36px')
     expect(row.style.marginTop).toBe('')
-  })
-
-  it('keeps the mnemonic icon in the bottom-left corner and the description badge in the bottom-right', () => {
-    renderCardNode(testCard)
-
-    const icon = screen.getByTestId('card-icon-button')
-    expect(icon.style.bottom).toBe('6px')
-    expect(icon.style.left).toBe('6px')
-    expect(icon.style.top).toBe('')
-
-    const fiche = screen.getByRole('button', { name: /description/i })
-    expect(fiche.style.bottom).toBe('6px')
-    expect(fiche.style.right).toBe('6px')
   })
 
   it('gives the card the paddings the floating buttons and the drag handle need, and nothing more', () => {

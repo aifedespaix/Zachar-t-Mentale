@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { AlertTriangle, Pencil, Save, Trash2, X } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
@@ -28,6 +28,13 @@ function seedFrom(blocks: CardBlock[]): CardBlock[] {
   return blocks.length > 0 ? blocks : [{ kind: 'text', text: '' }]
 }
 
+/** The title field's colours — the card's own level palette, resolved to CSS by the caller. */
+export interface TitleChipColors {
+  bg: string
+  border: string
+  text: string
+}
+
 export interface DescriptionDialogProps {
   /** Ancestors, root first — the breadcrumb that says which card this is. */
   breadcrumb: string[]
@@ -39,6 +46,14 @@ export interface DescriptionDialogProps {
   onInsertImage?: BlockEditorProps['onInsertImage']
   onPickImage?: BlockEditorProps['onPickImage']
   onError?: (message: string) => void
+  /**
+   * Renames the card straight from the dialog's own title field. Omitted
+   * leaves the title read-only — there is nowhere for a rename to write back
+   * to.
+   */
+  onRenameTitle?: (title: string) => void
+  /** Paints the title field like the card itself; omitted falls back to a neutral chip. */
+  titleColors?: TitleChipColors
 }
 
 /**
@@ -70,6 +85,8 @@ export function DescriptionDialog({
   onInsertImage,
   onPickImage,
   onError,
+  onRenameTitle,
+  titleColors,
 }: DescriptionDialogProps) {
   // Seeded once, at mount. `blocks` is deliberately not watched afterwards:
   // this is a draft, and re-reading the card mid-edit would fight the typing.
@@ -77,8 +94,18 @@ export function DescriptionDialog({
   const [draft, setDraft] = useState<CardBlock[]>(initial.current)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // Its own short-lived draft, same idea as the card's own title field but
+  // simpler: this dialog is mounted fresh on every open (see the note above),
+  // so there is no external re-render to re-seed against mid-edit.
+  const [titleDraft, setTitleDraft] = useState(cardTitle)
 
   const dirty = blocksDiffer(draft, initial.current)
+
+  function commitTitle() {
+    const next = titleDraft.trim()
+    if (next !== '' && next !== cardTitle) onRenameTitle?.(next)
+    else setTitleDraft(cardTitle)
+  }
 
   function save() {
     onSave(draft)
@@ -169,8 +196,8 @@ export function DescriptionDialog({
             zIndex: 50,
             display: 'flex',
             flexDirection: 'column',
-            width: 'min(1100px, 92vw)',
-            height: 'min(85vh, 900px)',
+            width: 'min(1400px, 95vw)',
+            height: 'min(92vh, 1100px)',
             background: 'var(--popover)',
             color: 'var(--popover-foreground)',
             border: '1px solid var(--border)',
@@ -179,12 +206,54 @@ export function DescriptionDialog({
             outline: 'none',
           }}
         >
-          <header style={{ padding: '14px 18px 10px', borderBottom: '1px solid var(--border)' }}>
+          <header style={{ padding: '16px 20px 14px', borderBottom: '1px solid var(--border)' }}>
             {breadcrumb.length > 0 && (
-              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 2 }}>{breadcrumb.join(' › ')}</div>
+              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>{breadcrumb.join(' › ')}</div>
             )}
-            <DialogPrimitive.Title style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-              {cardTitle}
+            <DialogPrimitive.Title asChild>
+              <div
+                className={`description-dialog-title-chip${onRenameTitle ? ' is-editable' : ''}`}
+                style={
+                  {
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 14px',
+                    borderRadius: 8,
+                    border: `2px solid ${titleColors?.border ?? 'var(--border)'}`,
+                    background: titleColors?.bg ?? 'var(--muted)',
+                    color: titleColors?.text ?? 'var(--foreground)',
+                    '--chip-accent': titleColors?.border ?? 'var(--foreground)',
+                  } as CSSProperties
+                }
+              >
+                <input
+                  aria-label="Titre de la carte"
+                  value={titleDraft}
+                  readOnly={!onRenameTitle}
+                  size={Math.max(titleDraft.length, 1)}
+                  onChange={event => setTitleDraft(event.target.value)}
+                  onBlur={commitTitle}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      event.currentTarget.blur()
+                    }
+                    if (event.key === 'Escape') setTitleDraft(cardTitle)
+                  }}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'inherit',
+                    font: 'inherit',
+                    fontSize: 16,
+                    fontWeight: 600,
+                    outline: 'none',
+                    cursor: onRenameTitle ? 'text' : 'default',
+                  }}
+                />
+                {onRenameTitle && <Pencil size={13} className="title-chip-pencil" aria-hidden />}
+              </div>
             </DialogPrimitive.Title>
           </header>
 

@@ -274,13 +274,6 @@ export const COMMANDS = [
     defaultBinding: 'Mod+Enter',
   },
   {
-    id: 'card.pickIcon',
-    label: 'Choisir une icône',
-    description: 'Ouvre le sélecteur d’icône de la carte sélectionnée.',
-    category: 'card',
-    defaultBinding: 'Mod+Shift+I',
-  },
-  {
     id: 'card.detach',
     label: 'Détacher la carte',
     description: 'Sort la carte de la hiérarchie et la transforme en carte volante.',
