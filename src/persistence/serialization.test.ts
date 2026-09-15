@@ -32,4 +32,14 @@ describe('deserializeMindMap', () => {
     expect(() => deserializeMindMap(JSON.stringify({ foo: 'bar' }))).toThrow()
     expect(() => deserializeMindMap('"just a string"')).toThrow()
   })
+
+  it('round-trips correctsId and correctsSnapshot through serialize/deserialize', () => {
+    const metaWithFreshness: MindMapMeta = {
+      ...meta,
+      correctsId: 'exo-abc-123',
+      correctsSnapshot: { total: 5, byLevel: { 1: 1, 2: 2, 3: 1, 4: 1 }, detached: 0 },
+    }
+    const json = serializeMindMap(metaWithFreshness, cards)
+    expect(deserializeMindMap(json)).toEqual({ meta: metaWithFreshness, cards })
+  })
 })

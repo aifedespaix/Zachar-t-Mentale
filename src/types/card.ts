@@ -1,6 +1,7 @@
 import type { CardBlock } from './cardBlock'
 import type { MapType } from './mapType'
 import type { CopyLink } from '../sync/copyLink'
+import type { CardCounts } from '../sync/cardCounts'
 
 export type CardLevel = 1 | 2 | 3 | 4
 
@@ -34,6 +35,19 @@ export interface MindMapMeta {
    * fichiers : seul « Créer une copie » en pose un (voir `sync/copyLink.ts`).
    */
   copyLink?: CopyLink
+  /**
+   * Le `meta.id` de l'exo corrigé par ce fichier `corrections` — posé et lu
+   * uniquement par la skill `transformer-cours-en-carte-mentale`, jamais par
+   * l'app. Absent sur tout fichier qui n'est pas une correction.
+   */
+  correctsId?: string
+  /**
+   * Le compte de cartes de l'exo lié au moment où la correction a été
+   * écrite/vérifiée pour la dernière fois — sert à la skill à détecter
+   * qu'une correction est devenue obsolète. Voir
+   * `docs/superpowers/specs/2026-09-14-fraicheur-corrections-design.md`.
+   */
+  correctsSnapshot?: CardCounts
 }
 
 /**
