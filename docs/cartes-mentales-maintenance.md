@@ -158,7 +158,7 @@ tard si l'exo a bougé).
 
 ## Sous-projet 3 — Nettoyage + ingestion de `.cours/to-injest/`
 
-**Statut** : 🟡 En cours — tri et ingestion terminés pour les matières en
+**Statut** : ✅ Terminé — tri et ingestion terminés pour les matières en
 périmètre (`arts-plastiques`, `français 4e`, `histoire-geo` 3e) ;
 `histoire-geo` 4e/5e/6A reste hors périmètre sauf demande explicite de
 l'utilisateur (voir ci-dessous)
@@ -305,8 +305,14 @@ et "Nouveau" prof. **Ne pas convertir avant d'avoir trié.**
       activité 6 est un tableau vierge à remplir (révolutions de février/
       octobre 1917), aucune réponse à convertir. **Rien de nouveau à
       ingérer pour la 3e**, ce sous-point est donc terminé
-- [ ] Pour les exercices rencontrés en cours d'ingestion, appliquer la même
-      logique que le sous-projet 2 (créer aussi une correction)
+- [x] Pour les exercices rencontrés en cours d'ingestion, appliquer la même
+      logique que le sous-projet 2 (créer aussi une correction) — le seul
+      exercice rencontré pendant ce sous-projet,
+      `francais/conjugaison-participe-passe.zmap`, a déjà sa correction
+      (`conjugaison-participe-passe-corrections.zmap`), créée en même temps
+      que lui. Aucun autre exercice n'a été ingéré dans ce sous-projet
+      (arts-plastiques et histoire-geo 3e n'avaient rien à convertir, le
+      reste de français 4e étant hors périmètre — voir ci-dessus)
 
 Ce sous-projet est volumineux : le découper en sessions par dossier plutôt
 que d'essayer de tout faire d'un coup.
