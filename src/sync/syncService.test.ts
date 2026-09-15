@@ -74,7 +74,7 @@ function fakeClient(overrides: Partial<SyncClient> = {}): SyncClient {
 
 /** Un document v2 avec les entrées voulues pour le serveur de test. */
 function memory(entries: Record<string, SyncStateEntry> = {}, syncFolderPath: string | null = '/cours'): SyncState {
-  return { version: 2, servers: { 'https://pb.test': { syncFolderPath, entries, tombstones: [] } } }
+  return { version: 2, servers: { 'https://pb.test': { syncFolderPath, entries, tombstones: [], folderTombstones: [], knownFolders: [] } } }
 }
 
 /**
@@ -1385,7 +1385,7 @@ describe('sync — reconciliation des chemins', () => {
       syncFolderPath: '/autre',
       // Entrée SANS `lastSyncedPath` : c'est là, et seulement là, que la racine
       // mémorisée décide de l'amarrage.
-      state: { version: 2, servers: { 'https://pb.test': { syncFolderPath: '/cours', entries: { 'file-1': { lastSyncedModified: 'm0', lastSyncedUpdated: 'u0' } }, tombstones: [] } } },
+      state: { version: 2, servers: { 'https://pb.test': { syncFolderPath: '/cours', entries: { 'file-1': { lastSyncedModified: 'm0', lastSyncedUpdated: 'u0' } }, tombstones: [], folderTombstones: [], knownFolders: [] } } },
     })
 
     expect(rename).toHaveBeenCalledWith('/autre/a.zmap', '/autre/Chimie/a.zmap')
@@ -1833,6 +1833,80 @@ describe('sync — dossiers vides', () => {
 })
 
 /**
+ * La symétrie `dossiers` — création ET suppression d'un enregistrement de
+ * dossier vide, réservée au prof. Un élève ne touche jamais à l'agencement
+ * décidé ailleurs.
+ */
+describe('sync — dossiers (symétrie complète)', () => {
+  /** L'arbre local d'un dossier vide : aucun chemin de carte ne l'implique. */
+  const EMPTY_FOLDER_TREE = [{ type: 'folder', name: 'Chapitre 5', path: '/cours/Chapitre 5', children: [] }]
+
+  function folderClient(params: {
+    remote?: { id: string; path: string }[]
+    create?: ReturnType<typeof vi.fn>
+    remove?: ReturnType<typeof vi.fn>
+  }) {
+    return fakeClient({
+      folders: {
+        getFullList: vi.fn().mockResolvedValue(params.remote ?? []),
+        create:
+          params.create ??
+          vi.fn().mockImplementation(async (path: string, createdBy: string) => ({ id: 'new', path, created_by: createdBy })),
+        delete: params.remove ?? vi.fn().mockResolvedValue(undefined),
+      },
+    } as any)
+  }
+
+  it('prof : crée l’enregistrement distant d’un dossier local vide', async () => {
+    vi.mocked(scanFolder).mockResolvedValue(EMPTY_FOLDER_TREE as any)
+    const create = vi.fn().mockImplementation(async (path: string, createdBy: string) => ({ id: 'new', path, created_by: createdBy }))
+    const state = memory()
+
+    const result = await runSync({ client: folderClient({ create }), state })
+
+    expect(create).toHaveBeenCalledWith('Chapitre 5', 'aife', expect.anything())
+    expect(state.servers['https://pb.test'].knownFolders).toEqual(['Chapitre 5'])
+    expect(result.errors).toEqual([])
+  })
+
+  it('élève : ne crée aucun enregistrement de dossier', async () => {
+    vi.mocked(scanFolder).mockResolvedValue(EMPTY_FOLDER_TREE as any)
+    const create = vi.fn()
+    const state = memory()
+
+    await runSync({ client: folderClient({ create }), state, currentUser: 'eleve1', currentRole: 'eleve' })
+
+    expect(create).not.toHaveBeenCalled()
+    expect(state.servers['https://pb.test'].knownFolders).toEqual([])
+  })
+
+  it('pousse la tombstone d’un dossier, puis l’oublie', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const remove = vi.fn().mockResolvedValue(undefined)
+    const state = memory()
+    state.servers['https://pb.test'].folderTombstones = ['Chapitre 5']
+
+    await runSync({ client: folderClient({ remote: [{ id: 'fold-1', path: 'Chapitre 5' }], remove }), state })
+
+    expect(remove).toHaveBeenCalledWith('fold-1', expect.anything())
+    expect(state.servers['https://pb.test'].folderTombstones).toEqual([])
+    expect(state.servers['https://pb.test'].knownFolders).toEqual([])
+  })
+
+  it('une violation d’unicité compte comme un succès', async () => {
+    vi.mocked(scanFolder).mockResolvedValue(EMPTY_FOLDER_TREE as any)
+    const already = Object.assign(new Error('déjà là'), { status: 400 })
+    const create = vi.fn().mockRejectedValue(already)
+    const state = memory()
+
+    const result = await runSync({ client: folderClient({ create }), state })
+
+    expect(result.errors).toEqual([])
+    expect(state.servers['https://pb.test'].knownFolders).toEqual(['Chapitre 5'])
+  })
+})
+
+/**
  * Le LIEN DE COPIE est un arrangement de fichiers LOCAL : il ne monte pas au
  * serveur, et un tirage ne l'efface pas. Ces deux tests tiennent les deux bouts
  * — sans le premier, une autre machine hériterait d'un badge promettant une
@@ -2193,7 +2267,7 @@ describe('syncOneFile', () => {
       currentRole: 'prof',
       serverUrl: 'https://pb.test',
       syncFolderPath: '/cours',
-      state: { version: 2, servers: { 'https://pb.test': { syncFolderPath: '/cours', entries: { 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0' } }, tombstones: [] } } },
+      state: { version: 2, servers: { 'https://pb.test': { syncFolderPath: '/cours', entries: { 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0' } }, tombstones: [], folderTombstones: [], knownFolders: [] } } },
       filePath: '/cours/a.zmap',
       openFilePath: '/cours/a.zmap',
     })

@@ -25,6 +25,7 @@ vi.mock('../../persistence/fileTree', async importOriginal => {
 })
 vi.mock('../../persistence/fileStore', () => ({
   loadMindMap: vi.fn(),
+  loadMindMapMeta: vi.fn(),
   saveMindMap: vi.fn(),
   mindMapExists: vi.fn(),
   stampMindMapSyncMeta: vi.fn(),
@@ -45,7 +46,7 @@ import {
   freeSiblingPath,
 } from '../../persistence/fileOps'
 import { scanFolder } from '../../persistence/fileTree'
-import { loadMindMap, saveMindMap, mindMapExists, stampMindMapSyncMeta, setMindMapType } from '../../persistence/fileStore'
+import { loadMindMap, loadMindMapMeta, saveMindMap, mindMapExists, stampMindMapSyncMeta, setMindMapType } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
 import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
@@ -86,6 +87,7 @@ describe('FileTreeRow', () => {
     vi.mocked(duplicatePath).mockReset()
     vi.mocked(scanFolder).mockReset()
     vi.mocked(loadMindMap).mockReset()
+    vi.mocked(loadMindMapMeta).mockReset().mockResolvedValue(null)
     vi.mocked(saveMindMap).mockReset()
     vi.mocked(mindMapExists).mockReset().mockResolvedValue(false)
     vi.mocked(stampMindMapSyncMeta).mockReset().mockResolvedValue(true)
@@ -858,7 +860,51 @@ describe('FileTreeRow', () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Confirmer' }))
 
-    expect(deletePath).toHaveBeenCalledWith('/cours/chimie', true)
+    // Suppression SÉLECTIVE : chaque fichier supprimable part, puis le dossier
+    // vidé est retiré sans récursion — ce qui n'a pas été supprimé (une carte du
+    // prof) le garde en place.
+    expect(deletePath).toHaveBeenCalledWith('/cours/chimie/atomes.json', false)
+    expect(deletePath).toHaveBeenCalledWith('/cours/chimie/liaisons.json', false)
+    expect(deletePath).toHaveBeenLastCalledWith('/cours/chimie', false)
+    expect(deletePath).not.toHaveBeenCalledWith('/cours/chimie', true)
+  })
+
+  it('garde la carte d’un autre et l’annonce avant de supprimer', async () => {
+    const user = userEvent.setup()
+    const foreign: MindMapMeta = { id: 'file-9', author: 'autre', role: 'eleve', lastModified: '2026-01-01T00:00:00.000Z' }
+    vi.mocked(useMindMapAuthor).mockReturnValue(foreign)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(foreign)
+    useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu(/chapitre1/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
+
+    expect(screen.getByText(/conservée\(s\) en lecture seule/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirmer' })).toBeDisabled()
+    expect(deletePath).not.toHaveBeenCalled()
+  })
+
+  it('élève : un dossier mitoyen garde les cartes du prof', async () => {
+    const user = userEvent.setup()
+    const foreign: MindMapMeta = { id: 'file-9', author: 'profX', role: 'prof', lastModified: '2026-01-01T00:00:00.000Z' }
+    vi.mocked(loadMindMapMeta).mockResolvedValue(foreign)
+    useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
+    const node: FileTreeNode = {
+      type: 'folder',
+      name: 'chimie',
+      path: '/cours/chimie',
+      children: [{ type: 'mindmap', name: 'atomes.json', path: '/cours/chimie/atomes.json' }],
+    }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu(/chimie/i)
+    await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
+
+    expect(screen.getByText(/Rien ne sera supprimé/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirmer' })).toBeDisabled()
+    expect(deletePath).not.toHaveBeenCalled()
   })
 
   it('opens the export dialog with the file\'s cards once they are loaded and validated', async () => {

@@ -30,6 +30,8 @@ const V2: SyncState = {
       syncFolderPath: '/cours',
       entries: { 'file-1': { lastSyncedModified: 'm1', lastSyncedUpdated: 'u1', lastSyncedPath: 'a.zmap' } },
       tombstones: [],
+      folderTombstones: [],
+      knownFolders: [],
     },
   },
 }
@@ -81,7 +83,7 @@ describe('migrateLegacyState', () => {
   it('files the flat entries under the configured server, paths unknown', () => {
     expect(migrateLegacyState(entries, 'https://pb.test', '/cours')).toEqual({
       version: 2,
-      servers: { 'https://pb.test': { syncFolderPath: '/cours', entries, tombstones: [] } },
+      servers: { 'https://pb.test': { syncFolderPath: '/cours', entries, tombstones: [], folderTombstones: [], knownFolders: [] } },
     })
   })
 
@@ -104,7 +106,7 @@ describe('serverStateOf', () => {
   it('creates the compartment on first use, and returns the same one afterwards', () => {
     const state = emptySyncState()
     const first = serverStateOf(state, 'https://pb.test', '/cours')
-    expect(first).toEqual({ syncFolderPath: '/cours', entries: {}, tombstones: [] })
+    expect(first).toEqual({ syncFolderPath: '/cours', entries: {}, tombstones: [], folderTombstones: [], knownFolders: [] })
     first.entries['file-1'] = { lastSyncedModified: 'm', lastSyncedUpdated: 'u' }
     expect(serverStateOf(state, 'https://pb.test', '/cours').entries).toHaveProperty('file-1')
   })
@@ -118,7 +120,7 @@ describe('loadServerSyncState', () => {
     // Le compartiment du serveur demandé est créé, et celui de l'autre serveur
     // du fichier n'est pas dupliqué sous une clé approximative.
     expect(Object.keys(state.servers)).toEqual(['https://pb.test', 'https://autre.test'])
-    expect(state.servers['https://autre.test']).toEqual({ syncFolderPath: '/cours', entries: {}, tombstones: [] })
+    expect(state.servers['https://autre.test']).toEqual({ syncFolderPath: '/cours', entries: {}, tombstones: [], folderTombstones: [], knownFolders: [] })
   })
 })
 

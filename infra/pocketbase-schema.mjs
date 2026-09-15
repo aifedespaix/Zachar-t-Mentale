@@ -532,7 +532,11 @@ export const FOLDER_RULES = {
   // le prof a décidé, sinon un dossier créé au téléphone n'atteint personne.
   listRule: '',
   viewRule: '',
-  createRule: '@request.auth.id != ""',
+  // Créer ET supprimer un dossier vide est l'affaire du prof, des deux côtés :
+  // un élève ne modifie jamais l'agencement décidé ailleurs. Même règle que le
+  // réarrangement d'une carte, à ceci près qu'un dossier n'a pas d'auteur à
+  // consulter.
+  createRule: IS_PROF,
   // Réarranger, c'est la prérogative du prof — même règle que « déplacer la
   // carte d'un élève », à ceci près qu'un dossier n'a pas d'auteur à consulter.
   updateRule: IS_PROF,

@@ -28,6 +28,19 @@ export interface ServerSyncState {
   entries: Record<string, SyncStateEntry>
   /** `file_id` dont la suppression distante reste à appliquer (plan « suppression »). */
   tombstones: string[]
+  /**
+   * Chemins RELATIFS (forme canonique à barre oblique) d'enregistrements
+   * `dossiers` dont la suppression reste à pousser.
+   */
+  folderTombstones: string[]
+  /**
+   * Les chemins des enregistrements `dossiers` vus au dernier sync.
+   *
+   * Indispensable pour lever l'ambiguïté entre « supprimé par le prof » et
+   * « jamais existé » : sans cette mémoire, un dossier vide supprimé côté
+   * serveur et encore présent en local serait recréé par la passe de création.
+   */
+  knownFolders: string[]
 }
 
 export interface SyncState {
@@ -48,7 +61,19 @@ export function emptySyncState(): SyncState {
 }
 
 export function emptyServerState(syncFolderPath: string | null): ServerSyncState {
-  return { syncFolderPath, entries: {}, tombstones: [] }
+  return { syncFolderPath, entries: {}, tombstones: [], folderTombstones: [], knownFolders: [] }
+}
+
+/**
+ * Un état v2 écrit avant l'arrivée des dossiers n'a pas ces champs : on les lit
+ * comme des tableaux vides plutôt que de lui refuser le passage. Aucune
+ * migration à écrire, donc — la forme reste la version 2.
+ */
+function normalizeServerState(server: ServerSyncState): ServerSyncState {
+  if (!Array.isArray(server.tombstones)) server.tombstones = []
+  if (!Array.isArray(server.folderTombstones)) server.folderTombstones = []
+  if (!Array.isArray(server.knownFolders)) server.knownFolders = []
+  return server
 }
 
 /**
@@ -61,7 +86,7 @@ export function emptyServerState(syncFolderPath: string | null): ServerSyncState
  */
 export function serverStateOf(state: SyncState, serverUrl: string, syncFolderPath: string | null): ServerSyncState {
   const existing = state.servers[serverUrl]
-  if (existing !== undefined) return existing
+  if (existing !== undefined) return normalizeServerState(existing)
   const created = emptyServerState(syncFolderPath)
   state.servers[serverUrl] = created
   return created
@@ -84,7 +109,7 @@ export function migrateLegacyState(
   // Sans serveur configuré, les entrées migrées n'ont aucun compartiment où
   // aller : c'est un cache, et le pire cas est une re-comparaison complète.
   if (serverUrl !== null && serverUrl !== '') {
-    state.servers[serverUrl] = { syncFolderPath, entries, tombstones: [] }
+    state.servers[serverUrl] = { syncFolderPath, entries, tombstones: [], folderTombstones: [], knownFolders: [] }
   }
   return state
 }

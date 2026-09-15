@@ -65,8 +65,14 @@ export function createSyncClient(pb: PocketBase): SyncClient {
   // La collection des dossiers vides. Facultative côté serveur : `sync()`
   // avale un 404 sans broncher, donc on la branche toujours et c'est le serveur
   // qui décide s'il a quelque chose à dire.
+  const foldersCollection = pb.collection('dossiers')
   const folders: FoldersApi = {
-    getFullList: options => pb.collection('dossiers').getFullList<RemoteFolderRecord>({ ...options, fields: 'id,path' }),
+    getFullList: options => foldersCollection.getFullList<RemoteFolderRecord>({ ...options, fields: 'id,path' }),
+    create: (path, createdBy, options) =>
+      foldersCollection.create<RemoteFolderRecord>({ path, created_by: createdBy }, options),
+    delete: async (id, options) => {
+      await foldersCollection.delete(id, options)
+    },
   }
 
   return { mindMaps, assets, folders }

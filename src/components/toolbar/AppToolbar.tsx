@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react'
 import type { Card, MindMapMeta } from '../../types/card'
+import type { FileTreeNode } from '../../types/workspace'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import {
@@ -53,10 +54,11 @@ import { useCardDetailStore } from '../../state/useCardDetailStore'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
 import { usePublishMindMap } from '../../hooks/usePublishMindMap'
+import { useDeleteMindMap, type DeletePlan } from '../../hooks/useDeleteMindMap'
+import { DeletePlanSummary } from '../sidebar/DeletePlanSummary'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 import { startCircularThemeTransition } from '../../theme/circularReveal'
 import { duplicatePath, freeSiblingPath, renamePath } from '../../persistence/fileOps'
-import { useDeleteMindMap } from '../../hooks/useDeleteMindMap'
 import { fileNameOf, mindMapBaseName, parentDirOf, separatorOf, withMindMapExtension } from '../../persistence/paths'
 import { quickExport } from '../../export/quickExport'
 import { describeExportError } from '../../export/describeExportError'
@@ -104,8 +106,8 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null)
   const [naming, setNaming] = useState<PendingNaming | null>(null)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [deletePlan, setDeletePlan] = useState<DeletePlan | null>(null)
   const [busy, setBusy] = useState(false)
-  const { deleteEntry } = useDeleteMindMap()
 
   const locked = useCardsStore(s => s.locked)
   // A map that is someone else's is shown locked like any other, but the lock is
@@ -120,6 +122,7 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
   const setThemeMode = useAppearanceSettingsStore(s => s.setThemeMode)
   const resolvedTheme = useResolvedTheme()
   const { canPublish, publish } = usePublishMindMap()
+  const { planDelete, applyDelete } = useDeleteMindMap()
 
   const hasFile = filePath !== null
   const fileName = filePath === null ? null : fileNameOf(filePath)
@@ -180,7 +183,7 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
     canPublish(filePath, meta)
   )
 
-  useCommand('file.delete', () => setConfirmDeleteOpen(true), hasFile)
+  useCommand('file.delete', () => void openDeleteDialog(), hasFile)
   useCommand('file.export', () => setExportOpen(true), hasFile)
 
   useCommand(
@@ -276,21 +279,40 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
     }
   }
 
-  async function confirmDelete() {
+  /** Calcule le plan de suppression avant d'ouvrir la confirmation. */
+  async function openDeleteDialog() {
     if (filePath === null) return
+    const node: FileTreeNode = { type: 'mindmap', name: fileNameOf(filePath), path: filePath }
+    try {
+      setDeletePlan(await planDelete(node))
+      setConfirmDeleteOpen(true)
+    } catch (error) {
+      fail(`Impossible de préparer la suppression de « ${fileName} » : ${describeError(error)}`)
+    }
+  }
+
+  async function confirmDelete() {
+    if (filePath === null || deletePlan === null) return
     setConfirmDeleteOpen(false)
+    const plan = deletePlan
+    setDeletePlan(null)
     setBusy(true)
     const folder = parentDirOf(filePath)
     try {
-      const { error } = await deleteEntry(filePath, false)
-      if (error !== undefined) {
-        fail(`Impossible de supprimer « ${fileName} » : ${describeError(error)}`)
+      const outcome = await applyDelete(plan)
+      if (outcome.failed.length > 0) {
+        fail(`Impossible de supprimer « ${fileName} » : ${describeError(outcome.failed[0].error)}`)
         return
       }
+      // Rien n'a disparu (la carte appartient à quelqu'un d'autre) : on laisse
+      // le canevas tel quel.
+      if (outcome.deletedFiles === 0) return
       // Closed BEFORE the tree is re-scanned: leaving the canvas on a file that
       // is gone would let autosave recreate it a keystroke later.
       setCurrentFile(null)
       if (folder) await refreshFolder(folder)
+    } catch (error) {
+      fail(`Impossible de supprimer « ${fileName} » : ${describeError(error)}`)
     } finally {
       setBusy(false)
     }
@@ -428,21 +450,32 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
         />
       )}
 
-      {confirmDeleteOpen && (
+      {confirmDeleteOpen && deletePlan !== null && (
         <Dialog open onOpenChange={open => !open && setConfirmDeleteOpen(false)}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Supprimer « {fileName} » ?</DialogTitle>
             </DialogHeader>
+            <DeletePlanSummary plan={deletePlan} />
             <p style={{ margin: 0, fontSize: 14 }}>
               Le fichier et ses images sont supprimés du disque. Cette action ne peut pas être annulée
               depuis l’application.
             </p>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setConfirmDeleteOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setConfirmDeleteOpen(false)
+                  setDeletePlan(null)
+                }}
+              >
                 Annuler
               </Button>
-              <Button variant="destructive" disabled={busy} onClick={() => void confirmDelete()}>
+              <Button
+                variant="destructive"
+                disabled={busy || deletePlan.files.length === 0}
+                onClick={() => void confirmDelete()}
+              >
                 Supprimer
               </Button>
             </DialogFooter>

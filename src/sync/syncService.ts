@@ -85,6 +85,9 @@ export interface RemoteFolderRecord {
 
 export interface FoldersApi {
   getFullList(options?: RequestOptions): Promise<RemoteFolderRecord[]>
+  /** `path` est le chemin RELATIF canonique ; une violation d'unicité compte comme un succès. */
+  create(path: string, createdBy: string, options?: RequestOptions): Promise<RemoteFolderRecord>
+  delete(id: string, options?: RequestOptions): Promise<void>
 }
 
 export interface SyncClient {
@@ -260,6 +263,29 @@ function isAbortError(error: unknown): boolean {
 /** Un DELETE sur un enregistrement déjà absent : un succès, jamais une erreur à signaler. */
 function isNotFoundError(error: unknown): boolean {
   return error !== null && typeof error === 'object' && (error as { status?: unknown }).status === 404
+}
+
+/**
+ * Une violation d'unicité d'index (le `path` d'un dossier existe déjà) : pour
+ * notre propos, le dossier est créé. PocketBase la remonte en 400 ; 409 est
+ * accepté par symétrie, au cas où une autre version du serveur le préfère.
+ */
+function isAlreadyExists(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false
+  const status = (error as { status?: unknown }).status
+  return status === 400 || status === 409
+}
+
+/** Tous les dossiers d'un arbre local, indexés par chemin RELATIF canonique. */
+function collectLocalFolders(root: string, nodes: FileTreeNode[]): Map<string, Extract<FileTreeNode, { type: 'folder' }>> {
+  const folders = new Map<string, Extract<FileTreeNode, { type: 'folder' }>>()
+  const visit = (node: FileTreeNode): void => {
+    if (node.type !== 'folder') return
+    folders.set(relativeTo(root, node.path), node)
+    node.children.forEach(visit)
+  }
+  nodes.forEach(visit)
+  return folders
 }
 
 export interface PushPlan {
@@ -1322,6 +1348,106 @@ export async function sync({
     // `total` a été fixé sur la taille de cet instantané.
     if (!remoteDeletedThisRun.has(record.file_id)) await pullOne(record)
     report()
+  }
+
+  // ── Passe 4 : dossiers ───────────────────────────────────────────────────
+  //
+  // Symétrie complète, réservée au rôle prof. Un élève ne crée ni ne supprime
+  // jamais d'enregistrement `dossiers` : son dossier vide reste local. Serveur
+  // sans la collection : passe entièrement silencieuse.
+  if (!result.cancelled && !aborted() && client.folders !== undefined) {
+    const folders = client.folders
+    let remoteFolders: RemoteFolderRecord[] | null = null
+    try {
+      remoteFolders = await folders.getFullList({ signal })
+    } catch (error) {
+      if (aborted() || isAbortError(error)) result.cancelled = true
+      // Silencieux par contrat : collection facultative.
+      remoteFolders = null
+    }
+
+    if (remoteFolders !== null && !result.cancelled) {
+      const tree = await scanFolder(syncFolderPath)
+      const remotePaths = new Set(remoteFolders.map(record => record.path))
+      const recordByPath = new Map(remoteFolders.map(record => [record.path, record]))
+      const localFolders = collectLocalFolders(syncFolderPath, tree)
+      // Les chemins qu'on ne doit PAS recréer : ils viennent d'être retirés du
+      // serveur ou supprimés à la demande de l'utilisateur.
+      const forgottenPaths = new Set<string>()
+
+      // Suppression locale : pousse les tombstones de dossiers.
+      for (const path of [...server.folderTombstones]) {
+        const record = recordByPath.get(path)
+        if (record === undefined) {
+          server.folderTombstones = server.folderTombstones.filter(item => item !== path)
+          continue
+        }
+        try {
+          await folders.delete(record.id, { signal })
+          server.folderTombstones = server.folderTombstones.filter(item => item !== path)
+          remotePaths.delete(path)
+          forgottenPaths.add(path)
+        } catch (error) {
+          if (isNotFoundError(error)) {
+            server.folderTombstones = server.folderTombstones.filter(item => item !== path)
+            remotePaths.delete(path)
+            forgottenPaths.add(path)
+          } else if (aborted() || isAbortError(error)) {
+            result.cancelled = true
+            break
+          } else {
+            // Tombstone conservée : nouvel essai au prochain sync.
+            result.errors.push({ fileId: path, message: describeSyncError(error) })
+          }
+        }
+      }
+
+      // Suppression distante : le prof a retiré l'enregistrement. Un dossier
+      // local devenu vide disparaît ; sinon on oublie l'enregistrement, qui
+      // était vestigial (les cartes impliquent le dossier).
+      if (!result.cancelled) {
+        for (const path of new Set(server.knownFolders)) {
+          if (remotePaths.has(path)) continue
+          forgottenPaths.add(path)
+          const node = localFolders.get(path)
+          if (node === undefined || node.children.length > 0) continue
+          if (!isSafeRelativePath(path)) continue
+          try {
+            await deletePath(await join(syncFolderPath, path), false)
+          } catch {
+            // Dossier verrouillé ou non vide : on l'a oublié, c'est tout.
+          }
+        }
+      }
+
+      // Création : chaque dossier local VIDE inconnu du serveur, pour un prof.
+      if (!result.cancelled && currentRole === 'prof') {
+        const tombstoned = new Set(server.folderTombstones)
+        for (const [path, node] of localFolders) {
+          if (node.children.length > 0) continue
+          if (remotePaths.has(path) || tombstoned.has(path) || forgottenPaths.has(path)) continue
+          if (!isSafeRelativePath(path)) continue
+          try {
+            await folders.create(path, currentUser, { signal })
+            remotePaths.add(path)
+          } catch (error) {
+            if (aborted() || isAbortError(error)) {
+              result.cancelled = true
+              break
+            }
+            if (isAlreadyExists(error)) {
+              // L'enregistrement existait déjà : c'est un succès.
+              remotePaths.add(path)
+            } else {
+              result.errors.push({ fileId: path, message: describeSyncError(error) })
+            }
+          }
+        }
+      }
+
+      // La mémoire du prochain sync : ce qui est au serveur maintenant.
+      server.knownFolders = [...remotePaths]
+    }
   }
 
   // Les dossiers VIDES, en dernier — après que les fichiers ont créé les leurs.

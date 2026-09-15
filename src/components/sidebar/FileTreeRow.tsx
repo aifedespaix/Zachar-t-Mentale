@@ -1,5 +1,5 @@
 // src/components/sidebar/FileTreeRow.tsx
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { Folder, FolderOpen, FolderInput, FolderSearch, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, ClipboardCopy, CloudUpload, CloudOff, Check, Tag } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
@@ -7,7 +7,6 @@ import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useTreeDragStore } from '../../state/useTreeDragStore'
 import { renamePath, duplicatePath, freeSiblingPath } from '../../persistence/fileOps'
-import { useDeleteMindMap } from '../../hooks/useDeleteMindMap'
 import { countDescendants } from '../../persistence/fileTree'
 import { parentDirOf, separatorOf, fileNameOf, mindMapBaseName, mindMapExtensionSuffix, withMindMapExtension, isInsideFolder } from '../../persistence/paths'
 import { loadMindMap, mindMapExists, setMindMapType } from '../../persistence/fileStore'
@@ -34,6 +33,8 @@ import { useMindMapFormatValid } from '../../hooks/useMindMapFormatValid'
 import { useMindMapAuthor } from '../../hooks/useMindMapAuthor'
 import { usePublishMindMap } from '../../hooks/usePublishMindMap'
 import { useSyncStore } from '../../state/useSyncStore'
+import { useDeleteMindMap, type DeletePlan } from '../../hooks/useDeleteMindMap'
+import { DeletePlanSummary } from './DeletePlanSummary'
 import { canClassify, canEditContent } from '../../sync/permissions'
 import { MAP_TYPES, MAP_TYPE_LABELS, type MapType } from '../../types/mapType'
 import { MapTypeBadge } from './MapTypeBadge'
@@ -126,10 +127,15 @@ interface NamingAction {
 
 function ConfirmDeleteDialog({
   title,
+  details,
+  confirmDisabled = false,
   onCancel,
   onConfirm,
 }: {
   title: string
+  /** Le plan de suppression, tel que le dialogue doit l'annoncer AVANT d'agir. */
+  details?: ReactNode
+  confirmDisabled?: boolean
   onCancel: () => void
   onConfirm: () => void
 }) {
@@ -139,11 +145,12 @@ function ConfirmDeleteDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
+        {details}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
             Annuler
           </Button>
-          <Button variant="destructive" onClick={onConfirm}>
+          <Button variant="destructive" onClick={onConfirm} disabled={confirmDisabled}>
             Confirmer
           </Button>
         </DialogFooter>
@@ -169,7 +176,6 @@ export function FileTreeRow({
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const rootFolders = useWorkspaceStore(s => s.rootFolders)
   const moveNode = useWorkspaceStore(s => s.moveNode)
-  const { deleteEntry } = useDeleteMindMap()
   // Two booleans, not the drag state itself: subscribing a row to the pointer
   // position would re-render the whole tree on every mouse move.
   const dragging = useTreeDragStore(s => s.source?.path === node.path)
@@ -184,6 +190,10 @@ export function FileTreeRow({
   const renameBaseName = node.type === 'mindmap' ? mindMapBaseName(node.name) : node.name
   const [draftRenameName, setDraftRenameName] = useState(renameBaseName)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  // Le plan est calculé AVANT d'ouvrir la confirmation : le dialogue dit ce qui
+  // part et ce qui reste, puis « Confirmer » applique exactement ce plan.
+  const [deletePlan, setDeletePlan] = useState<DeletePlan | null>(null)
+  const { planDelete, applyDelete } = useDeleteMindMap()
   const [exportCards, setExportCards] = useState<Card[] | null>(null)
   const [namingAction, setNamingAction] = useState<NamingAction | null>(null)
   // Set right before the deferred `setRenaming(true)` below, and consumed by
@@ -339,17 +349,40 @@ export function FileTreeRow({
     await refreshFolder(parentPath)
   }
 
+  /** Calcule le plan de suppression avant d'ouvrir la confirmation. */
+  async function openDeleteDialog() {
+    try {
+      const plan = await planDelete(node)
+      setDeletePlan(plan)
+      setConfirmDeleteOpen(true)
+    } catch (error) {
+      setWorkspaceError(`Impossible de préparer la suppression de « ${node.name} » : ${describeError(error)}`)
+    }
+  }
+
   async function confirmDelete() {
+    if (deletePlan === null) return
     setConfirmDeleteOpen(false)
+    const plan = deletePlan
+    setDeletePlan(null)
     const parentPath = parentDirOf(node.path)
     const separator = separatorOf(node.path)
     // Lu AVANT la suppression : après, il n'y a plus de fichier à interroger.
     const link = meta?.copyLink
-    const { error } = await deleteEntry(node.path, node.type === 'folder')
-    if (error !== undefined) {
+    let deletedFiles = 0
+    try {
+      const outcome = await applyDelete(plan)
+      deletedFiles = outcome.deletedFiles
+      if (outcome.failed.length > 0) {
+        setWorkspaceError(`Impossible de supprimer « ${node.name} » : ${describeError(outcome.failed[0].error)}`)
+      }
+    } catch (error) {
       setWorkspaceError(`Impossible de supprimer « ${node.name} » : ${describeError(error)}`)
       return
     }
+    // Rien n'a disparu (tout était à quelqu'un d'autre) : on ne touche ni au
+    // lien, ni au fichier ouvert, ni à l'arborescence.
+    if (deletedFiles === 0) return
     // Un lien qui ne désigne plus personne est pire que pas de lien : le badge
     // promettrait un voisin que l'utilisateur irait chercher.
     if (link !== undefined) {
@@ -572,7 +605,7 @@ export function FileTreeRow({
                 <ContextMenuItem onSelect={startRenaming}>
                   <Pencil size={14} /> Renommer
                 </ContextMenuItem>
-                <ContextMenuItem variant="destructive" onSelect={() => setConfirmDeleteOpen(true)}>
+                <ContextMenuItem variant="destructive" onSelect={() => void openDeleteDialog()}>
                   <Trash2 size={14} /> Supprimer
                 </ContextMenuItem>
               </>
@@ -588,10 +621,15 @@ export function FileTreeRow({
           </ContextMenuContent>
         </ContextMenu>
 
-        {confirmDeleteOpen && (
+        {confirmDeleteOpen && deletePlan !== null && (
           <ConfirmDeleteDialog
             title={`Supprimer le dossier « ${node.name} » et son contenu (${countDescendants(node)} éléments) ?`}
-            onCancel={() => setConfirmDeleteOpen(false)}
+            details={<DeletePlanSummary plan={deletePlan} />}
+            confirmDisabled={deletePlan.files.length === 0}
+            onCancel={() => {
+              setConfirmDeleteOpen(false)
+              setDeletePlan(null)
+            }}
             onConfirm={confirmDelete}
           />
         )}
@@ -773,16 +811,21 @@ export function FileTreeRow({
             <ContextMenuItem onSelect={startRenaming}>
               <Pencil size={14} /> Renommer
             </ContextMenuItem>
-            <ContextMenuItem variant="destructive" onSelect={() => setConfirmDeleteOpen(true)}>
+            <ContextMenuItem variant="destructive" onSelect={() => void openDeleteDialog()}>
               <Trash2 size={14} /> Supprimer
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
 
-        {confirmDeleteOpen && (
+        {confirmDeleteOpen && deletePlan !== null && (
           <ConfirmDeleteDialog
             title={`Supprimer le fichier « ${node.name} » ?`}
-            onCancel={() => setConfirmDeleteOpen(false)}
+            details={<DeletePlanSummary plan={deletePlan} />}
+            confirmDisabled={deletePlan.files.length === 0}
+            onCancel={() => {
+              setConfirmDeleteOpen(false)
+              setDeletePlan(null)
+            }}
             onConfirm={confirmDelete}
           />
         )}

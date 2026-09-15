@@ -62,3 +62,15 @@ describe('syncResultLabel', () => {
     expect(syncResultLabel(result({ merged }))).toContain('2 carte(s) mise(s) de côté')
   })
 })
+
+describe('syncResultLabel — suppressions', () => {
+  it('affiche les suppressions distantes et locales', () => {
+    expect(syncResultLabel(result({ remoteDeleted: 2, localDeleted: 1 }))).toBe(
+      '0 envoyé(s), 0 reçu(s), 1 supprimé(s) ici, 2 supprimé(s) sur le serveur'
+    )
+  })
+
+  it('ne dit rien quand rien n’a été supprimé', () => {
+    expect(syncResultLabel(result())).toBe('0 envoyé(s), 0 reçu(s)')
+  })
+})

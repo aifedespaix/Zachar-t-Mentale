@@ -185,6 +185,17 @@ describe('AppToolbar', () => {
     expect(dialog).toHaveTextContent('images')
   })
 
+  it('annonce le plan de suppression avant de confirmer', async () => {
+    const user = userEvent.setup()
+    renderToolbar()
+    await user.click(screen.getByRole('button', { name: 'Fichier' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Supprimer la carte mentale/ }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('1 carte(s) supprimée(s)')
+    expect(screen.getByRole('button', { name: 'Supprimer' })).toBeEnabled()
+  })
+
   it('shows the file in the system explorer', async () => {
     const user = userEvent.setup()
     renderToolbar()

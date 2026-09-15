@@ -178,7 +178,7 @@ Ce qu'elle installe :
 | `cartes_mentales` | `file_id` (unique), `author`, `path`, `content`, `type`            | lecture publique ; création pour tout compte connecté ; modification et suppression par l'auteur, ou par un compte `prof` |
 | `assets`         | `hash` (unique), `extension`, `file` (≤ 10 Mio)                    | lecture publique ; création pour tout compte connecté ; jamais modifié        |
 | `users`          | ajoute `username` (unique, obligatoire) et `role` (`eleve`/`prof`)  | inscription publique fermée ; connexion par pseudo                            |
-| `dossiers`       | `path` (unique), `created_by`                                       | lecture publique ; création pour tout compte connecté ; renommage et suppression réservés aux `prof` |
+| `dossiers`       | `path` (unique), `created_by`                                       | lecture publique ; création, renommage et suppression réservés aux `prof` |
 | `sync_events`    | `username`, `level`, `trigger`, `summary`, compteurs, `detail`      | lecture réservée aux `prof` ; écriture pour tout compte connecté ; jamais modifié |
 | `sync_conflicts` | `file_id`, `path`, `username`, `local_content`, `status`            | lecture et arbitrage par le `prof` ou par le compte concerné                   |
 

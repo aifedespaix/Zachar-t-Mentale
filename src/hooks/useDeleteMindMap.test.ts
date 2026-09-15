@@ -1,118 +1,189 @@
+import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
 
-vi.mock('../persistence/fileOps', () => ({ deletePath: vi.fn() }))
 vi.mock('../persistence/fileStore', () => ({ loadMindMapMeta: vi.fn() }))
-vi.mock('../persistence/fileTree', () => ({ scanFolder: vi.fn() }))
+vi.mock('../persistence/fileOps', () => ({ deletePath: vi.fn() }))
 vi.mock('../persistence/syncState', () => ({
   loadServerSyncState: vi.fn(),
   saveSyncState: vi.fn(),
-  serverStateOf: vi.fn(),
+  serverStateOf: vi.fn((state: { servers: Record<string, unknown> }, url: string) => state.servers[url]),
 }))
-vi.mock('../sync/syncService', () => ({ flattenMindMapPaths: vi.fn() }))
 
-import { deletePath } from '../persistence/fileOps'
 import { loadMindMapMeta } from '../persistence/fileStore'
-import { scanFolder } from '../persistence/fileTree'
+import { deletePath } from '../persistence/fileOps'
 import { loadServerSyncState, saveSyncState, serverStateOf } from '../persistence/syncState'
-import { flattenMindMapPaths } from '../sync/syncService'
-import { useDeleteMindMap } from './useDeleteMindMap'
+import type { ServerSyncState, SyncState } from '../persistence/syncState'
 import { useSyncStore } from '../state/useSyncStore'
+import { useDeleteMindMap, type DeletePlan } from './useDeleteMindMap'
+import type { FileTreeNode } from '../types/workspace'
 import type { MindMapMeta } from '../types/card'
 
-const AIFE: MindMapMeta = { id: 'f1', author: 'aife', role: 'prof', lastModified: 'm1' }
-const ELEVE1: MindMapMeta = { id: 'f2', author: 'eleve1', role: 'eleve', lastModified: 'm2' }
+const AIFE: MindMapMeta = { id: 'file-1', author: 'aife', role: 'prof', lastModified: '2026-01-01T00:00:00.000Z' }
+const OTHER: MindMapMeta = { id: 'file-9', author: 'autre', role: 'eleve', lastModified: '2026-01-01T00:00:00.000Z' }
 
-function armed(server: { tombstones: string[] } = { tombstones: [] }) {
-  vi.mocked(loadServerSyncState).mockResolvedValue({ version: 2, servers: {} } as any)
-  vi.mocked(serverStateOf).mockReturnValue({ syncFolderPath: '/cours', entries: {}, ...server } as any)
-  vi.mocked(saveSyncState).mockResolvedValue(undefined)
+let state: SyncState
+
+function server(overrides: Partial<ServerSyncState> = {}): ServerSyncState {
+  return {
+    syncFolderPath: '/cours',
+    entries: {},
+    tombstones: [],
+    folderTombstones: [],
+    knownFolders: [],
+    ...overrides,
+  }
 }
 
-describe('useDeleteMindMap', () => {
-  beforeEach(() => {
-    vi.mocked(deletePath).mockReset().mockResolvedValue(undefined)
-    vi.mocked(loadMindMapMeta).mockReset()
-    vi.mocked(scanFolder).mockReset()
-    vi.mocked(flattenMindMapPaths).mockReset()
-    vi.mocked(loadServerSyncState).mockReset()
-    vi.mocked(serverStateOf).mockReset()
-    vi.mocked(saveSyncState).mockReset()
-    useSyncStore.setState({ currentUser: { username: 'aife', role: 'prof' }, syncFolderPath: '/cours', serverUrl: 'https://pb.test' })
+beforeEach(() => {
+  vi.mocked(loadMindMapMeta).mockReset().mockResolvedValue(null)
+  vi.mocked(deletePath).mockReset().mockResolvedValue(undefined)
+  vi.mocked(saveSyncState).mockReset().mockResolvedValue(undefined)
+  state = { version: 2, servers: { 'https://pb.test': server() } }
+  vi.mocked(loadServerSyncState).mockReset().mockResolvedValue(state)
+  vi.mocked(serverStateOf).mockClear()
+  useSyncStore.setState({
+    syncFolderPath: '/cours',
+    serverUrl: 'https://pb.test',
+    currentUser: { username: 'aife', role: 'prof' },
+  })
+})
+
+async function plan(target: FileTreeNode): Promise<DeletePlan> {
+  const { result } = renderHook(() => useDeleteMindMap())
+  let computed: DeletePlan | null = null
+  await act(async () => {
+    computed = await result.current.planDelete(target)
+  })
+  if (computed === null) throw new Error('plan non calculé')
+  return computed
+}
+
+describe('useDeleteMindMap — plan', () => {
+  it('supprime un fichier jamais publié, sans tombstone', async () => {
+    const computed = await plan({ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' })
+
+    expect(computed.files).toEqual([{ path: '/cours/a.zmap', kind: 'mindmap' }])
+    expect(computed.files[0]?.fileId).toBeUndefined()
+    expect(computed.folderTombstones).toEqual([])
   })
 
-  it('poses a tombstone for a single file it has the right to remove, before touching the disk', async () => {
-    armed()
+  it('conserve la carte d’un autre, en lecture seule', async () => {
+    vi.mocked(loadMindMapMeta).mockResolvedValue(OTHER)
+    useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
+
+    const computed = await plan({ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' })
+
+    expect(computed.files).toEqual([])
+    expect(computed.keptCards).toEqual([{ path: '/cours/a.zmap', name: 'a.zmap' }])
+  })
+
+  it('pose la tombstone d’une carte possédée, mais seulement à l’application', async () => {
     vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
-    const server = { syncFolderPath: '/cours', entries: {}, tombstones: [] as string[] }
-    vi.mocked(serverStateOf).mockReturnValue(server as any)
 
-    const { result } = renderHook(() => useDeleteMindMap())
-    const outcome = await result.current.deleteEntry('/cours/a.zmap', false)
+    const computed = await plan({ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' })
 
-    expect(outcome.error).toBeUndefined()
-    expect(server.tombstones).toEqual(['f1'])
-    expect(saveSyncState).toHaveBeenCalled()
-    expect(deletePath).toHaveBeenCalledWith('/cours/a.zmap', false)
-    // La tombstone est posée AVANT que le disque ne bouge.
-    const saveOrder = vi.mocked(saveSyncState).mock.invocationCallOrder[0]!
-    const deleteOrder = vi.mocked(deletePath).mock.invocationCallOrder[0]!
-    expect(saveOrder).toBeLessThan(deleteOrder)
-  })
-
-  it('never poses a tombstone for a draft (no meta) or a file outside the sync folder', async () => {
-    armed()
-    vi.mocked(loadMindMapMeta).mockResolvedValue(null)
-    const server = { syncFolderPath: '/cours', entries: {}, tombstones: [] as string[] }
-    vi.mocked(serverStateOf).mockReturnValue(server as any)
-
-    const { result } = renderHook(() => useDeleteMindMap())
-    await result.current.deleteEntry('/cours/brouillon.zmap', false)
-
-    expect(server.tombstones).toEqual([])
+    expect(computed.files[0]?.fileId).toBe('file-1')
+    // Rien n’est posé tant que la confirmation n’a pas appliqué le plan.
+    expect(state.servers['https://pb.test'].tombstones).toEqual([])
     expect(saveSyncState).not.toHaveBeenCalled()
-    expect(deletePath).toHaveBeenCalledWith('/cours/brouillon.zmap', false)
   })
 
-  it('poses a tombstone for every card under a folder it has the right to remove, skipping someone else s', async () => {
-    armed()
-    vi.mocked(scanFolder).mockResolvedValue([] as any)
-    vi.mocked(flattenMindMapPaths).mockReturnValue(['/cours/Chapitre/a.zmap', '/cours/Chapitre/b.zmap'])
-    vi.mocked(loadMindMapMeta).mockImplementation(async path =>
-      path.endsWith('a.zmap') ? AIFE : { ...ELEVE1, author: 'quelquun-d-autre' }
-    )
-    const server = { syncFolderPath: '/cours', entries: {}, tombstones: [] as string[] }
-    vi.mocked(serverStateOf).mockReturnValue(server as any)
-    useSyncStore.setState({ currentUser: { username: 'aife', role: 'eleve' as any } })
+  it('prof : tombstones pour tous les dossiers de la branche, du plus profond au plus haut', async () => {
+    const target: FileTreeNode = {
+      type: 'folder',
+      name: 'Chapitre',
+      path: '/cours/Chapitre',
+      children: [
+        { type: 'folder', name: 'Sous', path: '/cours/Chapitre/Sous', children: [] },
+        { type: 'mindmap', name: 'a.zmap', path: '/cours/Chapitre/a.zmap' },
+      ],
+    }
 
+    const computed = await plan(target)
+
+    expect(computed.folderTombstones).toEqual(['Chapitre/Sous', 'Chapitre'])
+  })
+
+  it('élève : un dossier du prof reste, sa carte aussi', async () => {
+    state = { version: 2, servers: { 'https://pb.test': server({ knownFolders: ['Chapitre'] }) } }
+    vi.mocked(loadServerSyncState).mockResolvedValue(state)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(OTHER)
+    useSyncStore.setState({ currentUser: { username: 'eleve1', role: 'eleve' } })
+    const target: FileTreeNode = {
+      type: 'folder',
+      name: 'Chapitre',
+      path: '/cours/Chapitre',
+      children: [{ type: 'mindmap', name: 'a.zmap', path: '/cours/Chapitre/a.zmap' }],
+    }
+
+    const computed = await plan(target)
+
+    expect(computed.files).toEqual([])
+    expect(computed.folderTombstones).toEqual([])
+    // Le dossier du prof n'est pas retiré du disque, même vidé.
+    expect(computed.folders).toEqual([])
+    expect(computed.remainingFolders).toEqual(['Chapitre'])
+  })
+})
+
+describe('useDeleteMindMap — application', () => {
+  async function applyPlan(computed: DeletePlan): Promise<void> {
     const { result } = renderHook(() => useDeleteMindMap())
-    await result.current.deleteEntry('/cours/Chapitre', true)
+    await act(async () => {
+      await result.current.applyDelete(computed)
+    })
+  }
 
-    // « aife » n'est ni l'auteur de b.zmap ni prof : seule a.zmap est tombstonée.
-    expect(server.tombstones).toEqual(['f1'])
-    expect(deletePath).toHaveBeenCalledWith('/cours/Chapitre', true)
-  })
-
-  it('leaves the disk untouched, and reports the failure, when the sync state cannot be saved', async () => {
-    armed()
+  it('supprime les fichiers, remonte les dossiers vidés et enregistre les tombstones', async () => {
     vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
-    vi.mocked(serverStateOf).mockReturnValue({ syncFolderPath: '/cours', entries: {}, tombstones: [] } as any)
-    vi.mocked(saveSyncState).mockRejectedValue(new Error('disque plein'))
+    const target: FileTreeNode = {
+      type: 'folder',
+      name: 'Chapitre',
+      path: '/cours/Chapitre',
+      children: [{ type: 'mindmap', name: 'a.zmap', path: '/cours/Chapitre/a.zmap' }],
+    }
+    const computed = await plan(target)
 
-    const { result } = renderHook(() => useDeleteMindMap())
-    const outcome = await result.current.deleteEntry('/cours/a.zmap', false)
+    await applyPlan(computed)
 
-    expect(outcome.error).toBeInstanceOf(Error)
-    expect(deletePath).not.toHaveBeenCalled()
+    expect(deletePath).toHaveBeenCalledWith('/cours/Chapitre/a.zmap', false)
+    expect(deletePath).toHaveBeenLastCalledWith('/cours/Chapitre', false)
+    expect(state.servers['https://pb.test'].tombstones).toEqual(['file-1'])
+    expect(state.servers['https://pb.test'].folderTombstones).toEqual(['Chapitre'])
+    expect(saveSyncState).toHaveBeenCalled()
   })
 
-  it('does not touch the sync state at all when no account is signed in — a purely local delete', async () => {
-    useSyncStore.setState({ currentUser: null, syncFolderPath: null })
+  it('pose la tombstone AVANT le disque : un échec local est signalé, la passe 3 annulera', async () => {
+    vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
+    vi.mocked(deletePath).mockRejectedValue(new Error('fichier verrouillé'))
+    const computed = await plan({ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' })
 
     const { result } = renderHook(() => useDeleteMindMap())
-    await result.current.deleteEntry('/ailleurs/a.zmap', false)
+    let outcome: { deletedFiles: number; failed: unknown[] } | null = null
+    await act(async () => {
+      outcome = await result.current.applyDelete(computed)
+    })
 
-    expect(loadServerSyncState).not.toHaveBeenCalled()
-    expect(deletePath).toHaveBeenCalledWith('/ailleurs/a.zmap', false)
+    expect(outcome!.failed).toHaveLength(1)
+    // L'intention est enregistrée ; le fichier encore là la fera annuler par la
+    // passe 3, qui constate qu'il porte toujours son `file_id`.
+    expect(state.servers['https://pb.test'].tombstones).toEqual(['file-1'])
+    expect(saveSyncState).toHaveBeenCalled()
+  })
+
+  it('n’efface rien sur le disque quand l’état de sync ne s’écrit pas', async () => {
+    vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
+    vi.mocked(saveSyncState).mockRejectedValue(new Error('disque plein'))
+    const computed = await plan({ type: 'mindmap', name: 'a.zmap', path: '/cours/a.zmap' })
+
+    const { result } = renderHook(() => useDeleteMindMap())
+    let outcome: { deletedFiles: number; failed: unknown[] } | null = null
+    await act(async () => {
+      outcome = await result.current.applyDelete(computed)
+    })
+
+    expect(outcome!.deletedFiles).toBe(0)
+    expect(outcome!.failed).toHaveLength(1)
+    expect(deletePath).not.toHaveBeenCalled()
   })
 })

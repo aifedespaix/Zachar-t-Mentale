@@ -67,7 +67,7 @@ describe('useSyncStore', () => {
       .mockResolvedValue({ settings: { ...DEFAULT_SYNC_SETTINGS }, problem: null })
     vi.mocked(saveSyncSettings).mockReset().mockResolvedValue(undefined)
     vi.mocked(loadServerSyncState).mockReset().mockResolvedValue({ version: 2, servers: {} })
-    vi.mocked(serverStateOf).mockReset().mockReturnValue({ syncFolderPath: '/cours', entries: {}, tombstones: [] })
+    vi.mocked(serverStateOf).mockReset().mockReturnValue({ syncFolderPath: '/cours', entries: {}, tombstones: [], folderTombstones: [], knownFolders: [] })
     vi.mocked(saveSyncState).mockReset().mockResolvedValue(undefined)
     vi.mocked(createPocketBaseClient).mockReset()
     vi.mocked(sync).mockReset()
