@@ -33,7 +33,7 @@ import { toCss } from '../../colors/contrast'
 import { contentOf, blocksToPlainText } from '../../content/blocks'
 import { BlockView } from '../../content/BlockView'
 import { ContentKindBadges } from '../../content/ContentKindBadges'
-import { DescriptionDialog } from '../../content/DescriptionDialog'
+import { DescriptionDialog, type TitleChipColors } from '../../content/DescriptionDialog'
 import { imageBlockFrom } from '../../content/imageBlock'
 import { pickImageFile } from '../../content/pickImage'
 import { assetSrc } from '../../persistence/assets'
@@ -114,11 +114,22 @@ export function CardDetailPanel() {
   const [manuallyCollapsed, setManuallyCollapsed] = useState(false)
 
   const isOpen = openEntries.length > 0
+  /**
+   * Whether this panel is hosting anything at all.
+   *
+   * No longer the same question as `isOpen`: the description editor is rendered
+   * from here, and opening that editor no longer opens a fiche — so a card can
+   * be written in with the panel showing nothing at all. `isOpen` still decides
+   * the WIDTH, so the panel stays at zero and the map keeps its room; this
+   * decides whether the component is there to host the dialog, which is
+   * rendered into a portal and therefore does not care how wide its host is.
+   */
+  const hostingEditor = editingCardId !== null
   // Stays mounted a beat after the last fiche closes, so the panel can shrink
   // away instead of vanishing mid-frame; `wasOpenRef` is what tells the effect
   // below "this is a fresh open" from "this is a fresh close" without also
   // firing on every unrelated re-render.
-  const [mounted, setMounted] = useState(isOpen)
+  const [mounted, setMounted] = useState(isOpen || hostingEditor)
   // Also true when the panel mounts already open (e.g. a fiche was open
   // before this component existed), so that case grows from zero too.
   const [entering, setEntering] = useState(isOpen)
@@ -136,6 +147,19 @@ export function CardDetailPanel() {
       return () => clearTimeout(timer)
     }
   }, [isOpen])
+
+  useEffect(() => {
+    // The editor alone is enough to need the host mounted — and once it is gone,
+    // with no fiche behind it, the host goes too. Same beat as a closing fiche,
+    // so a close reads as a shrink rather than a blink.
+    if (hostingEditor) {
+      setMounted(true)
+      return
+    }
+    if (isOpen) return
+    const timer = setTimeout(() => setMounted(false), 220)
+    return () => clearTimeout(timer)
+  }, [hostingEditor, isOpen])
 
   const openCountRef = useRef(openEntries.length)
   useEffect(() => {
@@ -246,36 +270,66 @@ export function CardDetailPanel() {
     manuallyCollapsed ? 'Afficher les fiches' : 'Masquer les fiches'
   )
 
-  if (!mounted) return null
-
-  if (isOpen && manuallyCollapsed) {
-    return (
-      <TooltipProvider>
-        <div
-          style={{
-            width: 32,
-            flexShrink: 0,
-            borderLeft: '1px solid var(--border)',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'flex-end',
-            paddingBottom: 8,
-          }}
-        >
-          <CommandButton
-            command="view.toggleDetailPanel"
-            icon={PanelRightOpen}
-            label="Déplier le panneau des fiches"
-            variant="ghost"
-            size="icon-sm"
-          />
-        </div>
-      </TooltipProvider>
-    )
-  }
+  if (!mounted && !hostingEditor) return null
 
   const renderedWidth = isOpen && !entering ? width : 0
   const editingCard = editingCardId === null ? undefined : cards.find(card => card.id === editingCardId)
+
+  /**
+   * The description editor, ready to drop into whichever shape this panel takes.
+   *
+   * It is a `Dialog`, so it renders into a portal: it does not need to be
+   * inside the panel's chrome, only inside a mounted component. That is what
+   * lets the panel stay out of the way — folded, or absent entirely — while a
+   * card is still being written in.
+   */
+  const editor =
+    editingCard === undefined ? null : (
+      // Keyed by card id: the edge arrows inside the dialog navigate by asking
+      // the store to edit a different card, which changes `editingCard` without
+      // unmounting this call site on its own — the key is what forces a fresh
+      // `DescriptionDialog` (and a fresh draft seeded from the new card) rather
+      // than reusing the old instance with the new card's props stapled onto it.
+      <FicheEditor key={editingCard.id} card={editingCard} cards={cards} onClose={() => setEditing(null)} />
+    )
+
+  if (isOpen && manuallyCollapsed) {
+    return (
+      <>
+        <TooltipProvider>
+          <div
+            style={{
+              width: 32,
+              flexShrink: 0,
+              borderLeft: '1px solid var(--border)',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'flex-end',
+              paddingBottom: 8,
+            }}
+          >
+            <CommandButton
+              command="view.toggleDetailPanel"
+              icon={PanelRightOpen}
+              label="Déplier le panneau des fiches"
+              variant="ghost"
+              size="icon-sm"
+            />
+          </div>
+        </TooltipProvider>
+        {editor}
+      </>
+    )
+  }
+
+  // Nothing to read, and nothing left to shrink away either: the editor only.
+  // The aside is NOT rendered, even at zero width — its header, its search
+  // field and its footer would all still be laid out inside a zero-width box,
+  // spilling over the map for as long as the dialog stays open. (While a fiche
+  // IS closing, `mounted` is still true and the aside runs its own animation
+  // below, which is exactly what `mounted` is for.)
+  if (!isOpen && !mounted) return <>{editor}</>
+
 
   /**
    * The search is a VIEW over the open fiches, never a mutation of them: it
@@ -443,15 +497,7 @@ export function CardDetailPanel() {
             {/* One editor for the whole panel, keyed by card, rather than one per
                 fiche: two dialogs for the same card must be impossible, and the
                 store already holds which card is being edited. */}
-            {editingCard !== undefined && (
-              // Keyed by card id: the edge arrows inside the dialog navigate
-              // by asking the store to edit a different card, which changes
-              // `editingCard` without unmounting this call site on its own —
-              // the key is what forces a fresh `DescriptionDialog` (and a
-              // fresh draft seeded from the new card) rather than reusing the
-              // old instance with the new card's props stapled onto it.
-              <FicheEditor key={editingCard.id} card={editingCard} cards={cards} onClose={() => setEditing(null)} />
-            )}
+            {editor}
           </aside>
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -683,10 +729,6 @@ function CardFiche({
 function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onClose: () => void }) {
   const updateContent = useCardsStore(s => s.updateContent)
   const updateTitle = useCardsStore(s => s.updateTitle)
-  // A description written from the editor joins the panel immediately: the
-  // card had nothing to read a second ago, so nothing was opened for it, and
-  // saving it is exactly the moment the fiche becomes worth showing.
-  const show = useCardDetailStore(s => s.show)
   const setEditing = useCardDetailStore(s => s.setEditing)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
@@ -694,12 +736,24 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
   const level = clampCardLevel(card.level)
   const levelAppearance = useAppearanceSettingsStore(s => s.levels[level])
   const colors = card.detached === true ? detachedColors[theme] : levelAppearance.color[theme]
+  // Every level at once, for the dialog's edge arrows: each one leads to a
+  // different card, and each is painted in ITS OWN card's colours so the user
+  // can recognise where a jump goes before reading the title on the button.
+  const allLevels = useAppearanceSettingsStore(s => s.levels)
 
-  // The edge arrows' targets: the parent above, the first child below (with
+  /** The palette a card wears — same rules as this one: its level, or the achromatic detached set. */
+  function chipColorsFor(target: Card | undefined): TitleChipColors | undefined {
+    if (target === undefined) return undefined
+    const palette =
+      target.detached === true ? detachedColors[theme] : allLevels[clampCardLevel(target.level)].color[theme]
+    return { bg: toCss(palette.bg), border: toCss(palette.border), text: toCss(palette.text) }
+  }
+
+  // The edge arrows' targets: the parent LEFT, the first child RIGHT (with
   // a count when there is more than one), and this card's neighbours at the
-  // same level on either side. `siblingsOf` includes the card itself, sorted
-  // in display order, so its own position in that list is where the left/
-  // right split falls.
+  // same level ABOVE and BELOW. `siblingsOf` includes the card itself, sorted
+  // in display order, so its own position in that list is where the
+  // previous/next split falls.
   const parent = card.parentId === null ? undefined : cards.find(c => c.id === card.parentId)
   const children = childrenOf(cards, card.id)
   const siblings = siblingsOf(cards, card.id)
@@ -714,14 +768,26 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
       cardTitle={card.title}
       blocks={contentOf(card)}
       onSave={blocks => {
+        // The content, and only the content. Saving used to also open the
+        // card's fiche, so that a description written from scratch "joined the
+        // panel immediately" — which meant the editor and the eye both pushed
+        // something into the right panel, and the user could not write a note
+        // without being shown a fiche they had not asked to read. Writing and
+        // reading are two intentions; the eye is the button for the second one.
         updateContent(card.id, blocks)
-        if (blocks.length > 0) show(card.id)
       }}
       onClose={onClose}
-      parentTarget={parent && { id: parent.id, title: parent.title }}
-      childTarget={children[0] && { id: children[0].id, title: children[0].title, count: children.length }}
-      prevSibling={prevSibling && { id: prevSibling.id, title: prevSibling.title }}
-      nextSibling={nextSibling && { id: nextSibling.id, title: nextSibling.title }}
+      parentTarget={parent && { id: parent.id, title: parent.title, colors: chipColorsFor(parent) }}
+      childTarget={
+        children[0] && {
+          id: children[0].id,
+          title: children[0].title,
+          count: children.length,
+          colors: chipColorsFor(children[0]),
+        }
+      }
+      prevSibling={prevSibling && { id: prevSibling.id, title: prevSibling.title, colors: chipColorsFor(prevSibling) }}
+      nextSibling={nextSibling && { id: nextSibling.id, title: nextSibling.title, colors: chipColorsFor(nextSibling) }}
       onNavigate={setEditing}
       // The dialog's title field mirrors the card's own — same colours, same
       // rename — so "the biggest, most present place to work on this card" is

@@ -9,7 +9,7 @@
  * no business importing a component.
  */
 
-export type LanguageId = 'en' | 'es'
+export type LanguageId = 'en' | 'es' | 'fr'
 
 export interface SpecialCharacter {
   /** The character the button inserts. */
@@ -109,6 +109,37 @@ export const LANGUAGES: LanguageHelp[] = [
           { char: 'ü', label: 'u tréma (güe)' },
           { char: 'ñ', label: 'eñe' },
           { char: 'Ñ', label: 'Eñe majuscule' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'fr',
+    // The pupil's own language, so this set is not about a keyboard that is
+    // "missing something foreign": it is what a word processor applies behind
+    // the writer's back. The accented letters are deliberately absent — é, è,
+    // ê, à, ç ARE on the AZERTY keyboard, and a button for a key already under
+    // the pupil's fingers only makes the palette harder to scan.
+    label: 'Français',
+    groups: [
+      {
+        name: 'Typographie française',
+        characters: [
+          { char: '«', label: 'Guillemet français ouvrant', closesWith: '»', spaced: true },
+          { char: '’', label: 'Apostrophe typographique (l’élève)' },
+          { char: '…', label: 'Points de suspension' },
+          { char: '–', label: 'Tiret demi-cadratin (10–20)' },
+          { char: '—', label: 'Tiret cadratin (dialogue, incise)' },
+          { char: '°', label: 'Symbole degré (45°)' },
+        ],
+      },
+      {
+        name: 'Ligatures',
+        characters: [
+          { char: 'œ', label: 'o et e liés (cœur)' },
+          { char: 'Œ', label: 'O et E liés majuscule (Œuvre)' },
+          { char: 'æ', label: 'a et e liés (ex æquo)' },
+          { char: 'Æ', label: 'A et E liés majuscule' },
         ],
       },
     ],

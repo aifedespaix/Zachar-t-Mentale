@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
-import { Pencil, Trash2, X } from 'lucide-react'
+import { Keyboard, Pencil, Trash2, X } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
 import { blocksDiffer } from './blocks'
 import { BlockEditor, type BlockEditorProps } from './BlockEditor'
@@ -29,12 +29,19 @@ export interface TitleChipColors {
   text: string
 }
 
-/** One neighbouring card the edge arrows can jump to. */
+/** One neighbouring card an edge arrow can jump to. */
 export interface DescriptionNavTarget {
   id: string
   title: string
   /** Set only on the "children" target, when there is more than one — the arrow then names a count instead of picking one title for the user. */
   count?: number
+  /**
+   * That card's own palette, so its arrow can be painted like the card it
+   * leads to. Optional because a host with no palette to offer still has a
+   * navigable neighbour — the arrow then falls back to neutral colours rather
+   * than to a wrong one.
+   */
+  colors?: TitleChipColors
 }
 
 export interface DescriptionDialogProps {
@@ -58,13 +65,13 @@ export interface DescriptionDialogProps {
   onRenameTitle?: (title: string) => void
   /** Paints the title field like the card itself; omitted falls back to a neutral chip. */
   titleColors?: TitleChipColors
-  /** The parent card — the "↑" arrow. Absent for a root or detached card. */
+  /** The parent card — the "←" arrow. Absent for a root or detached card. */
   parentTarget?: DescriptionNavTarget
-  /** The first child — the "↓" arrow. `count` is set when there is more than one. */
+  /** The first child — the "→" arrow. `count` is set when there is more than one. */
   childTarget?: DescriptionNavTarget
-  /** The previous card at the same level — the "←" arrow. Absent for the first one. */
+  /** The previous card at the same level — the "↑" arrow. Absent for the first one. */
   prevSibling?: DescriptionNavTarget
-  /** The next card at the same level — the "→" arrow. Absent for the last one. */
+  /** The next card at the same level — the "↓" arrow. Absent for the last one. */
   nextSibling?: DescriptionNavTarget
   /** Jumps the dialog to another card without a discard prompt — autosave already committed whatever was being typed. */
   onNavigate?: (cardId: string) => void
@@ -86,6 +93,14 @@ const AUTOSAVE_DELAY_MS = 600
  * `descriptionHistory`), separate from the app's document-wide one: `Ctrl+Z`
  * here walks back through the last few edits to THIS description, not
  * through whatever else was touched elsewhere in the map meanwhile.
+ *
+ * The dialog is deliberately HARD to leave by accident: an outside click does
+ * nothing (see `onInteractOutside`). A definition is the longest thing anyone
+ * writes in this app, and losing it to a stray click on the canvas behind — the
+ * canvas the user is very likely to be aiming at, since it is where the card
+ * they came from lives — is not a risk worth taking for the convenience of a
+ * gesture nobody asked for. Two deliberate gestures close it: the cross in the
+ * top-right corner, and the "Fermer" button.
  *
  * Mounted fresh every time it opens on a different card (`key={cardId}` at
  * the call site) — including when the edge arrows below "navigate" to a
@@ -117,6 +132,7 @@ export function DescriptionDialog({
   const initial = useRef(seedFrom(blocks))
   const [draft, setDraft] = useState<CardBlock[]>(initial.current)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   // Its own short-lived draft, same idea as the card's own title field but
   // simpler: this dialog is mounted fresh on every open (see the note above),
   // so there is no external re-render to re-seed against mid-edit.
@@ -230,6 +246,13 @@ export function DescriptionDialog({
           // auto-focus (see `autoFocusField` below) keep the caret, without
           // Radix taking it straight back afterwards.
           onOpenAutoFocus={event => event.preventDefault()}
+          // The whole point: the modal does not close on an outside click.
+          // `onInteractOutside` covers the pointer and the focus leaving;
+          // `onPointerDownOutside` is the same gesture one event earlier, and
+          // cancelling both is what makes the promise hold for a real click
+          // rather than only in principle.
+          onInteractOutside={event => event.preventDefault()}
+          onPointerDownOutside={event => event.preventDefault()}
           // Inline styles rather than utility classes: the shared
           // `DialogContent` caps itself at `sm:max-w-sm` and lays out as a
           // grid, and this dialog is deliberately the widest surface in the
@@ -252,25 +275,60 @@ export function DescriptionDialog({
             outline: 'none',
           }}
         >
-          <NavArrow side="top" target={parentTarget} onNavigate={onNavigate && navigate} />
-          <NavArrow side="bottom" target={childTarget} onNavigate={onNavigate && navigate} />
-          <NavArrow side="left" target={prevSibling} onNavigate={onNavigate && navigate} />
-          <NavArrow side="right" target={nextSibling} onNavigate={onNavigate && navigate} />
+          <NavArrow side="top" target={prevSibling} onNavigate={onNavigate && navigate} />
+          <NavArrow side="bottom" target={nextSibling} onNavigate={onNavigate && navigate} />
+          <NavArrow side="left" target={parentTarget} onNavigate={onNavigate && navigate} />
+          <NavArrow side="right" target={childTarget} onNavigate={onNavigate && navigate} />
 
-          <header style={{ padding: '16px 20px 14px', borderBottom: '1px solid var(--border)' }}>
+          {/* The cross, one of the only two ways out. It carries its own
+              accessible name because the glyph says nothing about what it
+              closes. */}
+          <button
+            type="button"
+            aria-label="Fermer la description"
+            title="Fermer"
+            onClick={close}
+            style={{
+              position: 'absolute',
+              top: 10,
+              right: 10,
+              zIndex: 3,
+              display: 'grid',
+              placeItems: 'center',
+              width: 30,
+              height: 30,
+              padding: 0,
+              borderRadius: 8,
+              border: '1px solid transparent',
+              background: 'transparent',
+              color: 'inherit',
+              opacity: 0.65,
+              cursor: 'pointer',
+            }}
+          >
+            <X size={17} />
+          </button>
+
+          <header style={{ padding: '16px 56px 14px 20px', borderBottom: '1px solid var(--border)' }}>
             {breadcrumb.length > 0 && (
-              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>{breadcrumb.join(' › ')}</div>
+              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 7 }}>{breadcrumb.join(' › ')}</div>
             )}
             <DialogPrimitive.Title asChild>
               <div
                 className={`description-dialog-title-chip${onRenameTitle ? ' is-editable' : ''}`}
                 style={
                   {
-                    display: 'inline-flex',
+                    // ALL the width, not a chip hugging its text: the title is
+                    // the thing being identified, and a long one used to be
+                    // squeezed into a pill that grew with the string, pushing
+                    // the breadcrumb and the whole header around as it changed.
+                    display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 14px',
-                    borderRadius: 8,
+                    gap: 10,
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '9px 14px',
+                    borderRadius: 9,
                     border: `2px solid ${titleColors?.border ?? 'var(--border)'}`,
                     background: titleColors?.bg ?? 'var(--muted)',
                     color: titleColors?.text ?? 'var(--foreground)',
@@ -278,11 +336,20 @@ export function DescriptionDialog({
                   } as CSSProperties
                 }
               >
+                <span
+                  aria-hidden
+                  style={{
+                    flex: '0 0 auto',
+                    width: 10,
+                    height: 10,
+                    borderRadius: 999,
+                    background: titleColors?.border ?? 'currentColor',
+                  }}
+                />
                 <input
                   aria-label="Titre de la carte"
                   value={titleDraft}
                   readOnly={!onRenameTitle}
-                  size={Math.max(titleDraft.length, 1)}
                   onChange={event => setTitleDraft(event.target.value)}
                   onBlur={commitTitle}
                   onKeyDown={event => {
@@ -293,32 +360,42 @@ export function DescriptionDialog({
                     if (event.key === 'Escape') setTitleDraft(cardTitle)
                   }}
                   style={{
+                    flex: 1,
+                    minWidth: 0,
                     border: 'none',
                     background: 'transparent',
                     color: 'inherit',
                     font: 'inherit',
-                    fontSize: 16,
-                    fontWeight: 600,
+                    fontSize: 17,
+                    fontWeight: 650,
                     outline: 'none',
                     cursor: onRenameTitle ? 'text' : 'default',
                   }}
                 />
-                {onRenameTitle && <Pencil size={13} className="title-chip-pencil" aria-hidden />}
+                {onRenameTitle && <Pencil size={14} className="title-chip-pencil" aria-hidden />}
               </div>
             </DialogPrimitive.Title>
           </header>
 
-          <div style={{ flex: 1, minHeight: 0, padding: '14px 20px' }}>
-            <BlockEditor
-              blocks={draft}
-              onChange={setDraft}
-              resolveAsset={resolveAsset}
-              onInsertImage={onInsertImage}
-              onPickImage={onPickImage}
-              onError={onError}
-              autoFocusField
-            />
+          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '14px 20px 6px' }}>
+            {/* A readable measure, not the full width of a 1600px dialog: the
+                side panel that used to hold this column back is gone, and
+                prose across the whole modal would run to ~180 characters a
+                line. Tables and formulas have room to spare at this width. */}
+            <div style={{ height: '100%', maxWidth: 1080, margin: '0 auto' }}>
+              <BlockEditor
+                blocks={draft}
+                onChange={setDraft}
+                resolveAsset={resolveAsset}
+                onInsertImage={onInsertImage}
+                onPickImage={onPickImage}
+                onError={onError}
+                autoFocusField
+              />
+            </div>
           </div>
+
+          {shortcutsOpen && <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />}
 
           <footer
             style={{
@@ -347,11 +424,17 @@ export function DescriptionDialog({
                 opacity: 0.55,
               }}
             >
-              <span
-                style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', opacity: 0.7 }}
-              />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', opacity: 0.7 }} />
               Enregistré automatiquement
             </span>
+            {/* Kept where the side panel's shortcut list used to be: the panel
+                is gone (its tools moved onto the blocks themselves), but the
+                keyboard is still the fastest way to write a definition, and a
+                shortcut nobody can look up is a shortcut nobody uses. */}
+            <Button variant="outline" aria-expanded={shortcutsOpen} onClick={() => setShortcutsOpen(open => !open)}>
+              <Keyboard />
+              Raccourcis
+            </Button>
             <Button onClick={close}>Fermer</Button>
           </footer>
 
@@ -382,18 +465,48 @@ export function DescriptionDialog({
 
 const NAV_GLYPH = { top: '↑', bottom: '↓', left: '←', right: '→' } as const
 
+/**
+ * Where each relation sits, and it is the geometry that carries the meaning:
+ * **depth is horizontal, order is vertical.**
+ *
+ * The parent is to the LEFT and the first child to the RIGHT — the two
+ * directions that read as "up a level" and "down a level" in a mind map laid
+ * out left to right. The cards either side of this one at the same level are
+ * ABOVE and BELOW, which is where they already are in the sibling order the
+ * user is looking at.
+ *
+ * It used to be the other way round (parent above, siblings left/right), which
+ * put a hierarchy move on the vertical axis and a same-level move on the
+ * horizontal one — exactly the two relations a reader is most likely to
+ * confuse, on the two axes that were most likely to suggest the opposite.
+ */
 const NAV_POSITION: Record<keyof typeof NAV_GLYPH, CSSProperties> = {
-  top: { top: -17, left: '50%', transform: 'translateX(-50%)' },
-  bottom: { bottom: -17, left: '50%', transform: 'translateX(-50%)' },
-  left: { left: -17, top: '50%', transform: 'translateY(-50%)' },
-  right: { right: -17, top: '50%', transform: 'translateY(-50%)' },
+  top: { top: -18, left: '50%', transform: 'translateX(-50%)' },
+  bottom: { bottom: -18, left: '50%', transform: 'translateX(-50%)' },
+  left: { left: -18, top: '50%', transform: 'translateY(-50%)' },
+  right: { right: -18, top: '50%', transform: 'translateY(-50%)' },
+}
+
+/** What each edge leads to, in one word, so the arrow does not have to be decoded. */
+const NAV_RELATION: Record<keyof typeof NAV_GLYPH, string> = {
+  top: 'Précédent',
+  bottom: 'Suivant',
+  left: 'Parent',
+  right: 'Sous-partie',
 }
 
 /**
- * One edge of the dialog: the parent above, the first child below, the
- * previous/next card at the same level on either side. Shown only when that
- * neighbour exists — a card with no siblings simply has no left/right arrow,
- * rather than one greyed out for a relation that does not apply to it.
+ * One edge of the dialog: the parent on the left, the first child on the right,
+ * the previous/next card at the same level above and below. Shown only when
+ * that neighbour exists — a card with no siblings simply has no top/bottom
+ * arrow, rather than one greyed out for a relation that does not apply to it.
+ *
+ * Painted in the TARGET card's own colours. The four arrows lead to four
+ * different cards, and colour is the one thing that already means "which card
+ * is this" everywhere else in the app: the level palette. A neutral button
+ * would make the user read four titles to find the one they want; a coloured
+ * one lets them recognise it, including the level it belongs to, before
+ * reading anything.
  */
 function NavArrow({
   side,
@@ -405,35 +518,106 @@ function NavArrow({
   onNavigate?: (id: string) => void
 }) {
   if (target === undefined || onNavigate === undefined) return null
-  const label = target.count !== undefined && target.count > 1 ? `${target.count} sous-parties` : target.title
+  // More than one child: naming one of them would be picking for the user, so
+  // the arrow says how many there are instead — and then the count IS the
+  // label, leaving no room for one title among several.
+  const manyChildren = side === 'right' && target.count !== undefined && target.count > 1
+  const relation = manyChildren ? `${target.count} sous-parties` : NAV_RELATION[side]
+  const detail = manyChildren ? null : target.title
+  const colors = target.colors
 
   return (
     <button
       type="button"
-      aria-label={`Aller à « ${label} »`}
-      title={label}
+      aria-label={`Aller à « ${target.title} »`}
+      title={`${relation} : ${target.title}`}
       onClick={() => onNavigate(target.id)}
       style={{
         position: 'absolute',
         zIndex: 2,
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        maxWidth: side === 'left' || side === 'right' ? 120 : 260,
+        gap: 7,
+        maxWidth: side === 'left' || side === 'right' ? 168 : 260,
         padding: '6px 12px',
         borderRadius: 999,
-        border: '1px solid var(--border)',
-        background: 'var(--popover)',
+        border: `2px solid ${colors?.border ?? 'var(--border)'}`,
+        background: colors?.bg ?? 'var(--popover)',
+        color: colors?.text ?? 'inherit',
         boxShadow: '0 4px 14px rgba(0, 0, 0, 0.2)',
-        color: 'inherit',
         fontSize: 12,
         cursor: 'pointer',
         ...NAV_POSITION[side],
       }}
     >
-      <span aria-hidden>{NAV_GLYPH[side]}</span>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+      {/* The arrow always points at the edge it lives on, whichever side that
+          is; the word beside it says what the jump MEANS. */}
+      {(side === 'left' || side === 'top') && <span aria-hidden>{NAV_GLYPH[side]}</span>}
+      <span style={{ fontWeight: 700, opacity: 0.85, whiteSpace: 'nowrap' }}>{relation}</span>
+      {detail !== null && (
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
+      )}
+      {(side === 'right' || side === 'bottom') && <span aria-hidden>{NAV_GLYPH[side]}</span>}
     </button>
+  )
+}
+
+/** The keyboard, listed — opened from the footer, in the flow rather than floating over the field being written in. */
+function ShortcutsPanel({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      role="group"
+      aria-label="Raccourcis clavier"
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '6px 22px',
+        alignItems: 'center',
+        padding: '9px 20px',
+        borderTop: '1px solid var(--border)',
+        background: 'color-mix(in oklch, var(--border), transparent 70%)',
+      }}
+    >
+      <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.6 }}>
+        Raccourcis
+      </span>
+      <Shortcut keys="Entrée" label="Nouveau bloc" />
+      <Shortcut keys="Maj + Entrée" label="Retour à la ligne" />
+      <Shortcut keys="$$" label="Transforme le texte en formule" />
+      <Shortcut keys="Ctrl/Cmd + Z" label="Annuler" />
+      <Shortcut keys="Ctrl/Cmd + Maj + Z" label="Rétablir" />
+      <Shortcut keys="Échap" label="Fermer" />
+      <button
+        type="button"
+        aria-label="Masquer les raccourcis"
+        onClick={onClose}
+        style={{
+          marginLeft: 'auto',
+          display: 'grid',
+          placeItems: 'center',
+          width: 26,
+          height: 26,
+          padding: 0,
+          borderRadius: 6,
+          border: '1px solid var(--border)',
+          background: 'transparent',
+          color: 'inherit',
+          opacity: 0.6,
+          cursor: 'pointer',
+        }}
+      >
+        <X size={14} />
+      </button>
+    </div>
+  )
+}
+
+function Shortcut({ keys, label }: { keys: string; label: string }) {
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, opacity: 0.8 }}>
+      <kbd style={{ font: 'inherit', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{keys}</kbd>
+      {label}
+    </span>
   )
 }
 

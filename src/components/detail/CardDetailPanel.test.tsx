@@ -82,20 +82,22 @@ describe('CardDetailPanel', () => {
     expect(useCardsStore.getState().history.present.find(c => c.id === leaf.id)?.definition).toBe('Réécrite')
   })
 
-  it('shows a description that was just written for a card that had none, in the panel', async () => {
-    // Writing a description is what makes the card worth reading: the fiche
-    // joins the panel at that moment, rather than the user having to go and
-    // find the card again.
+  it('hosts the editor of a card no fiche was opened for, without opening one', async () => {
+    // The description action opens the EDITOR, wherever it is clicked from; the
+    // eye opens the fiche. Writing is not reading, so saving here must not push
+    // a fiche into the panel that the user never asked for — the panel only has
+    // to be there to host the dialog (a portal, so its host has no width).
     const user = userEvent.setup()
-    useCardDetailStore.getState().show(bare.id)
+    useCardDetailStore.getState().setEditing(bare.id)
     render(<CardDetailPanel />)
 
-    await user.click(screen.getByRole('button', { name: /ajouter une description/i }))
     await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), 'On garde le plus grand.')
     await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
-    expect(useCardDetailStore.getState().open.some(entry => entry.cardId === bare.id)).toBe(true)
-    expect(screen.getByText(/on garde le plus grand/i)).toBeInTheDocument()
+    expect(useCardsStore.getState().history.present.find(c => c.id === bare.id)?.definition).toBe(
+      'On garde le plus grand.'
+    )
+    expect(useCardDetailStore.getState().open).toEqual([])
   })
 
   it('offers no editing on a locked map', () => {

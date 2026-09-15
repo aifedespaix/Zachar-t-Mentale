@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { DescriptionDialog } from './DescriptionDialog'
@@ -111,7 +111,8 @@ describe('DescriptionDialog', () => {
     const user = userEvent.setup()
     const props = renderDialog({ blocks: text('Como estas') })
 
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
+    // The palette is the current block's footer: the languages are there from
+    // the start, with no button to open first.
     await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
     await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
     await user.click(screen.getByRole('button', { name: /^fermer$/i }))
@@ -231,8 +232,8 @@ describe('DescriptionDialog', () => {
       ],
     })
 
-    await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
-    await user.click(screen.getByRole('button', { name: /monter le bloc en cours/i }))
+    // The order buttons live ON the block they move, so the label names it.
+    await user.click(screen.getByRole('button', { name: /monter le bloc 2/i }))
     await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
     expect(props.onSave).toHaveBeenCalledWith([
@@ -241,8 +242,7 @@ describe('DescriptionDialog', () => {
     ])
   })
 
-  it('cannot move the first block up nor the last one down', async () => {
-    const user = userEvent.setup()
+  it('cannot move the first block up nor the last one down', () => {
     renderDialog({
       blocks: [
         { kind: 'text', text: 'Premier' },
@@ -250,11 +250,41 @@ describe('DescriptionDialog', () => {
       ],
     })
 
-    // Block 1 is active on open (autofocused), so "up" is already disabled.
-    expect(screen.getByRole('button', { name: /monter le bloc en cours/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /monter le bloc 1/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /descendre le bloc 2/i })).toBeDisabled()
+  })
 
-    await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
-    expect(screen.getByRole('button', { name: /descendre le bloc en cours/i })).toBeDisabled()
+  it('cannot close on an outside click, and offers the cross as the way out', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog()
+
+    // Everything behind the dialog — the canvas, the panel, the card the user
+    // came from. Clicking there used to close the dialog and throw away the
+    // definition being written; it now does nothing at all.
+    //
+    // `fireEvent` rather than `user.click`: a modal Radix dialog sets
+    // `pointer-events: none` on the body precisely so that a real click cannot
+    // land there, and driving the gesture at the event level is what reaches
+    // the dismissable layer the test is about.
+    fireEvent.pointerDown(document.body)
+
+    expect(props.onClose).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: /fermer la description/i }))
+    expect(props.onClose).toHaveBeenCalled()
+  })
+
+  it('lists the keyboard shortcuts on demand, without taking up room the rest of the time', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    expect(screen.queryByRole('group', { name: /raccourcis clavier/i })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /raccourcis/i }))
+
+    const panel = screen.getByRole('group', { name: /raccourcis clavier/i })
+    expect(panel).toHaveTextContent('Nouveau bloc')
+    expect(panel).toHaveTextContent('Retour à la ligne')
   })
 
   it('resizes an image by its displayed width, keeping its shape', async () => {
@@ -282,6 +312,22 @@ describe('DescriptionDialog', () => {
     await user.click(screen.getByRole('button', { name: /^multiplié par$/i }))
     await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 
+    expect(props.onSave).toHaveBeenCalledWith([{ kind: 'math', latex: 'x\\times ' }])
+  })
+
+  it('inserts a symbol from the palette with the keyboard too, not only with a click', async () => {
+    // The palette listens to `mousedown` to keep the caret in the formula, and
+    // a keyboard Enter never fires one: without a key handler the keys stay
+    // reachable with Tab, announce their label, and then do nothing at all.
+    const user = userEvent.setup()
+    const props = renderDialog({ blocks: [{ kind: 'math', latex: 'x' }] })
+
+    screen.getByRole('button', { name: /^multiplié par$/i }).focus()
+    await user.keyboard('{Enter}')
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
+
+    // Inserted once, not twice: the keydown cancels the click it would
+    // otherwise synthesise.
     expect(props.onSave).toHaveBeenCalledWith([{ kind: 'math', latex: 'x\\times ' }])
   })
 

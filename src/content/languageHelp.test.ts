@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { LANGUAGES, languageHelp, insertCharacter, type SpecialCharacter } from './languageHelp'
 
 describe('the language help sets', () => {
-  it('offers English and Spanish, each labelled in French', () => {
-    expect(LANGUAGES.map(language => language.id)).toEqual(['en', 'es'])
-    expect(LANGUAGES.map(language => language.label)).toEqual(['Anglais', 'Espagnol'])
+  it('offers English, Spanish and French, each labelled in French', () => {
+    expect(LANGUAGES.map(language => language.id)).toEqual(['en', 'es', 'fr'])
+    expect(LANGUAGES.map(language => language.label)).toEqual(['Anglais', 'Espagnol', 'Français'])
   })
 
   it('gives every language groups, and never an empty one', () => {
@@ -46,15 +46,55 @@ describe('the language help sets', () => {
     expect(chars).not.toContain("'")
   })
 
+  it('carries the French ligatures, which no AZERTY key produces', () => {
+    const chars = languageHelp('fr').groups.flatMap(group => group.characters.map(character => character.char))
+    expect(chars).toContain('œ')
+    expect(chars).toContain('Œ')
+    expect(chars).toContain('æ')
+    expect(chars).toContain('Æ')
+  })
+
+  it('leaves out the accented letters the French keyboard already has', () => {
+    // These keys are under the pupil's fingers. Listing them would be noise in
+    // a palette whose job is to show only what is MISSING from the keyboard.
+    const chars = languageHelp('fr').groups.flatMap(group => group.characters.map(character => character.char))
+    expect(chars).not.toContain('é')
+    expect(chars).not.toContain('è')
+    expect(chars).not.toContain('ê')
+    expect(chars).not.toContain('à')
+    expect(chars).not.toContain('ç')
+  })
+
+  it('pairs the French guillemets, with the inner space typography asks for', () => {
+    const ouvrant = languageHelp('fr')
+      .groups.flatMap(group => group.characters)
+      .find(character => character.char === '«')
+    expect(ouvrant?.closesWith).toBe('»')
+    expect(ouvrant?.spaced).toBe(true)
+  })
+
+  it('inserts the French ligature œ at the caret, without disturbing the word', () => {
+    const oe = languageHelp('fr')
+      .groups.flatMap(group => group.characters)
+      .find(character => character.char === 'œ')
+    expect(oe).toBeDefined()
+    // « cur » + œ between the c and the u is the whole point: the letter the
+    // pupil cannot type arrives inside the word being written.
+    expect(insertCharacter('cur', 1, 1, oe!)).toEqual({ text: 'cœur', caret: 2 })
+  })
+
   it('gives every paired sign the closing sign that goes with it', () => {
     const paired = LANGUAGES.flatMap(language =>
       language.groups.flatMap(group => group.characters)
     ).filter(character => character.closesWith !== undefined)
+    // « » appears twice on purpose: French and Spanish both set their quotes
+    // that way, and each language's set stands alone in the palette.
     expect(paired.map(character => character.char + character.closesWith)).toEqual([
       '‘’',
       '“”',
       '¿?',
       '¡!',
+      '«»',
       '«»',
     ])
   })
@@ -106,5 +146,12 @@ describe('insertCharacter', () => {
 
   it('pads the inside of a spaced pair around a selection', () => {
     expect(insertCharacter('le texte', 0, 8, guillemets)).toEqual({ text: '« le texte »', caret: 12 })
+  })
+
+  it('writes the French guillemets with their inner spaces, caret between them', () => {
+    const ouvrant = languageHelp('fr')
+      .groups.flatMap(group => group.characters)
+      .find(character => character.char === '«')
+    expect(insertCharacter('', 0, 0, ouvrant!)).toEqual({ text: '«  »', caret: 2 })
   })
 })

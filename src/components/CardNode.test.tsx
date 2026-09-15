@@ -537,6 +537,25 @@ describe('CardNode footer', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Afficher dans le panneau')
   })
 
+  it('hands the two description buttons the class and the accent their hover needs', () => {
+    // The hover feedback lives in `index.css`, keyed on these class names, and
+    // its colour comes from `--card-action-accent` — set inline because the two
+    // buttons use it differently (a fill for one, a border for the other). Both
+    // halves are invisible to any other test, and a missing one is silent: that
+    // is exactly how the options button lost its own hover (an inline
+    // `background` outranking the stylesheet rule), so the wiring is pinned.
+    resetStore([cardWithDefinition])
+    renderCardNode(cardWithDefinition)
+
+    const edit = screen.getByRole('button', { name: /modifier la description/i })
+    const view = screen.getByRole('button', { name: /afficher dans le panneau/i })
+
+    expect(edit).toHaveClass('card-action-edit')
+    expect(view).toHaveClass('card-action-view')
+    expect(edit.getAttribute('style')).toContain('--card-action-accent')
+    expect(view.getAttribute('style')).toContain('--card-action-accent')
+  })
+
   it('replaces the title field with the shape of the answer while a recall question is pending', () => {
     renderCardNode(testCard, false, false, { type: 'recall', result: 'unanswered' })
 
@@ -713,29 +732,30 @@ describe('CardNode footer', () => {
     expect(useQuizStore.getState().results[testCard.id]).toBe('correct')
   })
 
-  it('opens the fiche AND its editor when the card has nothing to read yet', async () => {
+  it('opens the editor — and not the fiche — when the card has nothing to read yet', async () => {
     // A card with no description has nothing to show, so sending the user to
     // an empty panel to find an "add" button would spend a click on nothing.
+    // The editor is the whole answer; the fiche is the eye's business.
     const user = userEvent.setup()
     renderCardNode(testCard)
 
     await user.click(screen.getByRole('button', { name: /ajouter une description/i }))
 
-    expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([testCard.id])
     expect(useCardDetailStore.getState().editingCardId).toBe(testCard.id)
+    expect(useCardDetailStore.getState().open).toEqual([])
   })
 
-  it('opens the editor — not just the fiche — for a card that already has a description', async () => {
-    // Reading is what clicking the card itself does; this button is the one
-    // way into the description to CHANGE it, filled or empty.
+  it('opens the editor for a card that already has a description, still without a fiche', async () => {
+    // Reading is what the eye does; this button is the one way into the
+    // description to CHANGE it, filled or empty.
     const user = userEvent.setup()
     resetStore([cardWithDefinition])
     renderCardNode(cardWithDefinition)
 
     await user.click(screen.getByRole('button', { name: /modifier la description/i }))
 
-    expect(useCardDetailStore.getState().open.map(entry => entry.cardId)).toEqual([cardWithDefinition.id])
     expect(useCardDetailStore.getState().editingCardId).toBe(cardWithDefinition.id)
+    expect(useCardDetailStore.getState().open).toEqual([])
   })
 
   it('opens nothing when the card body is clicked, filled or not — only the eye button opens the fiche', async () => {
@@ -1057,14 +1077,14 @@ describe('the fiche corner badge', () => {
     expect(screen.queryByText('Définition existante')).not.toBeInTheDocument()
   })
 
-  it('opens the fiche and its editor when the "modifier" button is clicked', async () => {
+  it('opens the editor, not the fiche, when the "modifier" button is clicked', async () => {
     const user = userEvent.setup()
     renderCardNode(cardWithDefinition)
 
     await user.click(screen.getByRole('button', { name: /modifier la description/i }))
 
-    expect(useCardDetailStore.getState().open.some(entry => entry.cardId === cardWithDefinition.id)).toBe(true)
     expect(useCardDetailStore.getState().editingCardId).toBe(cardWithDefinition.id)
+    expect(useCardDetailStore.getState().open).toEqual([])
   })
 
   it('reflects the open state on the eye button via aria-pressed', async () => {

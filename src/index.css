@@ -273,14 +273,65 @@
  * colour as `color` (set inline), so a shared `currentColor` background tint
  * on hover is what makes either one read as "you're about to grab/open this"
  * without hard-coding a colour here that would drift from the level palette.
+ *
+ * `background: none` belongs in THIS rule rather than in the button's inline
+ * style: an inline declaration outranks every stylesheet rule, so the
+ * `background: transparent` that used to sit on the options button was
+ * silently cancelling the hover tint below it — the handle had no inline
+ * background and lit up, the options button had one and did not.
  */
 .card-drag-handle,
 .card-options-btn {
+  background: none;
   transition: background-color 120ms ease;
 }
 .card-drag-handle:hover:not([aria-disabled="true"]),
 .card-options-btn:hover {
   background-color: color-mix(in oklch, currentColor, transparent 82%);
+}
+
+/*
+ * The bottom row's two buttons — "Modifier / Ajouter la description", and the
+ * eye that opens the fiche without touching the editor.
+ *
+ * A slight lift and a coloured shadow, never a colour swap: the first button is
+ * painted with ITS OWN card's level colour, and replacing that on hover would
+ * drop the one piece of information the pointer is asking about at the exact
+ * moment it asks. The accent is passed in as `--card-action-accent`, since the
+ * two buttons use it differently (one as a fill, the other as a border).
+ *
+ * `transform` is outside the layout flow, so nothing around the buttons moves
+ * (règle anti-décalage 1) — the row keeps its 36px and the card keeps its
+ * footprint, which is also why this cannot be done with a padding or a margin.
+ */
+.card-action-edit,
+.card-action-view {
+  transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease, filter 140ms ease;
+}
+.card-action-edit:hover,
+.card-action-view:hover {
+  transform: translateY(-1px);
+}
+.card-action-edit:hover {
+  filter: brightness(1.12) saturate(1.06);
+  box-shadow: 0 3px 10px color-mix(in oklch, var(--card-action-accent), transparent 62%);
+}
+.card-action-view:hover {
+  background-color: color-mix(in oklch, var(--card-action-accent), transparent 88%);
+  box-shadow: 0 2px 8px color-mix(in oklch, var(--card-action-accent), transparent 76%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The colour and the shadow stay — they are the feedback. Only the movement
+     goes, which is the part the setting is about. */
+  .card-action-edit,
+  .card-action-view {
+    transition: none;
+  }
+  .card-action-edit:hover,
+  .card-action-view:hover {
+    transform: none;
+  }
 }
 
 /*
@@ -301,6 +352,19 @@
 .description-dialog-title-chip.is-editable:hover .title-chip-pencil,
 .description-dialog-title-chip.is-editable:focus-within .title-chip-pencil {
   opacity: 0.55;
+}
+
+/*
+ * Une formule est un bloc de la définition, pas un titre de chapitre : alignée à
+ * gauche, elle se lit dans le fil du texte, à la même marge que la prose
+ * au-dessus et en dessous. KaTeX centre en mode « display » (et re-centre une
+ * seconde fois sur `.katex` lui-même) — les deux règles sont donc nécessaires,
+ * et elles vivent ici, une fois, plutôt qu'en style inline à chaque appel de
+ * `renderMathToHtml` : l'écran et le PDF partagent ainsi la même mise en page.
+ */
+.katex-display,
+.katex-display > .katex {
+  text-align: left;
 }
 
 /*

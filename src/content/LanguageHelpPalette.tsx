@@ -15,15 +15,44 @@ const FLAG_HEIGHT = 12
  * rects and looks the same everywhere.
  */
 export function LanguageFlag({ id }: { id: LanguageId }) {
-  if (id === 'es') {
-    return (
-      <svg viewBox="0 0 60 40" width={FLAG_WIDTH} height={FLAG_HEIGHT} aria-hidden focusable="false" style={{ display: 'block', borderRadius: 2 }}>
-        <rect width="60" height="40" fill="#AA151B" />
-        <rect y="10" width="60" height="20" fill="#F1BF00" />
-      </svg>
-    )
-  }
+  if (id === 'es') return <SpainFlag />
+  if (id === 'fr') return <FranceFlag />
   return <UnionJack />
+}
+
+/** Blue, white, red — three vertical bands, the whole flag at this size. */
+function FranceFlag() {
+  return (
+    <svg
+      viewBox="0 0 60 40"
+      width={FLAG_WIDTH}
+      height={FLAG_HEIGHT}
+      aria-hidden
+      focusable="false"
+      style={{ display: 'block', borderRadius: 2 }}
+    >
+      <rect width="20" height="40" fill="#002395" />
+      <rect x="20" width="20" height="40" fill="#FDFDFD" />
+      <rect x="40" width="20" height="40" fill="#ED2939" />
+    </svg>
+  )
+}
+
+/** Red over yellow over red, the simplified civil ensign. */
+function SpainFlag() {
+  return (
+    <svg
+      viewBox="0 0 60 40"
+      width={FLAG_WIDTH}
+      height={FLAG_HEIGHT}
+      aria-hidden
+      focusable="false"
+      style={{ display: 'block', borderRadius: 2 }}
+    >
+      <rect width="60" height="40" fill="#AA151B" />
+      <rect y="10" width="60" height="20" fill="#F1BF00" />
+    </svg>
+  )
 }
 
 /** The Union Jack, in its simplified two-diagonal form. */
@@ -34,7 +63,14 @@ function UnionJack() {
   // resolving against the wrong element.
   const clipId = `flag-en-${useId().replace(/:/g, '')}`
   return (
-    <svg viewBox="0 0 60 40" width={FLAG_WIDTH} height={FLAG_HEIGHT} aria-hidden focusable="false" style={{ display: 'block', borderRadius: 2 }}>
+    <svg
+      viewBox="0 0 60 40"
+      width={FLAG_WIDTH}
+      height={FLAG_HEIGHT}
+      aria-hidden
+      focusable="false"
+      style={{ display: 'block', borderRadius: 2 }}
+    >
       <clipPath id={clipId}>
         <path d="M30,20 h30 v20 z v20 h-30 z h-30 v-20 z v-20 h30 z" />
       </clipPath>
@@ -47,70 +83,25 @@ function UnionJack() {
   )
 }
 
-export interface LanguageHelpButtonProps {
-  /** The language whose help is showing, or `null` before one is chosen. */
-  language: LanguageId | null
-  open: boolean
-  /** Nothing to insert into: the description has no text block to type in. */
-  disabled?: boolean
-  onToggle: () => void
-}
-
 /**
- * The clickable flag that opens the special-character palette.
+ * One hue per character group, so the groups of a language are told apart at a
+ * glance rather than by reading their headings.
  *
- * It shows the language it is helping with — the flag IS the state, so there is
- * no separate "current language" to read elsewhere in the toolbar — and falls
- * back to a neutral glyph while none is chosen.
+ * Written as `color-mix(… , transparent 88%)` on purpose: the result is a thin
+ * tint laid over whatever is behind it, which means the SAME constant reads as
+ * a pale wash on the light theme and as a deep one on the dark theme. A colour
+ * mixed with white would have been unreadable in the dark, and vice versa.
  */
-export function LanguageHelpButton({ language, open, disabled = false, onToggle }: LanguageHelpButtonProps) {
-  const selected = language === null ? null : languageHelp(language)
-  return (
-    <button
-      type="button"
-      aria-label={selected === null ? 'Aide à la saisie : choisir une langue' : `Caractères spéciaux en ${selected.label}`}
-      aria-expanded={open}
-      aria-pressed={open}
-      disabled={disabled}
-      title={
-        disabled
-          ? 'Ajoute ou sélectionne un bloc de texte pour insérer des caractères'
-          : 'Caractères spéciaux (anglais, espagnol)'
-      }
-      // Keeps the caret in the text being written: without it, clicking the
-      // flag moves focus here and a later insert would have to guess where the
-      // caret was. Keyboard focus (Tab) is untouched — this only cancels the
-      // pointer's focus grab, and the click still fires.
-      onMouseDown={event => event.preventDefault()}
-      onClick={onToggle}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 5,
-        padding: '5px 10px',
-        fontSize: 13,
-        borderRadius: 6,
-        cursor: disabled ? 'default' : 'pointer',
-        border: '1px solid var(--border)',
-        background: open ? 'var(--accent, rgba(0,0,0,0.08))' : 'transparent',
-        color: 'inherit',
-        opacity: disabled ? 0.4 : 1,
-        // Pushed to the far end of the mode row: it acts on the text being
-        // written, not on which kind of block is selected.
-        marginLeft: 'auto',
-      }}
-    >
-      {selected === null ? <Languages size={14} /> : <LanguageFlag id={selected.id} />}
-      {selected?.label ?? 'Langue'}
-    </button>
-  )
-}
+const GROUP_TONES = [
+  'oklch(0.6 0.17 250)',
+  'oklch(0.66 0.16 75)',
+  'oklch(0.62 0.15 155)',
+  'oklch(0.62 0.17 20)',
+] as const
 
-export interface LanguageHelpPanelProps {
-  language: LanguageId | null
-  onChooseLanguage: (id: LanguageId) => void
-  /** Inserts at the caret of the text block being written. */
-  onInsert: (character: SpecialCharacter) => void
+/** A tinted surface: `share` is how much of the hue survives the mix. */
+function tint(hue: string, share: number): string {
+  return `color-mix(in oklch, ${hue}, transparent ${100 - share}%)`
 }
 
 /**
@@ -119,34 +110,44 @@ export interface LanguageHelpPanelProps {
  * whose partner has to be found among the other buttons.
  */
 function faceOf(character: SpecialCharacter): string {
-  return character.closesWith === undefined
-    ? character.char
-    : `${character.char} ${character.closesWith}`
+  return character.closesWith === undefined ? character.char : `${character.char} ${character.closesWith}`
+}
+
+export interface LanguageCharacterPaletteProps {
+  /** The language whose characters are showing, or `null` before one is chosen. */
+  language: LanguageId | null
+  onChooseLanguage: (id: LanguageId) => void
+  /** Inserts at the caret of the text block this palette belongs to. */
+  onInsert: (character: SpecialCharacter) => void
 }
 
 /**
- * The palette itself: choose a language, then click the characters it needs.
+ * The special characters of one language, as the footer of the block being
+ * written in.
  *
- * Rendered in the flow rather than as a floating popover — it is something the
- * user keeps open while typing, and a panel hovering over the very field being
- * written in would hide the sentence the accents belong to.
+ * It used to live in a side panel, next to a flag button that had to be clicked
+ * open first. It is now the block's own footer (see `BlockEditor`): the
+ * characters appear under the very field they write into, and they follow the
+ * selection — switching to another block hides them here and shows them there,
+ * with that block's own palette. Nothing has to be opened, and nothing has to
+ * be remembered about which block is "current".
+ *
+ * The languages themselves stay a row of buttons rather than a menu: the whole
+ * point is that the pupil can see, without clicking, that the help exists in
+ * three languages, and which one is currently showing.
  */
-export function LanguageHelpPanel({ language, onChooseLanguage, onInsert }: LanguageHelpPanelProps) {
+export function LanguageCharacterPalette({
+  language,
+  onChooseLanguage,
+  onInsert,
+}: LanguageCharacterPaletteProps) {
   const selected = language === null ? null : languageHelp(language)
+
   return (
-    <div
-      role="group"
-      aria-label="Caractères spéciaux"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        padding: '8px 10px',
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        background: 'color-mix(in oklch, var(--border), transparent 88%)',
-      }}
-    >
+    // A labelled region, like the math palette's: what this is has to be
+    // announced, not only seen — the language buttons alone read as a row of
+    // flags with no idea what they are for.
+    <div role="group" aria-label="Caractères spéciaux" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div role="group" aria-label="Choix de la langue" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {LANGUAGES.map(entry => {
           const active = entry.id === language
@@ -165,14 +166,15 @@ export function LanguageHelpPanel({ language, onChooseLanguage, onInsert }: Lang
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 5,
-                padding: '4px 9px',
+                gap: 6,
+                padding: '5px 11px',
                 fontSize: 13,
-                borderRadius: 6,
+                borderRadius: 999,
                 cursor: 'pointer',
                 border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
-                background: active ? 'var(--accent, rgba(0,0,0,0.08))' : 'var(--background)',
+                background: active ? 'var(--accent, rgba(0,0,0,0.08))' : 'transparent',
                 color: 'inherit',
+                fontWeight: active ? 600 : 400,
               }}
             >
               <LanguageFlag id={entry.id} />
@@ -183,54 +185,67 @@ export function LanguageHelpPanel({ language, onChooseLanguage, onInsert }: Lang
       </div>
 
       {selected === null ? (
-        <p style={{ margin: 0, fontSize: 12, opacity: 0.7 }}>
+        <p style={{ margin: 0, fontSize: 12.5, opacity: 0.7 }}>
+          <Languages size={13} style={{ verticalAlign: '-2px', marginRight: 5 }} aria-hidden />
           Choisis une langue pour afficher les caractères qu’elle demande.
         </p>
       ) : (
-        selected.groups.map(group => (
-          <div key={group.name} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                opacity: 0.6,
-              }}
-            >
-              {group.name}
-            </span>
-            <div role="group" aria-label={group.name} style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-              {group.characters.map(character => (
-                <button
-                  key={character.char}
-                  type="button"
-                  aria-label={character.label}
-                  title={character.label}
-                  // Same reasoning as the flag button, plus the insert itself is
-                  // left to `onClick` so the keyboard (Enter/Space, which never
-                  // fire a mousedown) reaches every character too.
-                  onMouseDown={event => event.preventDefault()}
-                  onClick={() => onInsert(character)}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 18px', alignItems: 'flex-start' }}>
+          {selected.groups.map((group, groupIndex) => {
+            const hue = GROUP_TONES[groupIndex % GROUP_TONES.length]
+            return (
+              <div key={group.name} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <span
                   style={{
-                    minWidth: 28,
-                    height: 28,
-                    padding: '0 6px',
-                    fontSize: 15,
-                    lineHeight: 1,
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    border: '1px solid var(--border)',
-                    background: 'var(--background)',
-                    color: 'inherit',
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    alignSelf: 'flex-start',
+                    background: tint(hue, 16),
+                    border: `1px solid ${tint(hue, 34)}`,
                   }}
                 >
-                  {faceOf(character)}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))
+                  {group.name}
+                </span>
+                <div role="group" aria-label={group.name} style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {group.characters.map(character => (
+                    <button
+                      key={character.char}
+                      type="button"
+                      aria-label={character.label}
+                      title={character.label}
+                      // Same reasoning as the language buttons, plus the insert
+                      // itself is left to `onClick` so the keyboard (Enter/Space,
+                      // which never fire a mousedown) reaches every character too.
+                      onMouseDown={event => event.preventDefault()}
+                      onClick={() => onInsert(character)}
+                      style={{
+                        // Sized to be hit without aiming: this is the whole
+                        // reason the palette exists, and the old 28px buttons
+                        // were the smallest targets in the dialog.
+                        minWidth: 40,
+                        height: 38,
+                        padding: '0 10px',
+                        fontSize: 17,
+                        lineHeight: 1,
+                        borderRadius: 9,
+                        cursor: 'pointer',
+                        border: `1px solid ${tint(hue, 38)}`,
+                        background: tint(hue, 13),
+                        color: 'inherit',
+                      }}
+                    >
+                      {faceOf(character)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )

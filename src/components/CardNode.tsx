@@ -276,26 +276,33 @@ function DescriptionAction({
     <div className="card-footer" style={ACTION_SLOT_STYLE}>
       <button
         type="button"
+        className="card-action-edit"
         aria-label={label}
         onClick={event => {
           event.stopPropagation()
           onEdit()
         }}
-        style={{
-          flex: 1,
-          height: '100%',
-          borderRadius: 8,
-          border: 'none',
-          background: borderColor,
-          color: 'var(--background)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 6,
-          fontSize: 12.5,
-          fontWeight: 600,
-          cursor: 'pointer',
-        }}
+        style={
+          {
+            flex: 1,
+            height: '100%',
+            borderRadius: 8,
+            border: 'none',
+            background: borderColor,
+            color: 'var(--background)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: 'pointer',
+            // The card's own colour, for the hover shadow in `index.css`. It
+            // cannot come from `currentColor` here: this button is FILLED with
+            // that colour, so `currentColor` is the label sitting on top of it.
+            '--card-action-accent': borderColor,
+          } as CSSProperties
+        }
       >
         <Icon size={14} strokeWidth={2.3} />
         {label}
@@ -310,25 +317,29 @@ function DescriptionAction({
             <TooltipTrigger asChild>
               <button
                 type="button"
+                className="card-action-view"
                 aria-label="Afficher dans le panneau"
                 aria-pressed={ficheOpen}
                 onClick={event => {
                   event.stopPropagation()
                   onView()
                 }}
-                style={{
-                  flexShrink: 0,
-                  width: 36,
-                  height: '100%',
-                  borderRadius: 8,
-                  border: `1.5px solid ${borderColor}`,
-                  background: 'var(--background)',
-                  color: borderColor,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                }}
+                style={
+                  {
+                    flexShrink: 0,
+                    width: 36,
+                    height: '100%',
+                    borderRadius: 8,
+                    border: `1.5px solid ${borderColor}`,
+                    background: 'var(--background)',
+                    color: borderColor,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    '--card-action-accent': borderColor,
+                  } as CSSProperties
+                }
               >
                 <Eye size={16} strokeWidth={2.3} />
               </button>
@@ -522,16 +533,23 @@ export function CardNode({ data }: CardNodeProps) {
    * The card's one description action: on an editable map it opens the EDITOR,
    * whether or not a definition exists yet.
    *
-   * Reading is what clicking the card itself does now, so this button is only
-   * ever about writing — and it must be, because it is the sole way into the
-   * description of a card that has none. On a LOCKED map editing is impossible,
-   * so it falls back to the fiche: the one thing it can still honestly do.
+   * Reading is what the eye beside it does, so this button is only ever about
+   * writing — and it must be, because it is the sole way into the description
+   * of a card that has none. On a LOCKED map editing is impossible, so it
+   * falls back to the fiche: the one thing it can still honestly do.
    */
   function openDescription() {
-    // The panel first: the editor is rendered inside it, so a fiche that is not
-    // open has nowhere to put the dialog.
-    showFiche(card.id)
-    if (!locked) editFiche(card.id)
+    if (locked) {
+      showFiche(card.id)
+      return
+    }
+    // The EDITOR, and nothing else. It used to open the fiche as well, on the
+    // reasoning that the dialog is rendered from inside the panel — which made
+    // "write something down" and "read this card" the same gesture, and pushed
+    // a fiche into the right panel that the user had not asked for. The panel
+    // still hosts the dialog (it stays mounted, at zero width, while a card is
+    // being edited); it just no longer shows anything for it.
+    editFiche(card.id)
   }
 
   /**
@@ -814,7 +832,11 @@ export function CardNode({ data }: CardNodeProps) {
                 justifyContent: 'center',
                 borderRadius: '9999px',
                 border: 'none',
-                background: 'transparent',
+                // No `background` here, deliberately: an inline declaration
+                // outranks every stylesheet rule, and this one used to cancel
+                // the hover tint in `index.css` — the drag handle has no inline
+                // background and lights up, this button did and stayed inert.
+                // The transparency it needs lives in `.card-options-btn`.
                 cursor: 'pointer',
                 color: toCss(colors.border),
               }}

@@ -43,6 +43,29 @@ type MathfieldElement = HTMLElement & {
 let loadPromise: Promise<void> | undefined
 let loaded = false
 
+/**
+ * Masks the little keyboard button MathLive keeps in the corner of the field.
+ *
+ * `math-virtual-keyboard-policy="manual"` already stops the keyboard from
+ * opening by itself, but the BUTTON is still drawn, and a button whose whole
+ * promise is "open a keyboard" has no business on screen in an app that ships
+ * a symbol palette instead. A stylesheet injected into the element's open
+ * shadow root — MathLive styles that button with `.ML__virtual-keyboard-toggle`
+ * inside its own shadow tree, so no rule written in `index.css` can reach it,
+ * and MathLive documents no CSS part for it.
+ *
+ * Everything here is defensive: the shadow root may not exist yet if a future
+ * MathLive attaches it lazily, and MathLive may not be there at all — in which
+ * case this function is simply never called.
+ */
+function hideVirtualKeyboardToggle(field: MathfieldElement): void {
+  const shadow = field.shadowRoot
+  if (shadow === null) return
+  const style = document.createElement('style')
+  style.textContent = '.ML__virtual-keyboard-toggle { display: none !important; }'
+  shadow.append(style)
+}
+
 function loadMathLive(): Promise<void> {
   loadPromise ??= import('mathlive')
     .then(() => {
@@ -127,6 +150,13 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter,
     // passing a LaTeX string as a child would need escaping at every call site.
     const field = document.createElement('math-field') as MathfieldElement
     field.setAttribute('aria-label', ariaLabel)
+    // Le clavier virtuel de MathLive ne sert à rien ici : l'élève écrit sur un
+    // vrai clavier, et les symboles dont il a besoin sont déjà à portée de clic
+    // dans le footer du bloc (voir `MathPalette`). Le laisser s'ouvrir à chaque
+    // focus recouvrait la formule qu'on était en train d'écrire. « manual » dit
+    // à MathLive de ne JAMAIS l'afficher tout seul ; `index.css` masque aussi le
+    // bouton qui restait dans la barre latérale du champ.
+    field.setAttribute('math-virtual-keyboard-policy', 'manual')
     field.style.width = '100%'
     field.value = latex
     field.addEventListener('input', () => onChangeRef.current(field.value))
@@ -137,6 +167,7 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter,
     })
     host.replaceChildren(field)
     fieldRef.current = field
+    hideVirtualKeyboardToggle(field)
 
     return () => {
       host.replaceChildren()

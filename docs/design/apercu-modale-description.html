@@ -1,0 +1,1048 @@
+<!doctype html>
+<html lang="fr" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Aperçu UX — modale « Description »</title>
+<style>
+  /* ------------------------------------------------------------------
+     Jetons de thème : repris tels quels de src/index.css de l'application.
+     ------------------------------------------------------------------ */
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --border: oklch(0.922 0 0);
+    --accent: oklch(0.97 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --page: oklch(0.965 0.004 250);
+    --shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+    color-scheme: light;
+  }
+  [data-theme='dark'] {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --border: oklch(1 0 0 / 12%);
+    --accent: oklch(0.269 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --page: oklch(0.11 0 0);
+    --shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+
+  /* Palettes de niveau — src/colors/levelColors.ts, thème clair puis sombre. */
+  .lv1 { --lv-bg: oklch(0.96 0.03 25);  --lv-border: oklch(0.55 0.18 25);  --lv-text: oklch(0.32 0.15 25); }
+  .lv2 { --lv-bg: oklch(0.96 0.03 70);  --lv-border: oklch(0.6 0.19 70);   --lv-text: oklch(0.34 0.16 70); }
+  .lv3 { --lv-bg: oklch(0.96 0.03 235); --lv-border: oklch(0.55 0.14 235); --lv-text: oklch(0.32 0.13 235); }
+  .lv4 { --lv-bg: oklch(0.96 0.03 105); --lv-border: oklch(0.62 0.17 105); --lv-text: oklch(0.3 0.15 105); }
+  [data-theme='dark'] .lv1 { --lv-bg: oklch(0.22 0.035 25);  --lv-border: oklch(0.62 0.16 25);  --lv-text: oklch(0.88 0.05 25); }
+  [data-theme='dark'] .lv2 { --lv-bg: oklch(0.22 0.035 70);  --lv-border: oklch(0.66 0.17 70);  --lv-text: oklch(0.88 0.06 70); }
+  [data-theme='dark'] .lv3 { --lv-bg: oklch(0.2 0.035 235);  --lv-border: oklch(0.62 0.13 235); --lv-text: oklch(0.88 0.05 235); }
+  [data-theme='dark'] .lv4 { --lv-bg: oklch(0.22 0.035 105); --lv-border: oklch(0.68 0.15 105); --lv-text: oklch(0.86 0.06 105); }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    color: var(--foreground);
+    background: var(--page);
+  }
+  button { font: inherit; color: inherit; }
+
+  .page { display: grid; grid-template-columns: 340px minmax(0, 1fr); height: 100vh; }
+
+  /* ---------------------------- Panneau de légende ---------------------------- */
+  .legend {
+    overflow-y: auto;
+    padding: 18px 18px 40px;
+    border-right: 1px solid var(--border);
+    background: var(--background);
+  }
+  .legend h1 { margin: 0 0 4px; font-size: 16px; }
+  .legend .sub { margin: 0 0 14px; font-size: 12px; line-height: 1.5; color: var(--muted-foreground); }
+  .reqs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .reqs li {
+    display: flex; gap: 9px; align-items: flex-start;
+    padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 12.5px; line-height: 1.45; cursor: pointer; background: transparent;
+    transition: background 120ms;
+  }
+  .reqs li:hover { background: var(--muted); }
+  .reqs .n {
+    flex: 0 0 auto; display: grid; place-items: center; width: 18px; height: 18px;
+    border-radius: 999px; background: var(--primary); color: var(--primary-foreground);
+    font-size: 10px; font-weight: 700;
+  }
+  .reqs b { font-weight: 650; }
+  .reqs .ok { color: oklch(0.62 0.16 150); font-weight: 700; }
+  [data-theme='dark'] .reqs .ok { color: oklch(0.78 0.17 150); }
+
+  .hyp {
+    margin-top: 16px; padding: 10px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.5;
+    border: 1px solid oklch(0.8 0.13 85); background: oklch(0.97 0.05 85);
+    color: oklch(0.35 0.09 70);
+  }
+  [data-theme='dark'] .hyp { border-color: oklch(0.5 0.12 85); background: oklch(0.26 0.05 85); color: oklch(0.92 0.06 85); }
+  .hyp h2 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .hyp ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+
+  .themebtn {
+    margin-top: 14px; padding: 7px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--muted);
+  }
+
+  /* ---------------------------- Scène / toile ---------------------------- */
+  .stage { position: relative; overflow: hidden; display: grid; place-items: center; }
+  .canvas {
+    position: absolute; inset: 0; opacity: 0.5;
+    background-image: radial-gradient(var(--border) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .ghostcard {
+    position: absolute; padding: 8px 14px; border-radius: 8px; font-size: 12px;
+    border: 2px solid var(--lv-border); background: var(--lv-bg); color: var(--lv-text);
+  }
+
+  /* ---------------------------- La modale ---------------------------- */
+  .modalwrap { position: relative; z-index: 3; }
+  .modal {
+    position: relative;
+    /* 340px de gouttière réservée de chaque côté : les quatre pastilles de
+       navigation débordent volontairement de la modale (comme aujourd'hui)
+       et ne doivent jamais être rognées par le bord de la scène. */
+    width: min(1180px, calc(100% - 340px));
+    height: min(84vh, 860px);
+    display: flex; flex-direction: column;
+    border: 1px solid var(--border); border-radius: 14px;
+    background: var(--popover); color: var(--popover-foreground);
+    box-shadow: var(--shadow);
+    border-top: 3px solid var(--lv-border);
+  }
+
+  /* Point 8 : la croix, seul geste de fermeture avec le bouton « Fermer ». */
+  .x-close {
+    position: absolute; top: 10px; right: 10px; z-index: 5;
+    width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 8px; border: 1px solid transparent; background: transparent;
+    cursor: pointer; opacity: 0.65;
+  }
+  .x-close:hover { opacity: 1; background: var(--accent); border-color: var(--border); }
+
+  /* Point 1 : les quatre voisins, chacun peint aux couleurs de SA carte cible. */
+  .nav {
+    position: absolute; z-index: 4;
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    border: 2px solid var(--lv-border); background: var(--lv-bg); color: var(--lv-text);
+    font-size: 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    max-width: 152px;
+  }
+  .nav:hover { filter: brightness(0.97); }
+  .nav .rel { font-weight: 700; opacity: 0.85; }
+  .nav .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav .glyph { font-weight: 700; }
+  .nav-left  { left: -22px;  top: 50%; transform: translateY(-50%); }
+  .nav-right { right: -22px; top: 50%; transform: translateY(-50%); }
+  .nav-top   { top: -20px;   left: 50%; transform: translateX(-50%); }
+  .nav-bottom{ bottom: -20px;left: 50%; transform: translateX(-50%); }
+
+  /* Point 2 : le titre prend toute la largeur de la modale. */
+  .modal-head { padding: 14px 56px 12px 20px; border-bottom: 1px solid var(--border); }
+  .crumb { font-size: 11px; opacity: 0.6; margin-bottom: 7px; }
+  .titleband {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 10px 14px; border-radius: 9px;
+    border: 2px solid var(--lv-border); background: var(--lv-bg); color: var(--lv-text);
+  }
+  .titleband .leveldot { width: 10px; height: 10px; border-radius: 999px; background: var(--lv-border); flex: 0 0 auto; }
+  .titleband input {
+    flex: 1; min-width: 0; border: none; background: transparent; color: inherit;
+    font: inherit; font-size: 17px; font-weight: 650; outline: none;
+  }
+
+  /* ---------------------------- Corps : les blocs ---------------------------- */
+  .modal-body { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 20px 12px; }
+  .blocks { display: flex; flex-direction: column; gap: 10px; }
+
+  .block {
+    border: 1px solid var(--border); border-radius: 10px;
+    background: transparent; transition: border-color 120ms, background 120ms;
+  }
+  .block.is-selected {
+    border-color: var(--lv-border);
+    background: color-mix(in oklch, var(--lv-bg), transparent 62%);
+  }
+  .blockrow { display: flex; align-items: stretch; gap: 6px; padding: 6px 8px 6px 4px; }
+
+  /* Point 5 : les actions du bloc sont SUR le bloc, à gauche. */
+  .rail { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 0 0 auto; }
+  .rail-left { width: 26px; }
+  .rail-right { width: auto; padding-top: 2px; }
+  .railbtn {
+    width: 24px; height: 24px; display: grid; place-items: center;
+    border: 1px solid transparent; border-radius: 6px; background: transparent;
+    cursor: grab; opacity: 0.42; padding: 0;
+  }
+  .railbtn:hover { opacity: 1; background: var(--accent); border-color: var(--border); }
+  .railbtn[disabled] { opacity: 0.12; cursor: default; }
+  .railbtn.danger:hover { color: var(--destructive); border-color: color-mix(in oklch, var(--destructive), transparent 55%); }
+  .rail .sep { width: 14px; height: 1px; background: var(--border); margin: 2px 0; }
+
+  .blockmain { flex: 1; min-width: 0; }
+
+  /* Point 6 : la zone grandit avec le texte, elle ne défile pas. */
+  textarea.autogrow {
+    width: 100%; display: block; resize: none; overflow: hidden;
+    font: inherit; font-size: 14.5px; line-height: 1.55;
+    padding: 7px 9px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--popover); color: inherit;
+    outline: none;
+  }
+  textarea.autogrow:focus { border-color: var(--lv-border); }
+
+  /* Point 4 : la formule est alignée à GAUCHE, plus jamais centrée. */
+  .mathfield {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--popover);
+  }
+  .mathfield:focus-within { border-color: var(--lv-border); }
+  .mathfield .src {
+    flex: 1; min-width: 0; text-align: left;
+    font-family: 'Cambria Math', 'Latin Modern Math', Cambria, Georgia, serif;
+    font-size: 20px; line-height: 1.5; outline: none;
+  }
+  .mathfield .src sup, .mathfield .src sub { font-size: 0.68em; }
+  .mathfield .latex-hint {
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px; opacity: 0.55; white-space: nowrap;
+  }
+
+  /* Choix du mode de bloc (point 3) : à DROITE du bloc, état courant affiché. */
+  .modebtn {
+    display: flex; align-items: center; gap: 6px; padding: 5px 9px;
+    border: 1px solid var(--border); border-radius: 7px; background: var(--popover);
+    cursor: pointer; font-size: 12.5px; white-space: nowrap;
+  }
+  .modebtn:hover { background: var(--accent); }
+  .modebtn .face { font-weight: 700; }
+  .menu {
+    position: absolute; z-index: 20; min-width: 172px; padding: 5px;
+    border: 1px solid var(--border); border-radius: 9px; background: var(--popover);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  }
+  .menu button {
+    display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px;
+    border: none; border-radius: 6px; background: transparent; cursor: pointer; text-align: left;
+    font-size: 13px;
+  }
+  .menu button:hover { background: var(--accent); }
+  .menu .check { margin-left: auto; opacity: 0.9; }
+  .menu .mdesc { display: block; font-size: 11px; opacity: 0.6; }
+
+  /* ---------------------------- Tableaux ---------------------------- */
+  .tblgrid { display: grid; gap: 3px; align-items: stretch; }
+  .colhandle, .rowhandle {
+    display: flex; align-items: center; justify-content: center; gap: 1px;
+    opacity: 0.38; transition: opacity 120ms;
+  }
+  .colhandle:hover, .rowhandle:hover { opacity: 1; }
+  .tblbtn {
+    width: 20px; height: 20px; display: grid; place-items: center; padding: 0;
+    border: 1px solid var(--border); border-radius: 5px; background: var(--popover); cursor: pointer;
+  }
+  .tblbtn:hover { background: var(--accent); border-color: var(--lv-border); }
+  .tblbtn.del:hover { color: var(--destructive); }
+  .cell { display: flex; align-items: center; gap: 2px; min-width: 0; }
+  .cell input {
+    flex: 1; min-width: 0; font: inherit; font-size: 13.5px; padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--popover); color: inherit; outline: none;
+  }
+  .cell input:focus { border-color: var(--lv-border); }
+  .cell.is-head input { font-weight: 650; background: var(--muted); }
+  .cellkind {
+    flex: 0 0 auto; width: 26px; height: 28px; display: grid; place-items: center;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--popover);
+    cursor: pointer; font-size: 11px; font-weight: 700;
+  }
+  .cellkind.is-math { color: oklch(0.5 0.16 275); border-color: color-mix(in oklch, oklch(0.5 0.16 275), transparent 55%); }
+  [data-theme='dark'] .cellkind.is-math { color: oklch(0.82 0.1 275); }
+  .cellkind:hover { background: var(--accent); }
+  .tablehint {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-top: 8px; font-size: 12px; opacity: 0.75;
+  }
+  .tablehint button {
+    padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--popover); cursor: pointer; font-size: 12px;
+  }
+  .tablehint button:hover { background: var(--accent); }
+
+  /* ---------------------------- Point 7 : le footer du bloc sélectionné ---------------------------- */
+  /* Le footer est TOUJOURS dans le DOM de chaque bloc : seul le bloc
+     sélectionné l'affiche. Changer de bloc ne re-rend donc rien — la saisie
+     en cours et le curseur survivent au clic. */
+  .blockfooter { display: none; }
+  .block.is-selected > .blockfooter { display: block; }
+  .blockfooter {
+    border-top: 1px dashed color-mix(in oklch, var(--lv-border), transparent 55%);
+    padding: 9px 10px 10px 34px;
+    background: color-mix(in oklch, var(--lv-bg), transparent 78%);
+    border-radius: 0 0 10px 10px;
+  }
+  .footerhead {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .footerhead .ftitle {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.65;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .langpill {
+    display: flex; align-items: center; gap: 5px; padding: 4px 9px; font-size: 12.5px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--popover); cursor: pointer;
+  }
+  .langpill[aria-pressed='true'] { border-color: var(--lv-border); background: var(--lv-bg); color: var(--lv-text); font-weight: 650; }
+  .symrow { display: flex; flex-wrap: wrap; gap: 9px 14px; align-items: flex-start; }
+  .symgroup { display: flex; flex-direction: column; gap: 4px; }
+  .symgroup > span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.55; }
+  .symbuttons { display: flex; flex-wrap: wrap; gap: 3px; }
+  /* Plus gros et colorés : chaque famille se repère d'un coup d'œil. */
+  .sym {
+    min-width: 38px; height: 36px; padding: 0 9px;
+    display: grid; place-items: center; font-size: 16px; line-height: 1;
+    border: 1px solid var(--tone-border, var(--border));
+    border-radius: 8px; background: var(--tone-bg, var(--popover)); color: inherit; cursor: pointer;
+  }
+  .sym:hover { border-color: var(--lv-border); transform: translateY(-1px); }
+  .tone-blue  { --tone-bg: oklch(0.96 0.03 250); --tone-border: oklch(0.8 0.08 250); }
+  .tone-amber { --tone-bg: oklch(0.97 0.04 80);  --tone-border: oklch(0.83 0.1 80); }
+  .tone-green { --tone-bg: oklch(0.96 0.04 160); --tone-border: oklch(0.8 0.09 160); }
+  .tone-rose  { --tone-bg: oklch(0.96 0.03 20);  --tone-border: oklch(0.82 0.08 20); }
+  [data-theme='dark'] .tone-blue  { --tone-bg: oklch(0.28 0.04 250); --tone-border: oklch(0.42 0.06 250); }
+  [data-theme='dark'] .tone-amber { --tone-bg: oklch(0.28 0.04 80);  --tone-border: oklch(0.44 0.07 80); }
+  [data-theme='dark'] .tone-green { --tone-bg: oklch(0.28 0.04 160); --tone-border: oklch(0.42 0.06 160); }
+  [data-theme='dark'] .tone-rose  { --tone-bg: oklch(0.28 0.03 20);  --tone-border: oklch(0.44 0.06 20); }
+  .symnote { font-size: 11.5px; opacity: 0.6; margin: 6px 0 0; }
+
+  .addblock {
+    margin-top: 10px; width: 100%; padding: 9px; font-size: 12.5px;
+    display: flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.6;
+    border: 1px dashed var(--border); border-radius: 9px; background: none; cursor: pointer;
+  }
+  .addblock:hover { opacity: 1; background: var(--muted); }
+
+  /* ---------------------------- Pied de modale ---------------------------- */
+  .modal-foot {
+    display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+    border-top: 1px solid var(--border);
+  }
+  .saved { margin-right: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.6; }
+  .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--popover); cursor: pointer;
+  }
+  .btn:hover { background: var(--accent); }
+  .btn.primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+  .btn.danger { color: var(--destructive); border-color: color-mix(in oklch, var(--destructive), transparent 55%); }
+
+  /* ---------------------------- Pastilles numérotées ---------------------------- */
+  .pin {
+    display: inline-grid; place-items: center; width: 17px; height: 17px; flex: 0 0 auto;
+    border-radius: 999px; background: oklch(0.55 0.18 265); color: white;
+    font-size: 10px; font-weight: 700; cursor: help;
+  }
+  [data-theme='dark'] .pin { background: oklch(0.62 0.17 265); color: oklch(0.15 0 0); }
+  .pin.pulse { animation: pulse 1200ms ease-out 1; }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 oklch(0.55 0.18 265 / 0.55); transform: scale(1); }
+    35% { box-shadow: 0 0 0 9px oklch(0.55 0.18 265 / 0); transform: scale(1.35); }
+    100% { box-shadow: 0 0 0 0 oklch(0.55 0.18 265 / 0); transform: scale(1); }
+  }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(16px);
+    padding: 9px 16px; border-radius: 999px; font-size: 13px;
+    background: var(--primary); color: var(--primary-foreground);
+    opacity: 0; pointer-events: none; transition: opacity 200ms, transform 200ms; z-index: 90;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .reltag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+    padding: 1px 6px; border-radius: 999px; background: color-mix(in oklch, var(--lv-border), transparent 80%);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <aside class="legend">
+    <h1>Modale « Description » — aperçu UX</h1>
+    <p class="sub">
+      Maquette interactive et autonome (aucune dépendance). Clique dans les blocs, change le mode,
+      ajoute lignes/colonnes, navigue avec les flèches. Clique un point ci-dessous : la pastille
+      correspondante pulse dans la modale.
+    </p>
+
+    <ol class="reqs" id="reqs">
+      <li data-pin="1"><span class="n">1</span><span>
+        <b>Accès aux descriptions.</b> Parent à <b>gauche</b>, 1<sup>er</sup> enfant à <b>droite</b>,
+        voisin du dessus en <b>haut</b>, voisin du dessous en <b>bas</b>. Chaque bouton porte les
+        <b>couleurs de la carte cible</b> (fond + texte + bordure) pour se repérer avant de cliquer.
+      </span></li>
+      <li data-pin="2"><span class="n">2</span><span>
+        <b>Titre</b> sur toute la largeur de la modale, dans les couleurs de la carte.
+      </span></li>
+      <li data-pin="3"><span class="n">3</span><span>
+        <b>Modes du bloc : Texte / Formule</b> seulement. Un bouton à droite du bloc affiche
+        l'état courant et ouvre un menu déroulant. Le tableau n'est plus un mode : tout bloc est un
+        tableau 1×1 auquel on <b>ajoute lignes et colonnes</b> (et qu'on réduit).
+      </span></li>
+      <li data-pin="4"><span class="n">4</span><span>
+        <b>Formules alignées à gauche</b>, plus centrées.
+      </span></li>
+      <li data-pin="5"><span class="n">5</span><span>
+        <b>Monter / descendre / supprimer / glisser</b> : les actions sont directement sur le bloc,
+        dans une gouttière à gauche.
+      </span></li>
+      <li data-pin="6"><span class="n">6</span><span>
+        Une <b>zone de texte grandit</b> avec son contenu au lieu de défiler.
+      </span></li>
+      <li data-pin="7"><span class="n">7</span><span>
+        <b>Plus de clavier virtuel.</b> Les symboles sont <b>plus gros, groupés et colorés</b>, et
+        vivent dans le <b>footer du bloc sélectionné</b> : ils le suivent quand on change de bloc.
+      </span></li>
+      <li data-pin="8"><span class="n">8</span><span>
+        <b>Pas de fermeture au clic extérieur.</b> Uniquement la <b>croix en haut à droite</b> ou
+        le bouton <b>Fermer</b>.
+      </span></li>
+      <li><span class="n">+</span><span>
+        <b>Le but :</b> prendre des notes et faire ses exercices (français, maths, langues, histoire…).
+        Tout doit être sous la main — d'où le footer contextuel, qui accueillera demain les aides
+        français (conjugaison, typographie) exactement comme les symboles maths.
+      </span></li>
+    </ol>
+
+    <div class="hyp">
+      <h2>Hypothèses à confirmer</h2>
+      <ol>
+        <li>Le menu déroulant de mode n'offre que <b>Texte</b> et <b>Formule</b> (comme demandé),
+            donc la création d'un tableau passe par un bouton « ajouter une colonne » présent sur
+            tout bloc. Autre option : garder « Tableau » dans le menu.</li>
+        <li>Formule : le champ WYSIWYG <em>est</em> l'affichage interprété, donc l'aperçu redondant
+            disparaît. Le mode « source LaTeX » reste accessible par un petit bouton.</li>
+        <li>Le bouton texte/formule d'une cellule : <b>une par cellule</b> (comme aujourd'hui),
+            déplacé proprement à droite du champ au lieu de chevaucher le coin.</li>
+        <li>Échap : gardé comme fermeture clavier, ou supprimé lui aussi ?</li>
+      </ol>
+    </div>
+
+    <button class="themebtn" id="themebtn">Passer en thème sombre</button>
+  </aside>
+
+  <main class="stage">
+    <div class="canvas" id="canvas"></div>
+
+    <div class="modalwrap">
+      <section class="modal lv3" role="dialog" aria-modal="true" aria-label="Description de Théorème de Pythagore">
+
+        <button class="x-close" id="xclose" title="Fermer (seule façon avec le bouton Fermer)" aria-label="Fermer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+
+        <!-- Point 1 : géométrie = hiérarchie (gauche/droite) vs ordre (haut/bas). -->
+        <button class="nav nav-left lv2" title="Carte parente">
+          <span class="reltag">Parent</span>
+          <span class="glyph">←</span>
+          <span class="ttl">Chapitre 5 — Le triangle rectangle</span>
+          <span class="pin" data-pin="1">1</span>
+        </button>
+        <button class="nav nav-right lv4" title="Première sous-partie">
+          <span class="ttl">Exemple : 3-4-5</span>
+          <span class="glyph">→</span>
+          <span class="reltag">1<sup>re</sup> sous-partie</span>
+        </button>
+        <button class="nav nav-top lv3" title="Carte précédente au même niveau">
+          <span class="glyph">↑</span>
+          <span class="ttl">Propriété directe</span>
+          <span class="reltag">Précédent</span>
+        </button>
+        <button class="nav nav-bottom lv3" title="Carte suivante au même niveau">
+          <span class="reltag">Suivant</span>
+          <span class="ttl">Réciproque du théorème</span>
+          <span class="glyph">↓</span>
+        </button>
+
+        <header class="modal-head">
+          <div class="crumb">Mathématiques › Géométrie › Chapitre 5 — Le triangle rectangle</div>
+          <div class="titleband">
+            <span class="leveldot"></span>
+            <input value="Théorème de Pythagore" aria-label="Titre de la carte" />
+            <span class="pin" data-pin="2">2</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="opacity:.6" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          </div>
+        </header>
+
+        <div class="modal-body">
+          <div class="blocks" id="blocks"></div>
+          <button class="addblock" id="addblock">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Ajouter un bloc
+          </button>
+        </div>
+
+        <footer class="modal-foot">
+          <span class="saved"><span class="dot"></span>Enregistré automatiquement</span>
+          <span class="pin" data-pin="8">8</span>
+          <button class="btn danger">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+            Supprimer
+          </button>
+          <button class="btn" id="closebtn">Fermer</button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  </main>
+</div>
+
+<script>
+/* =====================================================================
+   Maquette — données et rendu. Rien ici n'est du code de production :
+   l'objectif est de rendre la maquette cliquable pour valider l'UX.
+   ===================================================================== */
+
+const ICON = {
+  grip: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="9" cy="19" r="1.6"/><circle cx="15" cy="5" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="15" cy="19" r="1.6"/></svg>',
+  up: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>',
+  down: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  trash: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
+  plus: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  chevron: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  lang: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6"/></svg>',
+  sigma: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 7V5H6l6 7-6 7h12v-2"/></svg>',
+  grid: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>',
+  text: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>',
+}
+
+const MATH_GROUPS = [
+  { name: 'Structures', tone: 'tone-blue', items: [
+    { face: '⅟', label: 'Fraction' }, { face: 'x²', label: 'Puissance' }, { face: 'xₙ', label: 'Indice' },
+    { face: '√', label: 'Racine carrée' }, { face: 'ⁿ√', label: 'Racine n-ième' }, { face: '( )', label: 'Parenthèses' },
+  ] },
+  { name: 'Opérateurs', tone: 'tone-amber', items: [
+    { face: '×', label: 'Multiplié par' }, { face: '÷', label: 'Divisé par' }, { face: '±', label: 'Plus ou moins' },
+    { face: '≠', label: 'Différent de' }, { face: '≤', label: 'Inférieur ou égal' }, { face: '≥', label: 'Supérieur ou égal' },
+    { face: '≈', label: 'Environ égal' }, { face: '→', label: 'Flèche' }, { face: 'π', label: 'Pi' }, { face: '∞', label: 'Infini' },
+  ] },
+  { name: 'Chimie & unités', tone: 'tone-green', items: [
+    { face: '⚗', label: 'Équation chimique' }, { face: 'm/s', label: 'Grandeur avec unité' },
+  ] },
+]
+
+const LANGS = [
+  { id: 'fr', label: 'Français', proposed: true, groups: [
+    { name: 'Typographie française', tone: 'tone-rose', items: ['« »', 'œ', 'Œ', '–', '—', '…', '’', '°'] },
+  ] },
+  { id: 'en', label: 'Anglais', groups: [
+    { name: 'Apostrophe et guillemets', tone: 'tone-rose', items: ['’', '‘ ’', '“ ”'] },
+    { name: 'Tirets et signes', tone: 'tone-blue', items: ['–', '—', '…', '°'] },
+    { name: 'Monnaie', tone: 'tone-green', items: ['£', '$', '€'] },
+  ] },
+  { id: 'es', label: 'Espagnol', groups: [
+    { name: 'Ponctuation inversée', tone: 'tone-rose', items: ['¿ ?', '¡ !', '« »'] },
+    { name: 'Accents et tréma', tone: 'tone-amber', items: ['á', 'é', 'í', 'ó', 'ú', 'ü', 'ñ', 'Ñ'] },
+  ] },
+]
+
+let uid = 0
+const id = () => 'b' + ++uid
+
+const state = {
+  selected: null,
+  openMenu: null,          // { blockId, cellKey? }
+  language: 'en',
+  blocks: [
+    { id: id(), kind: 'text', text: "Dans un triangle rectangle, le carré de la longueur de l'hypoténuse est égal à la somme des carrés des longueurs des deux autres côtés." },
+    { id: id(), kind: 'math', latex: 'a² + b² = c²' },
+    { id: id(), kind: 'table', header: ['Côté', 'Mesure (cm)'], rows: [
+      [cell('a'), cell('3')],
+      [cell('b'), cell('4')],
+      [cell('c'), cell('5')],
+    ], hasHeader: true },
+    { id: id(), kind: 'text', text: "À retenir : l'hypoténuse est toujours le côté le plus long, et c'est celui qui fait face à l'angle droit.\nUtile aussi pour vérifier qu'un triangle est bien rectangle." },
+  ],
+}
+state.selected = state.blocks[0].id
+
+function cell(value, kind = 'text') { return { value, kind } }
+
+/* ------------------------------- Rendu ------------------------------- */
+
+const blocksEl = document.getElementById('blocks')
+
+function render() {
+  blocksEl.innerHTML = state.blocks.map(renderBlock).join('')
+  autoGrowAll()
+  if (state.openMenu !== null) positionMenu()
+}
+
+function renderBlock(block, index) {
+  const selected = block.id === state.selected
+  const isFirst = index === 0
+  const isLast = index === state.blocks.length - 1
+  const onlyOne = state.blocks.length <= 1
+
+  return `
+  <div class="block ${selected ? 'is-selected' : ''}" data-block="${block.id}">
+    <div class="blockrow">
+      <div class="rail rail-left">
+        <button class="railbtn" data-act="drag" title="Glisser pour déplacer le bloc" aria-label="Déplacer le bloc">${ICON.grip}</button>
+        <button class="railbtn" data-act="up" title="Monter le bloc" aria-label="Monter le bloc" ${isFirst ? 'disabled' : ''}>${ICON.up}</button>
+        <button class="railbtn" data-act="down" title="Descendre le bloc" aria-label="Descendre le bloc" ${isLast ? 'disabled' : ''}>${ICON.down}</button>
+        <div class="sep"></div>
+        <button class="railbtn danger" data-act="del" title="Supprimer le bloc" aria-label="Supprimer le bloc" ${onlyOne ? 'disabled' : ''}>${ICON.trash}</button>
+        ${index === 0 ? '<span class="pin" data-pin="5">5</span>' : ''}
+      </div>
+
+      <div class="blockmain">${renderContent(block)}</div>
+
+      <div class="rail rail-right">
+        ${renderModeButton(block)}
+        ${block.kind !== 'table' ? `
+          <button class="railbtn" data-act="tocol" title="Ajouter une colonne (le bloc devient un tableau)" aria-label="Ajouter une colonne">${ICON.grid}</button>
+        ` : ''}
+        ${block.kind === 'text' && index === 0 ? '<span class="pin" data-pin="3">3</span>' : ''}
+      </div>
+    </div>
+    ${renderFooter(block)}
+  </div>`
+}
+
+function renderModeButton(block) {
+  const isMath = block.kind === 'math'
+  return `
+    <button class="modebtn" data-act="mode" title="Type de ce bloc — clique pour changer" aria-expanded="${state.openMenu?.blockId === block.id}">
+      <span class="face">${isMath ? '∑' : 'Aa'}</span>
+      ${isMath ? 'Formule' : 'Texte'}
+      ${ICON.chevron}
+    </button>`
+}
+
+function renderContent(block) {
+  if (block.kind === 'text') {
+    return `<textarea class="autogrow" data-field="text" rows="1" placeholder="Écris ici…">${esc(block.text)}</textarea>`
+  }
+  if (block.kind === 'math') {
+    return `
+      <div class="mathfield">
+        <div class="src" contenteditable="true" data-field="latex" spellcheck="false">${esc(block.latex)}</div>
+        <span class="latex-hint" title="Afficher la source LaTeX">∑ LaTeX</span>
+      </div>`
+  }
+  return renderTable(block)
+}
+
+function renderTable(block) {
+  const cols = block.header.length
+  const grid = `grid-template-columns: 22px repeat(${cols}, minmax(110px, 1fr))`
+  const out = [`<div class="tblgrid" style="${grid}">`]
+
+  // Bandeau de colonnes : un « + » par colonne (insère à droite) et une corbeille.
+  out.push('<div></div>')
+  for (let c = 0; c < cols; c++) {
+    out.push(`
+      <div class="colhandle" style="align-self:end">
+        <button class="tblbtn" data-act="coladd" data-c="${c}" title="Insérer une colonne à droite">${ICON.plus}</button>
+        <button class="tblbtn del" data-act="coldel" data-c="${c}" title="Supprimer la colonne ${c + 1}" ${cols <= 1 ? 'disabled' : ''}>${ICON.trash}</button>
+      </div>`)
+  }
+
+  if (block.hasHeader) {
+    out.push('<div></div>')
+    for (let c = 0; c < cols; c++) {
+      out.push(`
+        <div class="cell is-head">
+          <input value="${esc(block.header[c] ?? '')}" data-field="header" data-c="${c}" placeholder="En-tête ${c + 1}" aria-label="En-tête ${c + 1}" />
+          <button class="cellkind" data-act="cellkind" data-c="${c}" data-head="1" title="Cellule d'en-tête : format">Aa</button>
+        </div>`)
+    }
+  }
+
+  block.rows.forEach((row, r) => {
+    out.push(`
+      <div class="rowhandle">
+        <button class="tblbtn" data-act="rowadd" data-r="${r}" title="Insérer une ligne en dessous">${ICON.plus}</button>
+        <button class="tblbtn del" data-act="rowdel" data-r="${r}" title="Supprimer la ligne ${r + 1}" ${block.rows.length <= 1 && !block.hasHeader ? 'disabled' : ''}>${ICON.trash}</button>
+      </div>`)
+    row.forEach((c, ci) => {
+      const isMath = c.kind === 'math'
+      out.push(`
+        <div class="cell" data-cell="${r}:${ci}">
+          <input value="${esc(c.value)}" data-field="cell" data-r="${r}" data-c="${ci}" aria-label="Ligne ${r + 1} colonne ${ci + 1}" />
+          <button class="cellkind ${isMath ? 'is-math' : ''}" data-act="cellkind" data-r="${r}" data-c="${ci}"
+                  title="${isMath ? 'Cellule en formule — passer en texte' : 'Cellule en texte — passer en formule'}">${isMath ? '∑' : 'Aa'}</button>
+        </div>`)
+    })
+  })
+
+  out.push('</div>')
+  out.push(`
+    <div class="tablehint">
+      <button data-act="rowadd" data-r="${block.rows.length - 1}">${ICON.plus} Ligne</button>
+      <button data-act="coladd" data-c="${cols - 1}">${ICON.plus} Colonne</button>
+      <button data-act="headtoggle">${block.hasHeader ? 'Retirer' : 'Ajouter'} la ligne d'en-tête</button>
+      <span class="pin" data-pin="3">3</span>
+      <span style="opacity:.75">Tout bloc est un tableau 1×1 : les <b>+</b> au-dessus et à gauche ajoutent, les corbeilles retirent.</span>
+    </div>`)
+  return out.join('')
+}
+
+/* ------------------- Point 7 : footer du bloc sélectionné ------------------- */
+
+function renderFooter(block) {
+  if (block.kind === 'text') {
+    const lang = LANGS.find(l => l.id === state.language) ?? LANGS[1]
+    return `
+      <div class="blockfooter">
+        <div class="footerhead">
+          <span class="ftitle">${ICON.lang} Footer de ce bloc ${'·'} caractères spéciaux</span>
+          ${LANGS.map(l => `
+            <button class="langpill" data-act="lang" data-lang="${l.id}" aria-pressed="${l.id === state.language}">
+              ${l.label}${l.proposed ? ' <em style="opacity:.6;font-style:normal">(proposé)</em>' : ''}
+            </button>`).join('')}
+          <span class="pin" data-pin="7">7</span>
+        </div>
+        <div class="symrow">
+          ${lang.groups.map(g => `
+            <div class="symgroup">
+              <span>${g.name}</span>
+              <div class="symbuttons">
+                ${g.items.map(item => `<button class="sym ${g.tone}" data-act="insert" title="Insérer ${esc(item)}">${esc(item)}</button>`).join('')}
+              </div>
+            </div>`).join('')}
+        </div>
+        <p class="symnote">Le clic insère au curseur, dans <b>ce</b> bloc. Le footer se déplace tout seul quand on sélectionne un autre bloc.</p>
+      </div>`
+  }
+
+  if (block.kind === 'math') {
+    return `
+      <div class="blockfooter">
+        <div class="footerhead">
+          <span class="ftitle">${ICON.sigma} Footer de ce bloc ${'·'} symboles mathématiques</span>
+          <span class="pillnote" style="font-size:11.5px;opacity:.65">Pas de clavier virtuel — juste ces symboles, plus gros et groupés.</span>
+          <span class="pin" data-pin="7">7</span>
+        </div>
+        <div class="symrow">
+          ${MATH_GROUPS.map(g => `
+            <div class="symgroup">
+              <span>${g.name}</span>
+              <div class="symbuttons">
+                ${g.items.map(item => `<button class="sym ${g.tone}" data-act="insert" title="${esc(item.label)}">${esc(item.face)}</button>`).join('')}
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>`
+  }
+
+  return `
+    <div class="blockfooter">
+      <div class="footerhead">
+        <span class="ftitle">${ICON.grid} Footer de ce bloc ${'·'} tableau</span>
+        <span class="pin" data-pin="7">7</span>
+      </div>
+      <p class="symnote">
+        Les <b>+</b> et corbeilles autour du tableau font tout : ajouter une ligne, une colonne,
+        les retirer. Chaque cellule a son bouton <b>Aa / ∑</b> juste à droite du champ.
+      </p>
+    </div>`
+}
+
+/* ------------------------------- Menu déroulant ------------------------------- */
+
+function positionMenu() {
+  const menu = document.getElementById('blockmenu')
+  if (menu === null) return
+  const anchor = document.querySelector(`[data-block="${state.openMenu.blockId}"] [data-act="mode"]`)
+  if (anchor === null) return
+  const r = anchor.getBoundingClientRect()
+  menu.style.top = (r.bottom + 6) + 'px'
+  menu.style.left = Math.max(12, r.right - menu.offsetWidth) + 'px'
+}
+
+function openModeMenu(blockId) {
+  const wasOpen = state.openMenu !== null && state.openMenu.blockId === blockId
+  closeMenu()
+  if (wasOpen) return
+  state.openMenu = { blockId }
+  const menu = document.createElement('div')
+  menu.className = 'menu'
+  menu.id = 'blockmenu'
+  menu.innerHTML = ['text', 'math'].map(kind => {
+    const block = findBlock(blockId)
+    const active = block.kind === kind
+    return `
+      <button data-act="setkind" data-kind="${kind}">
+        <span class="face">${kind === 'math' ? '∑' : 'Aa'}</span>
+        <span>${kind === 'math' ? 'Formule' : 'Texte'}
+          <span class="mdesc">${kind === 'math' ? 'Équation, calcul littéral' : 'Phrase, note, définition'}</span>
+        </span>
+        ${active ? `<span class="check">${ICON.check}</span>` : ''}
+      </button>`
+  }).join('')
+  // Le menu vit dans <body>, hors de la liste des blocs : son propre écouteur,
+  // sans quoi un clic sur « Formule » ne ferait rien du tout.
+  menu.addEventListener('click', event => {
+    const btn = event.target.closest('[data-act="setkind"]')
+    if (btn === null) return
+    const block = findBlock(blockId)
+    state.openMenu = null
+    menu.remove()
+    if (block === undefined) return
+    setKind(block, btn.dataset.kind)
+    render()
+  })
+  document.body.appendChild(menu)
+  positionMenu()
+  render()
+}
+
+function closeMenu() {
+  document.getElementById('blockmenu')?.remove()
+  state.openMenu = null
+}
+
+/* ------------------------------- Mutations ------------------------------- */
+
+function blockOf(el) { return el.closest('[data-block]')?.dataset.block }
+function findBlock(blockId) { return state.blocks.find(b => b.id === blockId) }
+
+function move(blockId, delta) {
+  const i = state.blocks.findIndex(b => b.id === blockId)
+  const j = i + delta
+  if (i < 0 || j < 0 || j >= state.blocks.length) return
+  const [b] = state.blocks.splice(i, 1)
+  state.blocks.splice(j, 0, b)
+  render()
+}
+
+function columnsOf(block) { return Math.max(block.header.length, ...block.rows.map(r => r.length), 1) }
+
+function addColumn(block, afterCol) {
+  const cols = columnsOf(block)
+  block.header = pad(block.header, cols, '').flatMap((v, i) => i === afterCol ? [v, ''] : [v])
+  block.rows = block.rows.map(r => { const p = pad(r, cols, cell('')); return p.flatMap((v, i) => i === afterCol ? [v, cell('')] : [v]) })
+}
+
+function removeColumn(block, col) {
+  const cols = columnsOf(block)
+  if (cols <= 1) return
+  block.header = pad(block.header, cols, '').filter((_, i) => i !== col)
+  block.rows = block.rows.map(r => pad(r, cols, cell('')).filter((_, i) => i !== col))
+}
+
+function addRow(block, afterRow) {
+  const cols = columnsOf(block)
+  block.rows.splice(afterRow + 1, 0, Array.from({ length: cols }, () => cell('')))
+}
+
+function removeRow(block, row) {
+  if (block.rows.length <= 1) return
+  block.rows.splice(row, 1)
+}
+
+function pad(arr, n, blank) { return Array.from({ length: n }, (_, i) => arr[i] ?? blank) }
+
+function toTable(block) {
+  const text = block.kind === 'math' ? block.latex : block.text
+  block.kind = 'table'
+  block.hasHeader = false
+  block.header = ['']
+  block.rows = [[cell(text)], [cell('')]]
+  delete block.text
+  delete block.latex
+}
+
+function setKind(block, kind) {
+  if (block.kind === kind) return
+  if (block.kind === 'table') return   // un tableau ne se « convertit » pas : on retire ses lignes/colonnes
+  if (kind === 'math') { block.latex = block.text; delete block.text; block.kind = 'math' }
+  else { block.text = block.latex; delete block.latex; block.kind = 'text' }
+}
+
+/* ------------------------------- Utilitaires ------------------------------- */
+
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function autoGrow(ta) {
+  ta.style.height = 'auto'
+  ta.style.height = ta.scrollHeight + 'px'
+}
+function autoGrowAll() {
+  blocksEl.querySelectorAll('textarea.autogrow').forEach(autoGrow)
+}
+
+let toastTimer
+function toast(message) {
+  const el = document.getElementById('toast')
+  el.textContent = message
+  el.classList.add('show')
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200)
+}
+
+/* ------------------------------- Écouteurs ------------------------------- */
+
+function select(blockId) {
+  if (blockId === state.selected) return
+  state.selected = blockId
+  blocksEl.querySelectorAll('.block').forEach(el =>
+    el.classList.toggle('is-selected', el.dataset.block === blockId)
+  )
+}
+
+blocksEl.addEventListener('mousedown', event => {
+  const blockEl = event.target.closest('[data-block]')
+  if (blockEl !== null) select(blockEl.dataset.block)
+})
+
+blocksEl.addEventListener('focusin', event => {
+  const blockEl = event.target.closest('[data-block]')
+  if (blockEl !== null) select(blockEl.dataset.block)
+})
+
+blocksEl.addEventListener('input', event => {
+  const t = event.target
+  const block = findBlock(blockOf(t))
+  if (block === undefined) return
+  if (t.dataset.field === 'text') { block.text = t.value; autoGrow(t) }
+  else if (t.dataset.field === 'latex') { block.latex = t.textContent }
+  else if (t.dataset.field === 'header') { block.header[+t.dataset.c] = t.value }
+  else if (t.dataset.field === 'cell') { block.rows[+t.dataset.r][+t.dataset.c].value = t.value }
+})
+
+blocksEl.addEventListener('click', event => {
+  const btn = event.target.closest('[data-act]')
+  if (btn === null) return
+  const act = btn.dataset.act
+  const block = findBlock(blockOf(btn))
+  if (block === undefined) return
+  event.preventDefault()
+
+  if (act === 'up') return move(block.id, -1)
+  if (act === 'down') return move(block.id, 1)
+  if (act === 'del') {
+    if (state.blocks.length <= 1) return
+    state.blocks = state.blocks.filter(b => b.id !== block.id)
+    state.selected = state.blocks[0].id
+    return render()
+  }
+  if (act === 'mode') return openModeMenu(block.id)
+  if (act === 'setkind') {
+    setKind(block, btn.dataset.kind)
+    closeMenu()
+    return render()
+  }
+  if (act === 'tocol') {
+    toTable(block)
+    return render()
+  }
+  if (act === 'coladd') { addColumn(block, +btn.dataset.c); return render() }
+  if (act === 'coldel') { removeColumn(block, +btn.dataset.c); return render() }
+  if (act === 'rowadd') { addRow(block, +btn.dataset.r); return render() }
+  if (act === 'rowdel') { removeRow(block, +btn.dataset.r); return render() }
+  if (act === 'headtoggle') { block.hasHeader = !block.hasHeader; return render() }
+  if (act === 'cellkind') {
+    if (btn.dataset.head === '1') return toast("L'en-tête reste du texte : c'est un titre de colonne.")
+    const c = block.rows[+btn.dataset.r][+btn.dataset.c]
+    c.kind = c.kind === 'math' ? 'text' : 'math'
+    return render()
+  }
+  if (act === 'lang') { state.language = btn.dataset.lang; return render() }
+  if (act === 'insert') return toast(`« ${btn.textContent.trim()} » inséré au curseur du bloc sélectionné`)
+  if (act === 'drag') return toast('Glisser-déposer : le bloc suit la souris (illustré ici par Monter/Descendre)')
+})
+
+document.getElementById('addblock').addEventListener('click', () => {
+  const b = { id: id(), kind: 'text', text: '' }
+  state.blocks.push(b)
+  state.selected = b.id
+  render()
+  blocksEl.querySelector(`[data-block="${b.id}"] textarea`)?.focus()
+})
+
+/* Point 1 : les quatre flèches. La maquette ne change pas de carte, elle
+   rappelle seulement que la saisie est déjà enregistrée (autosave). */
+document.querySelectorAll('.nav').forEach(nav => {
+  nav.addEventListener('click', () => {
+    const label = nav.querySelector('.ttl')?.textContent ?? ''
+    toast(`Navigation vers « ${label} » — la saisie en cours est déjà enregistrée`)
+  })
+})
+
+/* Point 8 : ni l'overlay ni un clic à l'extérieur ne ferment. */
+document.getElementById('canvas').addEventListener('click', () => toast('Clic à l’extérieur : la modale reste ouverte ✅'))
+document.getElementById('xclose').addEventListener('click', () => toast('Croix : on enregistre puis on ferme'))
+document.getElementById('closebtn').addEventListener('click', () => toast('Bouton Fermer : on enregistre puis on ferme'))
+
+document.addEventListener('mousedown', event => {
+  if (event.target.closest('#blockmenu') === null && event.target.closest('[data-act="mode"]') === null) closeMenu()
+})
+window.addEventListener('resize', positionMenu)
+
+/* Pastilles de la légende */
+document.getElementById('reqs').addEventListener('click', event => {
+  const li = event.target.closest('li[data-pin]')
+  if (li === null) return
+  const pin = document.querySelector(`.pin[data-pin="${li.dataset.pin}"]`)
+  if (pin === null) return
+  pin.classList.remove('pulse')
+  void pin.offsetWidth
+  pin.classList.add('pulse')
+  pin.scrollIntoView({ block: 'center', behavior: 'smooth' })
+})
+
+/* Thème */
+document.getElementById('themebtn').addEventListener('click', () => {
+  const dark = document.documentElement.dataset.theme === 'dark'
+  document.documentElement.dataset.theme = dark ? 'light' : 'dark'
+  document.getElementById('themebtn').textContent = dark ? 'Passer en thème sombre' : 'Passer en thème clair'
+})
+
+/* Cartes fantômes en arrière-plan, pour situer la modale dans la carte mentale. */
+const canvas = document.getElementById('canvas')
+const ghosts = [
+  { lv: 1, text: 'Mathématiques', top: '8%', left: '12%' },
+  { lv: 2, text: 'Chapitre 5 — Le triangle rectangle', top: '22%', left: '8%' },
+  { lv: 3, text: 'Propriété directe', top: '38%', left: '6%' },
+  { lv: 4, text: 'Exemple : 3-4-5', top: '54%', left: '10%' },
+  { lv: 3, text: 'Réciproque du théorème', top: '72%', left: '7%' },
+  { lv: 2, text: 'Chapitre 6 — Thalès', top: '86%', left: '14%' },
+  { lv: 3, text: 'Rapport de projection', top: '10%', left: '74%' },
+  { lv: 4, text: 'Exercice 12', top: '26%', left: '80%' },
+  { lv: 3, text: 'Configurations', top: '64%', left: '78%' },
+]
+canvas.innerHTML = ghosts.map(g =>
+  `<div class="ghostcard lv${g.lv}" style="top:${g.top};left:${g.left}">${g.text}</div>`
+).join('')
+canvas.style.background = ''
+
+render()
+</script>
+</body>
+</html>

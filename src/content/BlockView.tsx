@@ -152,7 +152,12 @@ const BlockItem = memo(function BlockItem({
     case 'table':
       return (
         <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9em' }}>
-          {block.header.length > 0 && (
+          {/* Only when there is a heading to show. The header array is a real
+              row of the data, and it is also what the editor pads to keep its
+              columns aligned — so a header of empty strings has to be read as
+              "no header" here, or a table whose author never wrote one gets a
+              band of blank bordered cells above it. */}
+          {block.header.some(cell => cell.trim() !== '') && (
             <thead>
               <tr>
                 {block.header.map((cell, index) => (

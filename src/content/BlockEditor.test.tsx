@@ -135,16 +135,16 @@ describe('the table editor', () => {
   })
 })
 
-describe('the mode selector follows the right block', () => {
-  it('acts on the block the user last focused, not always the first', async () => {
+describe('the type switch, carried by each block', () => {
+  it('switches the block whose own button was used, not always the first one', async () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([
       { kind: 'text', text: 'premier' },
       { kind: 'text', text: 'second' },
     ])
 
-    await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
-    await user.click(screen.getByRole('button', { name: /^formule$/i }))
+    await user.click(screen.getByRole('button', { name: /type du bloc 2/i }))
+    await user.click(screen.getByRole('menuitem', { name: /formule/i }))
 
     expect(latest()).toEqual([
       { kind: 'text', text: 'premier' },
@@ -152,7 +152,17 @@ describe('the mode selector follows the right block', () => {
     ])
   })
 
-  it('does not act on a stale index after the active block is removed', async () => {
+  it('shows the block’s CURRENT type on its own button, so the list can be read at a glance', () => {
+    renderEditor([
+      { kind: 'text', text: 'une règle' },
+      { kind: 'math', latex: 'x^2' },
+    ])
+
+    expect(screen.getByRole('button', { name: /type du bloc 1 : texte/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /type du bloc 2 : formule/i })).toBeInTheDocument()
+  })
+
+  it('acts on a block that still exists after another one is removed', async () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([
       { kind: 'text', text: 'un' },
@@ -160,36 +170,51 @@ describe('the mode selector follows the right block', () => {
       { kind: 'text', text: 'trois' },
     ])
 
-    await user.click(screen.getByRole('textbox', { name: /texte du bloc 3/i }))
     await user.click(screen.getByRole('button', { name: /supprimer le bloc 3/i }))
-    await user.click(screen.getByRole('button', { name: /^formule$/i }))
+    // Each switch is drawn on its own block: there is no remembered index left
+    // pointing past the end of the list.
+    await user.click(screen.getByRole('button', { name: /type du bloc 2/i }))
+    await user.click(screen.getByRole('menuitem', { name: /formule/i }))
 
-    // Whatever it converts, it must be a block that still exists — and it must
-    // not throw on an out-of-range index.
     const blocks = latest()!
     expect(blocks).toHaveLength(2)
     expect(blocks.filter(block => block.kind === 'math')).toHaveLength(1)
   })
 
-  it('is inert on an image block instead of silently dropping the picture', async () => {
-    const user = userEvent.setup()
-    const { latest } = renderEditor([
-      { kind: 'image', asset: 'a3f9.png', alt: 'Schéma', width: 10, height: 5 },
-    ])
+  it('is inert on an image block instead of silently dropping the picture', () => {
+    renderEditor([{ kind: 'image', asset: 'a3f9.png', alt: 'Schéma', width: 10, height: 5 }])
 
-    await user.click(screen.getByRole('textbox', { name: /description de l’image/i }))
-    expect(screen.getByRole('button', { name: /^texte$/i })).toBeDisabled()
-
-    expect(latest()).toBeUndefined()
+    expect(screen.getByRole('button', { name: /type du bloc 1 : image/i })).toBeDisabled()
   })
 
-  it('creates a block when the list is empty instead of doing nothing', async () => {
+  it('starts a block when the list is empty instead of doing nothing', async () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([])
 
-    await user.click(screen.getByRole('button', { name: /^formule$/i }))
+    await user.click(screen.getByRole('button', { name: /ajouter un bloc/i }))
 
-    expect(latest()).toEqual([{ kind: 'math', latex: '' }])
+    expect(latest()).toEqual([{ kind: 'text', text: '' }])
+  })
+
+  it('grows a text block into a table instead of converting it, since it already was a 1×1 one', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'chien' }])
+
+    await user.click(screen.getByRole('button', { name: /transformer le bloc 1 en tableau/i }))
+
+    // The note is still there, in the first cell; the second column is the one
+    // that was just asked for, and it comes up empty and ready.
+    expect(latest()).toEqual([{ kind: 'table', header: [], rows: [['chien', '']] }])
+  })
+
+  it('keeps a table’s header empty through the column edits, so no blank band appears', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'chien' }])
+
+    await user.click(screen.getByRole('button', { name: /transformer le bloc 1 en tableau/i }))
+    await user.click(screen.getByRole('button', { name: /ajouter une colonne/i }))
+
+    expect((latest()![0] as { header: string[] }).header).toEqual([])
   })
 })
 
@@ -209,13 +234,12 @@ describe('the math field', () => {
   })
 })
 
-describe('the language keyboard help', () => {
-  it('offers the languages first, and no character until one is chosen', async () => {
-    const user = userEvent.setup()
+describe('the character palette, in the footer of the text block', () => {
+  it('offers the languages straight away, and no character until one is chosen', () => {
     renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
-
+    // No button to open first: the palette is the block's footer, so it is
+    // there the moment the block is.
     expect(screen.getByRole('group', { name: /choix de la langue/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /point d’interrogation inversé/i })).not.toBeInTheDocument()
   })
@@ -224,7 +248,6 @@ describe('the language keyboard help', () => {
     const user = userEvent.setup()
     renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
     await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
 
     expect(screen.getByRole('button', { name: /point d’interrogation inversé/i })).toBeInTheDocument()
@@ -238,18 +261,25 @@ describe('the language keyboard help', () => {
     const user = userEvent.setup()
     renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
     await user.click(screen.getByRole('button', { name: /langue : anglais/i }))
 
     expect(screen.getByRole('button', { name: /apostrophe anglaise/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /point d’interrogation inversé/i })).not.toBeInTheDocument()
   })
 
+  it('shows the French ligatures, which no keyboard has a key for', async () => {
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'text', text: '' }])
+
+    await user.click(screen.getByRole('button', { name: /langue : français/i }))
+
+    expect(screen.getByRole('button', { name: 'o et e liés (cœur)' })).toBeInTheDocument()
+  })
+
   it('inserts the character into the text being written, without replacing it', async () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([{ kind: 'text', text: 'don' }])
 
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
     await user.click(screen.getByRole('button', { name: /langue : anglais/i }))
     await user.click(screen.getByRole('button', { name: /apostrophe anglaise/i }))
 
@@ -258,15 +288,17 @@ describe('the language keyboard help', () => {
     expect(written.replace('’', '')).toBe('don')
   })
 
-  it('inserts into the block being edited, not always into the first one', async () => {
+  it('puts the palette under the block being written in, and nowhere else', async () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([
       { kind: 'text', text: 'premier' },
       { kind: 'text', text: 'second' },
     ])
 
+    // Block 1 owns the footer while it is the active one.
+    expect(screen.getAllByRole('group', { name: /choix de la langue/i })).toHaveLength(1)
+
     await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
     await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
     await user.click(screen.getByRole('button', { name: /eñe$/i }))
 
@@ -275,17 +307,16 @@ describe('the language keyboard help', () => {
     expect((blocks[1] as { text: string }).text).toContain('ñ')
   })
 
-  it('is offered disabled when the description has no text block to write in', () => {
+  it('is not shown at all when the description has no text block to write in', () => {
     renderEditor([{ kind: 'math', latex: 'x' }])
 
-    expect(screen.getByRole('button', { name: /choisir une langue/i })).toBeDisabled()
+    expect(screen.queryByRole('group', { name: /choix de la langue/i })).not.toBeInTheDocument()
   })
 
   it('shows both signs on the button, and no longer offers the closing one alone', async () => {
     const user = userEvent.setup()
     renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
     await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
 
     expect(screen.getByRole('button', { name: /point d’interrogation inversé/i })).toHaveTextContent('¿ ?')
@@ -296,7 +327,6 @@ describe('the language keyboard help', () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
     await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
     await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
 
@@ -313,7 +343,6 @@ describe('the language keyboard help', () => {
     field.focus()
     field.setSelectionRange(0, 10)
 
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
     await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
     await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
 
@@ -324,7 +353,6 @@ describe('the language keyboard help', () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /choisir une langue/i }))
     await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
     await user.click(screen.getByRole('button', { name: /guillemet ouvrant/i }))
 
