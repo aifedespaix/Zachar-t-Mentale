@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { Keyboard, LayoutGrid, Pencil, Redo2, Trash2, Undo2, X } from 'lucide-react'
@@ -143,6 +143,30 @@ export function DescriptionDialog({
   // simpler: this dialog is mounted fresh on every open (see the note above),
   // so there is no external re-render to re-seed against mid-edit.
   const [titleDraft, setTitleDraft] = useState(cardTitle)
+
+  // Where the caret is, so the shortcuts panel can say what `Entrée` does THERE
+  // rather than reciting one hard-coded line that is already false in two of the
+  // editor's surfaces. Kept from the last focus, not read from the DOM when the
+  // panel opens: the panel is opened by a footer BUTTON, so at that instant the
+  // focus is on the button, and the answer the user wants is where they were
+  // working just before.
+  const [caretScope, setCaretScope] = useState<EnterScope>('block')
+  const titleRef = useRef<HTMLInputElement>(null)
+
+  /**
+   * Remembers which editable surface a focus landed on.
+   *
+   * Only the three that change what `Entrée` means matter; anything else — the
+   * footer buttons, the panel's own close — leaves the last answer alone, which
+   * is exactly what keeps "click Raccourcis" from erasing the context.
+   */
+  function noteCaretScope(event: FocusEvent<HTMLElement>) {
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    if (target === titleRef.current) setCaretScope('title')
+    else if (target.closest('[data-cell]') !== null) setCaretScope('cell')
+    else if (target.closest('[data-row-index]') !== null) setCaretScope('block')
+  }
 
   // The undo/redo buttons' state, read from the description's own history rather
   // than tracked here. Undo used to be reachable only by `Ctrl+Z` — nothing on
@@ -309,6 +333,9 @@ export function DescriptionDialog({
           // rather than only in principle.
           onInteractOutside={event => event.preventDefault()}
           onPointerDownOutside={event => event.preventDefault()}
+          // Which surface the caret is on decides what the shortcuts panel is
+          // allowed to promise (see `noteCaretScope`).
+          onFocusCapture={noteCaretScope}
           // Inline styles rather than utility classes: the shared
           // `DialogContent` caps itself at `sm:max-w-sm` and lays out as a
           // grid, and this dialog is deliberately the widest surface in the
@@ -404,6 +431,7 @@ export function DescriptionDialog({
                   }}
                 />
                 <input
+                  ref={titleRef}
                   aria-label="Titre de la carte"
                   value={titleDraft}
                   readOnly={!onRenameTitle}
@@ -453,7 +481,13 @@ export function DescriptionDialog({
             </div>
           </div>
 
-          {shortcutsOpen && <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />}
+          {shortcutsOpen && (
+            <ShortcutsPanel
+              scope={caretScope}
+              canRename={onRenameTitle !== undefined}
+              onClose={() => setShortcutsOpen(false)}
+            />
+          )}
 
           <footer
             style={{
@@ -705,8 +739,29 @@ function NavArrow({
   )
 }
 
-/** The keyboard, listed — opened from the footer, in the flow rather than floating over the field being written in. */
-function ShortcutsPanel({ onClose }: { onClose: () => void }) {
+/** Which surface the caret is on — what the shortcuts panel has to speak about. */
+type EnterScope = 'title' | 'cell' | 'block'
+
+/**
+ * The keyboard, listed — opened from the footer, in the flow rather than floating
+ * over the field being written in.
+ *
+ * The list is CONTEXTUAL to the surface the caret is on, because the same key
+ * does different things depending on where it is pressed: `Entrée` validates a
+ * rename in the title field, adds a row in a table cell, and inserts a block
+ * everywhere else. A single hard-coded "Entrée — Nouveau bloc" was already false
+ * in two of those surfaces, which is worse than saying nothing.
+ */
+function ShortcutsPanel({
+  scope,
+  canRename,
+  onClose,
+}: {
+  scope: EnterScope
+  /** A title only validates a rename when the host can actually write one back. */
+  canRename: boolean
+  onClose: () => void
+}) {
   return (
     <div
       role="group"
@@ -724,9 +779,13 @@ function ShortcutsPanel({ onClose }: { onClose: () => void }) {
       <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.6 }}>
         Raccourcis
       </span>
-      <Shortcut keys="Entrée" label="Nouveau bloc" />
-      <Shortcut keys="Maj + Entrée" label="Retour à la ligne" />
-      <Shortcut keys="$$" label="Transforme le texte en formule" />
+      {scope === 'title' && canRename && <Shortcut keys="Entrée" label="Valider le renommage" />}
+      {scope === 'cell' && <Shortcut keys="Entrée" label="Ajouter une ligne au tableau" />}
+      {scope === 'block' && <Shortcut keys="Entrée" label="Nouveau bloc" />}
+      {scope === 'block' && <Shortcut keys="Maj + Entrée" label="Retour à la ligne" />}
+      {/* `$$` is a text-block gesture only: it does nothing in the title, and a
+          table cell keeps its two dollar signs as literal text. */}
+      {scope === 'block' && <Shortcut keys="$$" label="Transforme le texte en formule" />}
       <Shortcut keys="Ctrl/Cmd + Z" label="Annuler" />
       <Shortcut keys="Ctrl/Cmd + Maj + Z" label="Rétablir" />
       <Shortcut keys="Échap" label="Fermer" />

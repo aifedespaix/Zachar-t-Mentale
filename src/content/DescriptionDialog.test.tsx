@@ -317,14 +317,17 @@ describe('DescriptionDialog', () => {
     expect(props.onClose).toHaveBeenCalled()
   })
 
-  it('shows a formula typeset with the same renderer the card and the export use', async () => {
+  it('shows a formula typeset with the same renderer the card and the export use', () => {
     // Radix renders the dialog into a portal appended to `document.body`, not
     // into the local render container — so the query below has to search the
     // whole document, the same way a `screen` query would.
-    const user = userEvent.setup()
-    renderDialog({ blocks: [] })
-
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), 'x^2$$')
+    //
+    // The formula is there from the start rather than typed through `$$`: what
+    // `$$` turns into a formula (and what it now leaves as prose) is
+    // `BlockEditor`'s contract and is tested there. Tying this renderer check
+    // to that trigger is how typing "x^2$$`" used to assert the very bug the
+    // narrowed trigger fixes.
+    renderDialog({ blocks: [{ kind: 'math', latex: 'x^2' }] })
 
     // Typeset, not LaTeX source: the live preview under the formula field IS
     // the result, not a rendition of it.
@@ -393,6 +396,33 @@ describe('DescriptionDialog', () => {
     const panel = screen.getByRole('group', { name: /raccourcis clavier/i })
     expect(panel).toHaveTextContent('Nouveau bloc')
     expect(panel).toHaveTextContent('Retour à la ligne')
+  })
+
+  it('names Entrée by where the caret is: validating a rename, not a new block', async () => {
+    // The panel used to recite "Entrée — Nouveau bloc" even with the caret in
+    // the title, where Enter commits the rename instead. Saying nothing would
+    // be better than that; saying the true thing is better still.
+    const user = userEvent.setup()
+    renderDialog({ onRenameTitle: vi.fn() })
+
+    await user.click(screen.getByRole('textbox', { name: /titre de la carte/i }))
+    await user.click(screen.getByRole('button', { name: /raccourcis/i }))
+
+    const panel = screen.getByRole('group', { name: /raccourcis clavier/i })
+    expect(panel).toHaveTextContent('Valider le renommage')
+    expect(panel).not.toHaveTextContent('Nouveau bloc')
+  })
+
+  it('names Entrée by where the caret is: a table row inside a cell, not a new block', async () => {
+    const user = userEvent.setup()
+    renderDialog({ blocks: [{ kind: 'table', header: [], rows: [['a']] }] })
+
+    await user.click(screen.getByRole('textbox', { name: /ligne 1 colonne 1 du tableau 1/i }))
+    await user.click(screen.getByRole('button', { name: /raccourcis/i }))
+
+    const panel = screen.getByRole('group', { name: /raccourcis clavier/i })
+    expect(panel).toHaveTextContent('Ajouter une ligne au tableau')
+    expect(panel).not.toHaveTextContent('Nouveau bloc')
   })
 
   it('resizes an image by its displayed width, keeping its shape', async () => {
