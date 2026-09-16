@@ -18,7 +18,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import type { Card } from '../../types/card'
+import { canReceiveChildren, isRootCard, type Card } from '../../types/card'
 import { useCardsStore, selectEditsBlocked } from '../../state/useCardsStore'
 import { useCardDetailStore } from '../../state/useCardDetailStore'
 import { useCardHoverStore } from '../../state/useCardHoverStore'
@@ -33,7 +33,7 @@ import { toCss } from '../../colors/contrast'
 import { contentOf, blocksToPlainText } from '../../content/blocks'
 import { BlockView } from '../../content/BlockView'
 import { ContentKindBadges } from '../../content/ContentKindBadges'
-import { DescriptionDialog, type TitleChipColors } from '../../content/DescriptionDialog'
+import { DescriptionDialog, type NavSide, type TitleChipColors } from '../../content/DescriptionDialog'
 import { imageBlockFrom } from '../../content/imageBlock'
 import { pickImageFile } from '../../content/pickImage'
 import { assetSrc } from '../../persistence/assets'
@@ -100,6 +100,46 @@ export function CardDetailPanel() {
   const setEditing = useCardDetailStore(s => s.setEditing)
   const closeAll = useCardDetailStore(s => s.closeAll)
   const cards = useCardsStore(s => s.history.present)
+
+  /**
+   * The card a "+" just created, so the fresh editor can open on its title with
+   * the placeholder selected. Held HERE rather than in `FicheEditor` because
+   * that component is keyed by card id: creating a card swaps it out, and the
+   * flag has to outlive the instance that set it.
+   */
+  const [titleFocusCardId, setTitleFocusCardId] = useState<string | null>(null)
+
+  /**
+   * Creates the neighbour an edge asked for, then moves the dialog onto it.
+   *
+   * The dialog only knows a "+" was clicked on its left/right/top/bottom; which
+   * op that maps to is the caller's business. The store owns the rules, and an
+   * op it refuses simply leaves the dialog where it was.
+   */
+  const createRelative = useCallback(
+    (cardId: string, side: NavSide) => {
+      const store = useCardsStore.getState()
+      const newCardId =
+        side === 'right'
+          ? store.addChild(cardId)
+          : side === 'top'
+            ? store.addSibling(cardId, 'above')
+            : side === 'bottom'
+              ? store.addSibling(cardId, 'below')
+              : null
+      if (newCardId === null) return
+      setTitleFocusCardId(newCardId)
+      setEditing(newCardId)
+    },
+    [setEditing]
+  )
+
+  // The title focus is spent the moment the dialog moves off that card. Without
+  // this, closing and reopening the same card later would silently select its
+  // title again.
+  useEffect(() => {
+    if (titleFocusCardId !== null && editingCardId !== titleFocusCardId) setTitleFocusCardId(null)
+  }, [editingCardId, titleFocusCardId])
 
   const [width, setWidth] = useState(loadCardDetailWidth)
   const [resizing, setResizing] = useState(false)
@@ -290,7 +330,14 @@ export function CardDetailPanel() {
       // unmounting this call site on its own — the key is what forces a fresh
       // `DescriptionDialog` (and a fresh draft seeded from the new card) rather
       // than reusing the old instance with the new card's props stapled onto it.
-      <FicheEditor key={editingCard.id} card={editingCard} cards={cards} onClose={() => setEditing(null)} />
+      <FicheEditor
+        key={editingCard.id}
+        card={editingCard}
+        cards={cards}
+        onClose={() => setEditing(null)}
+        onCreateRelative={createRelative}
+        titleFocus={editingCard.id === titleFocusCardId}
+      />
     )
 
   if (isOpen && manuallyCollapsed) {
@@ -726,9 +773,23 @@ function CardFiche({
  * rather than being rebuilt for every open fiche — and so the panel above stays
  * about layout.
  */
-function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onClose: () => void }) {
+function FicheEditor({
+  card,
+  cards,
+  onClose,
+  onCreateRelative,
+  titleFocus,
+}: {
+  card: Card
+  cards: Card[]
+  onClose: () => void
+  onCreateRelative: (cardId: string, side: NavSide) => void
+  /** Opens on the title with it selected — the card was just born from a "+". */
+  titleFocus: boolean
+}) {
   const updateContent = useCardsStore(s => s.updateContent)
   const updateTitle = useCardsStore(s => s.updateTitle)
+  const editsBlocked = useCardsStore(selectEditsBlocked)
   const setEditing = useCardDetailStore(s => s.setEditing)
   const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
@@ -741,12 +802,20 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
   // can recognise where a jump goes before reading the title on the button.
   const allLevels = useAppearanceSettingsStore(s => s.levels)
 
+  /** The palette a level wears: how a "+" predicts the colour of the card it will create. */
+  function paletteForLevel(targetLevel: number): TitleChipColors {
+    const palette = allLevels[clampCardLevel(targetLevel)].color[theme]
+    return { bg: toCss(palette.bg), border: toCss(palette.border), text: toCss(palette.text) }
+  }
+
   /** The palette a card wears — same rules as this one: its level, or the achromatic detached set. */
   function chipColorsFor(target: Card | undefined): TitleChipColors | undefined {
     if (target === undefined) return undefined
-    const palette =
-      target.detached === true ? detachedColors[theme] : allLevels[clampCardLevel(target.level)].color[theme]
-    return { bg: toCss(palette.bg), border: toCss(palette.border), text: toCss(palette.text) }
+    if (target.detached === true) {
+      const palette = detachedColors[theme]
+      return { bg: toCss(palette.bg), border: toCss(palette.border), text: toCss(palette.text) }
+    }
+    return paletteForLevel(target.level)
   }
 
   // The edge arrows' targets: the parent LEFT, the first child RIGHT (with
@@ -760,6 +829,33 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
   const ownIndex = siblings.findIndex(sibling => sibling.id === card.id)
   const prevSibling = ownIndex > 0 ? siblings[ownIndex - 1] : undefined
   const nextSibling = ownIndex >= 0 && ownIndex < siblings.length - 1 ? siblings[ownIndex + 1] : undefined
+
+  /**
+   * What each empty edge offers to create, in the palette the new card will
+   * actually wear — so a "+" for a child predicts the CHILD's level colour, and
+   * one for a sibling predicts this card's own.
+   *
+   * The rules are the store's, checked HERE rather than at click time so a "+"
+   * is never offered for a card the store would refuse: a floating card can
+   * neither receive a child nor join a sibling group, a level-4 card has no room
+   * for a child, and the root has no siblings to sit beside. `left` is absent by
+   * design — the only card with no parent is the root, and the store cannot
+   * invent a parent for it.
+   */
+  const canCreateSibling = !isRootCard(card) && card.detached !== true
+  const onCreate = editsBlocked
+    ? undefined
+    : {
+        right: canReceiveChildren(card)
+          ? { colors: paletteForLevel(card.level + 1), onSelect: () => onCreateRelative(card.id, 'right') }
+          : undefined,
+        top: canCreateSibling
+          ? { colors: paletteForLevel(card.level), onSelect: () => onCreateRelative(card.id, 'top') }
+          : undefined,
+        bottom: canCreateSibling
+          ? { colors: paletteForLevel(card.level), onSelect: () => onCreateRelative(card.id, 'bottom') }
+          : undefined,
+      }
 
   return (
     <DescriptionDialog
@@ -789,6 +885,8 @@ function FicheEditor({ card, cards, onClose }: { card: Card; cards: Card[]; onCl
       prevSibling={prevSibling && { id: prevSibling.id, title: prevSibling.title, colors: chipColorsFor(prevSibling) }}
       nextSibling={nextSibling && { id: nextSibling.id, title: nextSibling.title, colors: chipColorsFor(nextSibling) }}
       onNavigate={setEditing}
+      onCreate={onCreate}
+      autoFocusTitle={titleFocus}
       // The dialog's title field mirrors the card's own — same colours, same
       // rename — so "the biggest, most present place to work on this card" is
       // recognisably the same card, not a bare form.

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FocusEvent, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
-import { Keyboard, LayoutGrid, Pencil, Redo2, Trash2, Undo2, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Keyboard, LayoutGrid, Pencil, Plus, Redo2, Trash2, Undo2, X } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
 import { blocksDiffer } from './blocks'
 import { BlockEditor, type BlockEditorProps } from './BlockEditor'
@@ -9,7 +9,7 @@ import { BandOptionsOverlay } from './BandOptionsOverlay'
 import { loadHiddenFamilies, saveHiddenFamilies } from '../persistence/bandFamilies'
 import { Button } from '../components/ui/button'
 import { Hint } from '../components/ui/hint'
-import { TooltipProvider } from '../components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip'
 import {
   ensureDescriptionHistory,
   recordDescriptionState,
@@ -50,6 +50,21 @@ export interface DescriptionNavTarget {
   colors?: TitleChipColors
 }
 
+/** The four edges around a description: where a neighbour can be reached — and created. */
+export type NavSide = 'top' | 'bottom' | 'left' | 'right'
+
+/**
+ * A card that does not exist yet, offered on an edge with nothing to jump to.
+ *
+ * `colors` is the palette that card WILL wear, so the "+" can predict its level
+ * before it is born — the same "colour means which level" language the arrows
+ * already speak. Omitted falls back to neutral, never to a wrong palette.
+ */
+export interface DescriptionCreateTarget {
+  colors?: TitleChipColors
+  onSelect: () => void
+}
+
 export interface DescriptionDialogProps {
   /** The card whose description this is — the key the autosave debounce and the local undo history are both scoped by. */
   cardId: string
@@ -81,6 +96,19 @@ export interface DescriptionDialogProps {
   nextSibling?: DescriptionNavTarget
   /** Jumps the dialog to another card without a discard prompt — autosave already committed whatever was being typed. */
   onNavigate?: (cardId: string) => void
+  /**
+   * Creation, edge by edge. An edge with no neighbour shows a "+" instead of an
+   * arrow when a handler is given for it; an edge with neither a neighbour nor a
+   * handler shows nothing at all. The caller decides which edges are creatable,
+   * because that depends on the card's level and whether it is floating — rules
+   * the store already owns.
+   */
+  onCreate?: Partial<Record<NavSide, DescriptionCreateTarget>>
+  /**
+   * Opens with the title focused and its text selected, so a card just created
+   * from an edge's "+" can be named by typing over its placeholder title.
+   */
+  autoFocusTitle?: boolean
 }
 
 const AUTOSAVE_DELAY_MS = 600
@@ -132,6 +160,8 @@ export function DescriptionDialog({
   prevSibling,
   nextSibling,
   onNavigate,
+  onCreate,
+  autoFocusTitle,
 }: DescriptionDialogProps) {
   // Seeded once, at mount. `blocks` is deliberately not watched afterwards:
   // this is a draft, and re-reading the card mid-edit would fight the typing.
@@ -152,6 +182,27 @@ export function DescriptionDialog({
   // working just before.
   const [caretScope, setCaretScope] = useState<EnterScope>('block')
   const titleRef = useRef<HTMLInputElement>(null)
+
+  /**
+   * Focuses and selects the title the moment its field attaches.
+   *
+   * A callback ref rather than an effect, because the dialog renders through a
+   * Radix PORTAL: its content — the title input included — mounts a render LATER
+   * than this component, so a `[]` effect here ran while `titleRef.current` was
+   * still null and focused nothing. A ref callback fires exactly when there is a
+   * field to focus. It is memoised on `autoFocusTitle` (constant for the life of
+   * the dialog) so it is not re-run, and the title re-selected, on every keystroke
+   * render.
+   */
+  const registerTitleField = useCallback(
+    (node: HTMLInputElement | null) => {
+      titleRef.current = node
+      if (node === null || !autoFocusTitle) return
+      node.focus()
+      node.select()
+    },
+    [autoFocusTitle]
+  )
 
   /**
    * Remembers which editable surface a focus landed on.
@@ -358,10 +409,10 @@ export function DescriptionDialog({
             outline: 'none',
           }}
         >
-          <NavArrow side="top" target={prevSibling} onNavigate={onNavigate && navigate} />
-          <NavArrow side="bottom" target={nextSibling} onNavigate={onNavigate && navigate} />
-          <NavArrow side="left" target={parentTarget} onNavigate={onNavigate && navigate} />
-          <NavArrow side="right" target={childTarget} onNavigate={onNavigate && navigate} />
+          <NavArrow side="top" target={prevSibling} create={onCreate?.top} onNavigate={onNavigate && navigate} />
+          <NavArrow side="bottom" target={nextSibling} create={onCreate?.bottom} onNavigate={onNavigate && navigate} />
+          <NavArrow side="left" target={parentTarget} create={onCreate?.left} onNavigate={onNavigate && navigate} />
+          <NavArrow side="right" target={childTarget} create={onCreate?.right} onNavigate={onNavigate && navigate} />
 
           {/* The cross, one of the only two ways out. It carries its own
               accessible name because the glyph says nothing about what it
@@ -431,7 +482,7 @@ export function DescriptionDialog({
                   }}
                 />
                 <input
-                  ref={titleRef}
+                  ref={registerTitleField}
                   aria-label="Titre de la carte"
                   value={titleDraft}
                   readOnly={!onRenameTitle}
@@ -475,7 +526,7 @@ export function DescriptionDialog({
                 onInsertImage={onInsertImage}
                 onPickImage={onPickImage}
                 onError={onError}
-                autoFocusField
+                autoFocusField={!autoFocusTitle}
                 hiddenFamilies={hiddenFamilies}
               />
             </div>
@@ -614,7 +665,12 @@ export function DescriptionDialog({
   )
 }
 
-const NAV_GLYPH = { top: '↑', bottom: '↓', left: '←', right: '→' } as const
+const NAV_ICON: Record<NavSide, typeof ArrowUp> = {
+  top: ArrowUp,
+  bottom: ArrowDown,
+  left: ArrowLeft,
+  right: ArrowRight,
+}
 
 /**
  * Where each relation sits, and it is the geometry that carries the meaning:
@@ -638,7 +694,7 @@ const NAV_GLYPH = { top: '↑', bottom: '↓', left: '←', right: '→' } as co
  * visibly jump off its edge. `CardNode`'s `EdgeButton` documents the same trap.
  */
 type NavPosition = CSSProperties & { x?: string; y?: string }
-const NAV_POSITION: Record<keyof typeof NAV_GLYPH, NavPosition> = {
+const NAV_POSITION: Record<NavSide, NavPosition> = {
   top: { top: -18, left: '50%', x: '-50%' },
   bottom: { bottom: -18, left: '50%', x: '-50%' },
   left: { left: -18, top: '50%', y: '-50%' },
@@ -646,96 +702,198 @@ const NAV_POSITION: Record<keyof typeof NAV_GLYPH, NavPosition> = {
 }
 
 /** What each edge leads to, in one word, so the arrow does not have to be decoded. */
-const NAV_RELATION: Record<keyof typeof NAV_GLYPH, string> = {
+const NAV_RELATION: Record<NavSide, string> = {
   top: 'Précédent',
   bottom: 'Suivant',
   left: 'Parent',
   right: 'Sous-partie',
 }
 
+/** What each edge CREATES when it has no neighbour to jump to. */
+const NAV_CREATE_LABEL: Record<NavSide, string> = {
+  top: 'Nouvelle carte avant',
+  bottom: 'Nouvelle carte après',
+  left: 'Nouvelle carte parente',
+  right: 'Nouvelle sous-partie',
+}
+
 /**
- * One edge of the dialog: the parent on the left, the first child on the right,
- * the previous/next card at the same level above and below. Shown only when
- * that neighbour exists — a card with no siblings simply has no top/bottom
- * arrow, rather than one greyed out for a relation that does not apply to it.
+ * How much of a neighbour's title the hover card shows before eliding it.
  *
- * Painted in the TARGET card's own colours. The four arrows lead to four
- * different cards, and colour is the one thing that already means "which card
- * is this" everywhere else in the app: the level palette. A neutral button
- * would make the user read four titles to find the one they want; a coloured
- * one lets them recognise it, including the level it belongs to, before
- * reading anything.
+ * A fixed character budget rather than a width: the hover card is dressed as a
+ * card, and a card is a small thing — a title stretching across the dialog
+ * would be the opposite of the glance it exists for. Enough to recognise where
+ * the jump lands, never enough to become a paragraph.
+ */
+const TITLE_PREVIEW_CHARS = 42
+
+function previewTitle(title: string): string {
+  const trimmed = title.trim()
+  if (trimmed.length <= TITLE_PREVIEW_CHARS) return trimmed
+  return `${trimmed.slice(0, TITLE_PREVIEW_CHARS).trimEnd()}…`
+}
+
+const NAV_TIP_LABEL: CSSProperties = { fontWeight: 700, opacity: 0.85, whiteSpace: 'nowrap' }
+const NAV_TIP_TITLE: CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+
+/**
+ * One edge of the dialog, as an icon-only button.
+ *
+ * The parent is on the left, the first child on the right, the previous/next
+ * card at the same level above and below. This used to be a wide pill carrying
+ * the relation AND the neighbour's title; that title has moved into a hover card
+ * dressed like the destination itself, which is what let the control shrink to
+ * the single glyph that says where it points.
+ *
+ * Painted in the TARGET card's own colours. The four buttons lead to four
+ * different cards, and colour is the one thing that already means "which card is
+ * this" everywhere else in the app: the level palette. A neutral button would
+ * make the user read four titles to find the one they want; a coloured one lets
+ * them recognise it, including the level it belongs to, before reading anything.
+ *
+ * An edge with no neighbour shows a "+" — but only when the caller supplied a
+ * way to create one for that edge, which it can only do when the store would
+ * accept it (a level-4 card has no child to add, the root has no sibling). An
+ * edge with neither shows nothing, rather than a greyed-out button for a
+ * relation that does not apply.
  */
 function NavArrow({
   side,
   target,
+  create,
   onNavigate,
 }: {
-  side: keyof typeof NAV_GLYPH
+  side: NavSide
   target?: DescriptionNavTarget
+  create?: DescriptionCreateTarget
   onNavigate?: (id: string) => void
 }) {
-  // Called BEFORE the early return below: a hook may not sit behind a condition,
-  // and this component returns `null` for the three edges a card has no
-  // neighbour on.
+  const Icon = NAV_ICON[side]
+
+  if (target !== undefined && onNavigate !== undefined) {
+    // More than one child: naming one of them would be picking for the user, so
+    // the hover card says how many there are instead — and then the count IS the
+    // label, leaving no room for one title among several.
+    const manyChildren = side === 'right' && target.count !== undefined && target.count > 1
+    return (
+      <EdgeButton
+        side={side}
+        colors={target.colors}
+        ariaLabel={`Aller à « ${target.title} »`}
+        onActivate={() => onNavigate(target.id)}
+        tip={
+          manyChildren ? (
+            <span style={NAV_TIP_LABEL}>{target.count} sous-parties</span>
+          ) : (
+            <>
+              <span style={NAV_TIP_LABEL}>{NAV_RELATION[side]}</span>
+              <span style={NAV_TIP_TITLE}>{previewTitle(target.title)}</span>
+            </>
+          )
+        }
+      >
+        <Icon size={16} />
+      </EdgeButton>
+    )
+  }
+
+  if (create !== undefined) {
+    return (
+      <EdgeButton
+        side={side}
+        colors={create.colors}
+        ariaLabel={NAV_CREATE_LABEL[side]}
+        onActivate={create.onSelect}
+        tip={<span style={NAV_TIP_LABEL}>{NAV_CREATE_LABEL[side]}</span>}
+      >
+        <Plus size={16} />
+      </EdgeButton>
+    )
+  }
+
+  return null
+}
+
+/**
+ * The button both jobs share: an arrow that jumps to a neighbour, a "+" that
+ * creates one.
+ *
+ * Its hover card is dressed in the same border, fill and text as the card it
+ * leads to — hence `arrow={false}` on the shared `TooltipContent`, whose little
+ * pointer has no border to line up with that outline. `delayDuration` stays the
+ * app default (the one `TooltipProvider` mounting the dialog already set).
+ */
+function EdgeButton({
+  side,
+  colors,
+  ariaLabel,
+  onActivate,
+  tip,
+  children,
+}: {
+  side: NavSide
+  colors?: TitleChipColors
+  ariaLabel: string
+  onActivate: () => void
+  tip: ReactNode
+  children: ReactNode
+}) {
+  // `reduceMotion ? undefined` is load-bearing: motion does NOT consult
+  // `prefers-reduced-motion` on its own (`reducedMotion` defaults to
+  // `"never"`), so without the gate this would animate for the users who asked
+  // it not to.
   const reduceMotion = useReducedMotion()
-  if (target === undefined || onNavigate === undefined) return null
-  // More than one child: naming one of them would be picking for the user, so
-  // the arrow says how many there are instead — and then the count IS the
-  // label, leaving no room for one title among several.
-  const manyChildren = side === 'right' && target.count !== undefined && target.count > 1
-  const relation = manyChildren ? `${target.count} sous-parties` : NAV_RELATION[side]
-  const detail = manyChildren ? null : target.title
-  const colors = target.colors
 
   return (
-    <Hint label={`${relation} : ${target.title}`}>
-    <motion.button
-      type="button"
-      aria-label={`Aller à « ${target.title} »`}
-      onClick={() => onNavigate(target.id)}
-      // The pills had no hover or press feedback at all, while the palette's own
-      // keys did — so the four controls that move you around the map were the
-      // only ones that did not look clickable. This is the app's existing feel
-      // for a small action chip (the spring `CardNode`'s edge buttons use),
-      // not a new animation language; the scale stays gentler than theirs
-      // because these are wide pills rather than round badges.
-      //
-      // `reduceMotion ? undefined` is load-bearing: motion does NOT consult
-      // `prefers-reduced-motion` on its own (`reducedMotion` defaults to
-      // `"never"`), so without the gate this would animate for the users who
-      // asked it not to.
-      whileHover={reduceMotion ? undefined : { scale: 1.06 }}
-      whileTap={reduceMotion ? undefined : { scale: 0.96 }}
-      transition={{ type: 'spring', stiffness: 500, damping: 25 }}
-      style={{
-        position: 'absolute',
-        zIndex: 2,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 7,
-        maxWidth: side === 'left' || side === 'right' ? 168 : 260,
-        padding: '6px 12px',
-        borderRadius: 999,
-        border: `2px solid ${colors?.border ?? 'var(--border)'}`,
-        background: colors?.bg ?? 'var(--popover)',
-        color: colors?.text ?? 'inherit',
-        boxShadow: '0 4px 14px rgba(0, 0, 0, 0.2)',
-        fontSize: 12,
-        cursor: 'pointer',
-        ...NAV_POSITION[side],
-      }}
-    >
-      {/* The arrow always points at the edge it lives on, whichever side that
-          is; the word beside it says what the jump MEANS. */}
-      {(side === 'left' || side === 'top') && <span aria-hidden>{NAV_GLYPH[side]}</span>}
-      <span style={{ fontWeight: 700, opacity: 0.85, whiteSpace: 'nowrap' }}>{relation}</span>
-      {detail !== null && (
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
-      )}
-      {(side === 'right' || side === 'bottom') && <span aria-hidden>{NAV_GLYPH[side]}</span>}
-    </motion.button>
-    </Hint>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <motion.button
+          type="button"
+          aria-label={ariaLabel}
+          onClick={onActivate}
+          // The pills had no hover or press feedback at all, while the palette's
+          // own keys did — so the four controls that move you around the map were
+          // the only ones that did not look clickable. This is the app's existing
+          // feel for a small action chip (the spring `CardNode`'s edge buttons
+          // use), with a slightly firmer scale now that the chip is round.
+          whileHover={reduceMotion ? undefined : { scale: 1.12 }}
+          whileTap={reduceMotion ? undefined : { scale: 0.94 }}
+          transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+          style={{
+            position: 'absolute',
+            zIndex: 2,
+            display: 'grid',
+            placeItems: 'center',
+            width: 30,
+            height: 30,
+            padding: 0,
+            borderRadius: 999,
+            border: `2px solid ${colors?.border ?? 'var(--border)'}`,
+            background: colors?.bg ?? 'var(--popover)',
+            color: colors?.text ?? 'inherit',
+            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.2)',
+            cursor: 'pointer',
+            ...NAV_POSITION[side],
+          }}
+        >
+          {children}
+        </motion.button>
+      </TooltipTrigger>
+      <TooltipContent
+        arrow={false}
+        sideOffset={8}
+        className="z-[60] max-w-xs"
+        style={{
+          padding: '6px 10px',
+          borderRadius: 9,
+          border: `2px solid ${colors?.border ?? 'var(--border)'}`,
+          background: colors?.bg ?? 'var(--popover)',
+          color: colors?.text ?? 'inherit',
+        }}
+      >
+        {tip}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

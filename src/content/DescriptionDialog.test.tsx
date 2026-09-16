@@ -524,4 +524,64 @@ describe('DescriptionDialog', () => {
     expect(props.onSave).toHaveBeenCalledWith([{ kind: 'text', text: 'Une définition de plus' }])
     expect(onNavigate).toHaveBeenCalledWith('card-next')
   })
+
+  it('shows a neighbour’s title in a hover card dressed like that card, cut short', async () => {
+    // The card-styled hover card replaces the wide pill that used to spell the
+    // title out on the button itself: the chip shrank to its arrow, and the
+    // explanation moved to where the pointer already is.
+    const user = userEvent.setup()
+    renderDialog({
+      nextSibling: {
+        id: 'n',
+        title: 'Un titre de voisin vraiment très long qui dépasse la limite de ce qu’on lit',
+        colors: { bg: 'rgb(1, 2, 3)', border: 'rgb(4, 5, 6)', text: 'rgb(7, 8, 9)' },
+      },
+      onNavigate: vi.fn(),
+    })
+
+    await user.hover(screen.getByRole('button', { name: /aller à/i }))
+    const tip = await screen.findByRole('tooltip')
+
+    expect(tip).toHaveTextContent('Suivant')
+    // A character budget, not the whole thing: the tail never makes it in.
+    expect(tip.textContent).toContain('…')
+    expect(tip.textContent).not.toContain('dépasse')
+    // Painted in the DESTINATION card's own palette — background, border, text.
+    expect(tip).toHaveStyle({ backgroundColor: 'rgb(1, 2, 3)', borderTopColor: 'rgb(4, 5, 6)' })
+  })
+
+  it('offers a "+" where there is no neighbour, explains it, and creates on click', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    renderDialog({ onCreate: { right: { onSelect } } })
+
+    const plus = screen.getByRole('button', { name: /nouvelle sous-partie/i })
+    await user.hover(plus)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Nouvelle sous-partie')
+
+    await user.click(plus)
+    expect(onSelect).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows no "+" on an edge nobody offered to create', () => {
+    // The caller decides which edges are creatable, because only it knows the
+    // card's level and whether it floats. With no handler, an empty edge stays
+    // empty rather than offering something the store would refuse.
+    renderDialog({ parentTarget: { id: 'p', title: 'Chapitre 5' }, onNavigate: vi.fn() })
+
+    expect(screen.getByRole('button', { name: /aller à « chapitre 5 »/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /nouvelle/i })).not.toBeInTheDocument()
+  })
+
+  it('opens on the title, selected, for a card just created', () => {
+    // The fresh card wears a placeholder title, so the dialog opens ON it with
+    // the text selected: one gesture replaces it. The block editor's own
+    // auto-focus stands down for that (see `autoFocusField`).
+    renderDialog({ autoFocusTitle: true, onRenameTitle: vi.fn(), cardTitle: 'Nouveau titre' })
+
+    const title = screen.getByRole('textbox', { name: /titre de la carte/i }) as HTMLInputElement
+    expect(title).toHaveFocus()
+    expect(title.selectionStart).toBe(0)
+    expect(title.selectionEnd).toBe('Nouveau titre'.length)
+  })
 })
