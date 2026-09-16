@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import {
   Check,
@@ -319,6 +319,12 @@ export interface BlockEditorProps {
 }
 
 /**
+ * Le défaut des familles masquées, partagé et jamais recréé : un littéral `[]`
+ * recréé à chaque rendu casserait la mémoïsation du bandeau (`SymbolBand`).
+ */
+const NO_HIDDEN_FAMILIES: string[] = []
+
+/**
  * The one place a definition is written.
  *
  * Its shape follows one rule above all: **everything the user needs is on the
@@ -338,7 +344,7 @@ export function BlockEditor({
   onPickImage,
   onError,
   autoFocusField = false,
-  hiddenFamilies = [],
+  hiddenFamilies = NO_HIDDEN_FAMILIES,
 }: BlockEditorProps) {
   // Which block the band's insertion targets. Kept in state rather than derived
   // from DOM focus: the band is permanent, so it must still name a target while
@@ -757,10 +763,18 @@ ull quand l'utilisateur l'a refermé pour
   const [bandTab, setBandTab] = useState<BandTabId | null>(() => loadBandTab())
 
   /** Ouvre, referme ou change d'onglet, et retient le choix. */
-  function chooseTab(tab: BandTabId | null) {
+  const chooseTab = useCallback((tab: BandTabId | null) => {
     setBandTab(tab)
     saveBandTab(tab)
-  }
+  }, [])
+
+  // `SymbolBand` est mémoïsé : le rappel qu'il reçoit doit garder son identité
+  // d'une frappe à l'autre, sinon la mémoïsation ne sert à rien. Le corps lit
+  // l'état courant (bloc actif, champ focalisé), d'où ce relais par une ref —
+  // le prop reste stable, l'implémentation reste celle du dernier rendu.
+  const insertSymbolRef = useRef(insertSymbol)
+  insertSymbolRef.current = insertSymbol
+  const handleInsertSymbol = useCallback((symbol: PaletteSymbol) => insertSymbolRef.current(symbol), [])
 
   return (
     // ONE provider for the whole editor. The app's tooltip defaults are used
@@ -804,7 +818,7 @@ ull quand l'utilisateur l'a refermé pour
           activeTab={bandTab}
           onChooseTab={chooseTab}
           hiddenFamilies={hiddenFamilies}
-          onInsert={insertSymbol}
+          onInsert={handleInsertSymbol}
         />
       </div>
 

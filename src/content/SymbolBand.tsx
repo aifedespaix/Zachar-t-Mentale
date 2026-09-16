@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { memo, type CSSProperties } from 'react'
 import type { CardBlockKind } from '../types/cardBlock'
 import type { BandTabId, PaletteSymbol } from '../types/symbolBand'
 import { Hint } from '../components/ui/hint'
@@ -52,7 +52,7 @@ export interface SymbolBandProps {
  * replie, et un groupe doit rester un groupe de chaque côté du repli — c'est la
  * couleur du fond qui le dit, pas la distance entre deux touches.
  */
-export function SymbolBand({
+export const SymbolBand = memo(function SymbolBand({
   targetLabel,
   kind,
   symbolsApply,
@@ -202,7 +202,7 @@ export function SymbolBand({
       )}
     </div>
   )
-}
+})
 
 /**
  * Ce qu'une touche MONTRE : les deux signes d'une paire (`¿ ?`, `« »`) quand le
