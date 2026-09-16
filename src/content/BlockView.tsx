@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import type { CardBlock, TableCell } from '../types/cardBlock'
+import { blockGroups } from './blocks'
 import { renderMathToHtml } from './renderMath'
 import { renderHighlighted, stripHighlightMarkers } from './highlight'
 
@@ -15,6 +16,22 @@ import { renderHighlighted, stripHighlightMarkers } from './highlight'
  */
 function usableRatio(width: number, height: number): boolean {
   return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+}
+
+/**
+ * The wash that marks the blocks a group header owns.
+ *
+ * A left rule plus a tint, not a full box: the range has to be visible
+ * without drawing a second frame around content that already carries its own
+ * (a table's borders, an image's box). A translucent `color-mix` of
+ * `currentColor` keeps it legible on both themes AND in the exported page,
+ * where the app's design tokens are not guaranteed to be in scope.
+ */
+const GROUP_STYLE = {
+  borderLeft: '3px solid currentColor',
+  paddingLeft: '0.6rem',
+  borderRadius: 6,
+  background: 'color-mix(in oklch, currentColor, transparent 93%)',
 }
 
 export interface BlockViewProps {
@@ -50,17 +67,35 @@ export function BlockView({ blocks, resolveAsset, highlightKeywords = true }: Bl
   if (blocks.length === 0) return null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-      {blocks.map((block, index) => (
-        // Blocks have no stable identity of their own — they are a positional
-        // list the user reorders wholesale — so the index is the honest key.
-        //
-        // The horizontal scroll container is here, in the SHARED renderer, not
-        // in the popover: KaTeX display math sets `white-space: nowrap` and
-        // ships no scroller of its own, and a wide table would otherwise blow
-        // the popover's fixed width apart. Fixing it only on one side is the
-        // screen/PDF drift this component exists to prevent.
-        <div key={index} style={{ maxWidth: '100%', overflowX: 'auto' }}>
-          <BlockItem block={block} resolveAsset={resolveAsset} highlightKeywords={highlightKeywords} />
+      {blockGroups(blocks).map(group => (
+        // One wrapper per range. An unowned range keeps the wrapper too, with
+        // no style of its own, so the DOM does not change shape the day a
+        // header is added or removed above those blocks.
+        <div
+          key={group.indexes[0]}
+          data-group={group.headerIndex === null ? undefined : 'question'}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.4rem',
+            ...(group.headerIndex === null ? {} : GROUP_STYLE),
+          }}
+        >
+          {group.indexes.map(index => (
+            // Blocks have no stable identity of their own — they are a
+            // positional list the user reorders wholesale — so the index is
+            // the honest key.
+            //
+            // The horizontal scroll container is here, in the SHARED
+            // renderer, not in the popover: KaTeX display math sets
+            // `white-space: nowrap` and ships no scroller of its own, and a
+            // wide table would otherwise blow the popover's fixed width
+            // apart. Fixing it only on one side is the screen/PDF drift this
+            // component exists to prevent.
+            <div key={index} style={{ maxWidth: '100%', overflowX: 'auto' }}>
+              <BlockItem block={blocks[index]} resolveAsset={resolveAsset} highlightKeywords={highlightKeywords} />
+            </div>
+          ))}
         </div>
       ))}
     </div>
@@ -82,6 +117,17 @@ const BlockItem = memo(function BlockItem({
       // user's own, and collapsing them would change what they wrote.
       return (
         <div style={{ whiteSpace: 'pre-wrap' }}>
+          {highlightKeywords ? renderHighlighted(block.text) : stripHighlightMarkers(block.text)}
+        </div>
+      )
+
+    case 'question':
+      // The tinted range around this block is drawn by the wrapper in
+      // `BlockView`, so this case only has to make the sentence read as a title
+      // rather than as body text. Highlight markers behave as in a text block:
+      // it is the same words, edited in the same field.
+      return (
+        <div style={{ fontWeight: 600, whiteSpace: 'pre-wrap' }}>
           {highlightKeywords ? renderHighlighted(block.text) : stripHighlightMarkers(block.text)}
         </div>
       )

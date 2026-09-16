@@ -80,7 +80,88 @@ describe('convertBlock', () => {
       rows: [['', '']],
     })
   })
+
+  it('round-trips text through question, so marking a header is reversible', () => {
+    // The toggle is safe to explore, like text ↔ math: the header keeps the
+    // very sentence it was, so un-marking it loses nothing but the grouping.
+    const text: CardBlock = { kind: 'text', text: 'Quel est le coefficient directeur ?' }
+    const asQuestion = convertBlock(text, 'question')
+    expect(asQuestion).toEqual({ kind: 'question', text: 'Quel est le coefficient directeur ?' })
+    expect(convertBlock(asQuestion, 'text')).toEqual(text)
+  })
 })
+
+describe('a question header in the editor', () => {
+  it('offers « Question » in the type switch and carries the text across', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([
+      { kind: 'text', text: 'premier' },
+      { kind: 'text', text: 'Quel est le coefficient directeur ?' },
+    ])
+
+    await user.click(screen.getByRole('button', { name: /type du bloc 2/i }))
+    await user.click(screen.getByRole('menuitem', { name: /question/i }))
+
+    expect(latest()).toEqual([
+      { kind: 'text', text: 'premier' },
+      { kind: 'question', text: 'Quel est le coefficient directeur ?' },
+    ])
+  })
+
+  it('names the header on its own button, so the list can be read at a glance', () => {
+    renderEditor([{ kind: 'question', text: 'Quel est le coefficient directeur ?' }])
+    expect(screen.getByRole('button', { name: /type du bloc 1 : question/i })).toBeInTheDocument()
+  })
+
+  it('tints the range the header owns, and nothing before it', () => {
+    const { container } = render(
+      <Harness
+        initial={[
+          { kind: 'text', text: 'intro' },
+          { kind: 'question', text: 'Quel est le coefficient directeur ?' },
+          { kind: 'text', text: 'Le a de ax + b.' },
+        ]}
+        onState={() => {}}
+      />
+    )
+    const groups = [...container.querySelectorAll('[data-group="question"]')]
+    expect(groups).toHaveLength(1)
+    expect(groups[0].textContent).toContain('Le a de ax + b.')
+    expect(groups[0].textContent).not.toContain('intro')
+  })
+
+  it('keeps a header a header when its text ends in $$, instead of turning it into a formula', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'question', text: '' }])
+
+    await user.type(screen.getByRole('textbox', { name: /question du bloc 1/i }), 'coûte 5$$')
+
+    expect(latest()).toEqual([{ kind: 'question', text: 'coûte 5$$' }])
+  })
+
+  it('takes a sign from the band at the caret, and stays a header', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'question', text: 'ab' }])
+
+    const field = screen.getByRole('textbox', { name: /question du bloc 1/i }) as HTMLTextAreaElement
+    field.focus()
+    field.setSelectionRange(1, 1)
+
+    await user.click(screen.getByRole('button', { name: /inférieur ou égal/i }))
+
+    expect(latest()).toEqual([{ kind: 'question', text: 'a≤b' }])
+  })
+
+  it('does not grey the language characters in a header, which is prose like any other', async () => {
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'question', text: '' }])
+
+    await user.click(screen.getByRole('button', { name: 'Espagnol' }))
+
+    expect(screen.getByRole('button', { name: /point d’interrogation inversé/i })).toBeEnabled()
+  })
+})
+
 
 describe('the table editor', () => {
   it('inserts before the first row and column, not only after the existing ones', async () => {

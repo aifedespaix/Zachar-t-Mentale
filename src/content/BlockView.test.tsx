@@ -150,3 +150,42 @@ describe('BlockView — degenerate data from a shared file', () => {
     ).not.toThrow()
   })
 })
+
+describe('BlockView — the group a question header opens', () => {
+  const blocks: CardBlock[] = [
+    { kind: 'text', text: 'intro' },
+    { kind: 'question', text: 'Quel est le coefficient directeur ?' },
+    { kind: 'text', text: 'Le a de ax + b.' },
+    { kind: 'question', text: 'Et l’ordonnée à l’origine ?' },
+    { kind: 'text', text: 'Le b de ax + b.' },
+  ]
+
+  it('reads the header as its own line, not as a lost kind', () => {
+    render(<BlockView blocks={blocks} resolveAsset={resolve} />)
+    expect(screen.getByText('Quel est le coefficient directeur ?')).toBeInTheDocument()
+  })
+
+  it('draws one tinted range per header, holding exactly the blocks it owns', () => {
+    const { container } = render(<BlockView blocks={blocks} resolveAsset={resolve} />)
+    const groups = [...container.querySelectorAll('[data-group="question"]')]
+    expect(groups).toHaveLength(2)
+    expect(groups[0].textContent).toContain('Quel est le coefficient directeur ?')
+    expect(groups[0].textContent).toContain('Le a de ax + b.')
+    expect(groups[0].textContent).not.toContain('Et l’ordonnée à l’origine ?')
+    expect(groups[1].textContent).toContain('Le b de ax + b.')
+  })
+
+  it('leaves a block that precedes the first header outside every group', () => {
+    const { container } = render(<BlockView blocks={blocks} resolveAsset={resolve} />)
+    const groups = [...container.querySelectorAll('[data-group="question"]')]
+    expect(groups.every(group => !group.textContent!.includes('intro'))).toBe(true)
+    expect(screen.getByText('intro')).toBeInTheDocument()
+  })
+
+  it('drops the tint entirely for a list that has no header', () => {
+    const { container } = render(
+      <BlockView blocks={[{ kind: 'text', text: 'a' }, { kind: 'math', latex: 'x' }]} resolveAsset={resolve} />
+    )
+    expect(container.querySelector('[data-group]')).toBeNull()
+  })
+})

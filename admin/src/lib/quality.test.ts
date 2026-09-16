@@ -227,4 +227,42 @@ describe('repairMindMapText', () => {
   it('has nothing to repair in a text it cannot even read', () => {
     expect(repairMindMapText('pas du json')).toBeNull()
   })
+
+  it('keeps a question header through « Réparer », instead of flattening it to text', () => {
+    // Le panneau prof importe le MÊME validateur que le canevas. Si le kind
+    // `question` échappait à `sanitizeBlock`, « Réparer » réécrirait l'en-tête
+    // en bloc texte : le regroupement disparaîtrait de la carte du prof, pour
+    // toujours, sans un mot d'avertissement.
+    const grouped = [
+      card({ id: 'root', title: 'Chapitre', parentId: null, order: 0 }),
+      card({
+        id: 'grouped',
+        level: 2,
+        title: 'Coefficient directeur',
+        parentId: 'root',
+        order: 0,
+        content: [
+          { kind: 'question', text: 'Quel est le coefficient directeur ?' },
+          { kind: 'text', text: 'Le a de ax + b.' },
+        ],
+        definition: 'Quel est le coefficient directeur ?\nLe a de ax + b.',
+      }),
+      card({ id: 'b', level: 2, title: 'Ordonnée à l’origine', definition: 'Le b de ax + b.', parentId: 'root', order: 1 }),
+    ]
+    // Une racine en trop : la structure que le canevas refuserait, donc le cas
+    // qui passe réellement par `repairCards`.
+    const broken = [
+      ...grouped,
+      card({ id: 'second-root', level: 1, title: 'Autre racine', parentId: null, order: 9 }),
+    ]
+
+    const repaired = repairMindMapText(JSON.stringify(broken))
+    expect(repaired).not.toBeNull()
+    const kept = repaired!.find(entry => entry.id === 'grouped')
+    expect(kept?.content).toEqual([
+      { kind: 'question', text: 'Quel est le coefficient directeur ?' },
+      { kind: 'text', text: 'Le a de ax + b.' },
+    ])
+    expect(analyzeMindMapText(JSON.stringify(repaired)).saveable).toBe(true)
+  })
 })

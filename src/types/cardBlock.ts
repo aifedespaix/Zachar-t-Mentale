@@ -39,5 +39,21 @@ export type CardBlock =
    */
   | { kind: 'image'; asset: string; alt: string; width: number; height: number }
   | { kind: 'table'; header: string[]; rows: TableCell[][] }
+  /**
+   * A group header: it opens a run of blocks that belong to it.
+   *
+   * Deliberately FLAT — the blocks it groups are the FOLLOWING entries of the
+   * same list, not children. That is what keeps every consumer linear: no
+   * recursive `CardBlock`, no recursive walk in `blocksToPlainText` (so the
+   * quiz/XMind/PDF mirror stays exact), and reordering or the local undo
+   * untouched. The grouping itself is a rendering convention — a tinted range,
+   * computed once by `blockGroups` and shared by the screen and the PDF.
+   *
+   * It carries a `text` and no list, which also makes the degradation benign
+   * on a build that does not know it: `sanitizeBlock` flattens the unknown
+   * kind to a text block, so the question survives as words and only the
+   * grouping is lost — never the sentence.
+   */
+  | { kind: 'question'; text: string }
 
 export type CardBlockKind = CardBlock['kind']

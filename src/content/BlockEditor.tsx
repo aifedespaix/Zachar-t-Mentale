@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Heading1,
   ImagePlus,
   Plus,
   Sigma,
@@ -12,6 +13,7 @@ import {
   Type,
 } from 'lucide-react'
 import type { CardBlock, CardBlockKind, TableCell } from '../types/cardBlock'
+import { blockGroups } from './blocks'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle, type MathfieldElement } from './MathFieldEditor'
 import { SymbolBand } from './SymbolBand'
@@ -45,6 +47,7 @@ export const KIND_LABEL: Record<CardBlockKind, string> = {
   math: 'Formule',
   table: 'Tableau',
   image: 'Image',
+  question: 'Question',
 }
 
 /** The widths the image control offers, as a share of the definition's width. */
@@ -65,6 +68,9 @@ function sourceOf(block: CardBlock): string {
       return block.latex
     case 'image':
       return block.alt
+    case 'question':
+      // A header carries prose, so it leaves as prose — exactly as a text block.
+      return block.text
     case 'table':
       // Header included: dropping it loses a row of the user's data, and a
       // header is text like any other cell once flattened.
@@ -97,6 +103,10 @@ export function convertBlock(block: CardBlock, kind: CardBlockKind): CardBlock {
       return { kind: 'text', text: source }
     case 'math':
       return { kind: 'math', latex: source }
+    case 'question':
+      // Marking a sentence as a header, and un-marking it, is the same
+      // reversible gesture as text ↔ formula: the string crosses untouched.
+      return { kind: 'question', text: source }
     case 'table':
       return {
         kind: 'table',
@@ -576,7 +586,10 @@ export function BlockEditor({
   function insertText(character: SpecialCharacter) {
     const index = activeIndex
     const block = blocksRef.current[index]
-    if (block?.kind !== 'text') return
+    // A header is prose too: the accents and the language signs have to reach it
+    // by the same caret path, or the one block a teacher is most likely to write
+    // a question mark in would be the one that refuses it.
+    if (block?.kind !== 'text' && block?.kind !== 'question') return
 
     const field = textFieldAt(index)
     const caret = field !== null && document.activeElement === field ? field : null
@@ -585,7 +598,7 @@ export function BlockEditor({
 
     const insertion = insertCharacter(block.text, start, end, character)
     onChange(
-      blocksRef.current.map((existing, i) => (i === index ? { kind: 'text', text: insertion.text } : existing))
+      blocksRef.current.map((existing, i) => (i === index ? { kind: block.kind, text: insertion.text } : existing))
     )
     pendingCaret.current = { index, position: insertion.caret }
     setActiveIndex(index)
@@ -605,7 +618,7 @@ export function BlockEditor({
     if (insertIntoFocusedCell(symbol)) return
 
     const block = blocksRef.current[activeIndex]
-    if (block?.kind === 'text') {
+    if (block?.kind === 'text' || block?.kind === 'question') {
       // Réutilise l'insertion au caret du bloc texte — paires et sélection
       // comprises : un signe du bandeau est un `SpecialCharacter` comme un autre.
       insertText({
@@ -767,7 +780,8 @@ export function BlockEditor({
   const structuresApply = activeKind === 'math' || (activeKind === 'table' && focusedFieldKind === 'math')
   // L'inverse exact : la cible accepte-t-elle du TEXTE simple ? C'est ce qui
   // décide si les familles de langue (à venir) s'appliquent.
-  const textApply = activeKind === 'text' || (activeKind === 'table' && focusedFieldKind !== 'math')
+  const textApply =
+    activeKind === 'text' || activeKind === 'question' || (activeKind === 'table' && focusedFieldKind !== 'math')
 
   /**
    * L'onglet ouvert du bandeau — ou 
@@ -842,110 +856,124 @@ ull quand l'utilisateur l'a refermé pour
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {blocks.map((block, index) => {
-          const isActive = index === activeIndex
-          // A `const`, not the condition inline: TypeScript drops narrowing
-          // inside a closure for a parameter it cannot prove is never
-          // reassigned, so `blockAsTable(growable)` below would not type-check
-          // on `block` itself.
-          const growable = block.kind === 'image' || block.kind === 'table' ? null : block
-          return (
-            <motion.div
-              // Une clé STABLE, pas l'index : c'est ce qui fait que React déplace
-              // le nœud au lieu de réécrire son contenu, donc ce qui rend
-              // l'animation possible (voir `blockIds`). `data-row-index` reste
-              // l'INDEX, lui : les recherches DOM et l'insertion au caret en
-              // dépendent, et c'est une coordonnée, pas une identité.
-              key={blockIds.current[index]}
-              data-row-index={index}
-              data-block-kind={block.kind}
-              // L'animation du déplacement : `layout="position"` anime les blocs
-              // qui CHANGENT DE PLACE — « lequel prend la place de l'autre » — et
-              // rien d'autre. `layout` seul animerait aussi les changements de
-              // taille, donc chaque zone de texte qui s'allonge pendant la frappe,
-              // ce qui donnerait une page qui tremble au lieu d'un déplacement
-              // qu'on suit.
-              //
-              // Elle ne fonctionne QUE grâce aux clés stables ci-dessus : avec
-              // `key={index}`, aucun élément ne se déplace et il n'y aurait rien
-              // à animer.
-              layout={reduceMotion ? undefined : 'position'}
-              transition={{ layout: { duration: 0.18, ease: 'easeOut' } }}
-              onFocus={() => setActiveIndex(index)}
-              onMouseDown={() => setActiveIndex(index)}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                borderRadius: 10,
-                // `--ring`, not `--accent`: `--accent` is a SURFACE token
-                // (`oklch(0.97)` in the light theme, i.e. lighter than
-                // `--border` at `0.922`, on a `--popover` of `1`), so painting
-                // the active block and the drop target with it drew both in
-                // something fainter than the border they replace — invisible in
-                // the light theme. `--ring` is the token the rest of the app
-                // already uses for exactly this, at `oklch(0.708)`.
-                border: `1px solid ${isActive ? 'var(--ring, currentColor)' : 'var(--border)'}`,
-                borderLeft: `3px solid ${isActive ? 'var(--ring, currentColor)' : 'var(--border)'}`,
-                background: isActive ? 'color-mix(in oklch, var(--border), transparent 88%)' : 'transparent',
-
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, padding: '8px 10px 8px 3px' }}>
-                <BlockGutter index={index} count={blocks.length} onMove={move} />
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <BlockField
-                    block={block}
-                    index={index}
-                    resolveAsset={resolveAsset}
-                    onChange={next => replace(index, next)}
-                    onEnterBlock={() => insertBlockAfter(index, emptyBlock(inheritableKind(block)))}
-                    onFieldChange={fieldSetterFor(index)}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 0 auto' }}>
-                  <BlockKindMenu
-                    index={index}
-                    kind={block.kind}
-                    disabled={block.kind === 'image'}
-                    onChange={kind => {
-                      // « Tableau » ne convertit pas au sens des deux autres : un
-                      // bloc EST déjà un tableau 1×1, donc devenir un tableau c'est
-                      // lui AJOUTER une colonne — le geste qui avait remplacé
-                      // « convertir en tableau ». Dans l'autre sens, « Texte »
-                      // ramène un tableau à son contenu.
-                      if (kind === 'table') {
-                        if (growable !== null) replace(index, addTableColumn(blockAsTable(growable)))
-                      } else {
-                        replace(index, convertBlock(block, kind))
-                      }
-                      // The switch replaces the field itself — a text
-                      // `<textarea>` and a formula editor are different
-                      // components — so without this the caret is left on the
-                      // menu button and the user has to click back into the very
-                      // block they just converted before they can type in it.
-                      focusBlockAfterMenu(index)
-                    }}
-                  />
-                  {/* « Supprimer » est descendu du gutter : il est maintenant sous
-                      le menu de type, du même côté. Le gutter ne garde que le
-                      déplacement, et la corbeille garde la règle « jamais le
-                      dernier bloc » (`removeAt` la refuse). */}
-                  {blocks.length > 1 && (
-                    <GutterIcon
-                      label={`Supprimer le bloc ${index + 1}`}
-                      destructive
-                      onClick={() => removeAt(index)}
-                      icon={<Trash2 size={14} />}
-                    />
-                  )}
-                </div>
-              </div>
-
-            </motion.div>
-          )
-        })}
+        {blockGroups(blocks).map(group => (
+          <div
+            key={group.indexes[0]}
+            data-group={group.headerIndex === null ? undefined : 'question'}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              ...(group.headerIndex === null ? {} : GROUP_STYLE),
+            }}
+          >
+            {group.indexes.map(index => {
+              const block = blocks[index]
+              const isActive = index === activeIndex
+              // A `const`, not the condition inline: TypeScript drops narrowing
+              // inside a closure for a parameter it cannot prove is never
+              // reassigned, so `blockAsTable(growable)` below would not type-check
+              // on `block` itself.
+              const growable = block.kind === 'image' || block.kind === 'table' ? null : block
+              return (
+                <motion.div
+                  // Une clé STABLE, pas l'index : c'est ce qui fait que React déplace
+                  // le nœud au lieu de réécrire son contenu, donc ce qui rend
+                  // l'animation possible (voir `blockIds`). `data-row-index` reste
+                  // l'INDEX, lui : les recherches DOM et l'insertion au caret en
+                  // dépendent, et c'est une coordonnée, pas une identité.
+                  key={blockIds.current[index]}
+                  data-row-index={index}
+                  data-block-kind={block.kind}
+                  // L'animation du déplacement : `layout="position"` anime les blocs
+                  // qui CHANGENT DE PLACE — « lequel prend la place de l'autre » — et
+                  // rien d'autre. `layout` seul animerait aussi les changements de
+                  // taille, donc chaque zone de texte qui s'allonge pendant la frappe,
+                  // ce qui donnerait une page qui tremble au lieu d'un déplacement
+                  // qu'on suit.
+                  //
+                  // Elle ne fonctionne QUE grâce aux clés stables ci-dessus : avec
+                  // `key={index}`, aucun élément ne se déplace et il n'y aurait rien
+                  // à animer.
+                  layout={reduceMotion ? undefined : 'position'}
+                  transition={{ layout: { duration: 0.18, ease: 'easeOut' } }}
+                  onFocus={() => setActiveIndex(index)}
+                  onMouseDown={() => setActiveIndex(index)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    borderRadius: 10,
+                    // `--ring`, not `--accent`: `--accent` is a SURFACE token
+                    // (`oklch(0.97)` in the light theme, i.e. lighter than
+                    // `--border` at `0.922`, on a `--popover` of `1`), so painting
+                    // the active block and the drop target with it drew both in
+                    // something fainter than the border they replace — invisible in
+                    // the light theme. `--ring` is the token the rest of the app
+                    // already uses for exactly this, at `oklch(0.708)`.
+                    border: `1px solid ${isActive ? 'var(--ring, currentColor)' : 'var(--border)'}`,
+                    borderLeft: `3px solid ${isActive ? 'var(--ring, currentColor)' : 'var(--border)'}`,
+                    background: isActive ? 'color-mix(in oklch, var(--border), transparent 88%)' : 'transparent',
+    
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, padding: '8px 10px 8px 3px' }}>
+                    <BlockGutter index={index} count={blocks.length} onMove={move} />
+    
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <BlockField
+                        block={block}
+                        index={index}
+                        resolveAsset={resolveAsset}
+                        onChange={next => replace(index, next)}
+                        onEnterBlock={() => insertBlockAfter(index, emptyBlock(inheritableKind(block)))}
+                        onFieldChange={fieldSetterFor(index)}
+                      />
+                    </div>
+    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 0 auto' }}>
+                      <BlockKindMenu
+                        index={index}
+                        kind={block.kind}
+                        disabled={block.kind === 'image'}
+                        onChange={kind => {
+                          // « Tableau » ne convertit pas au sens des deux autres : un
+                          // bloc EST déjà un tableau 1×1, donc devenir un tableau c'est
+                          // lui AJOUTER une colonne — le geste qui avait remplacé
+                          // « convertir en tableau ». Dans l'autre sens, « Texte »
+                          // ramène un tableau à son contenu.
+                          if (kind === 'table') {
+                            if (growable !== null) replace(index, addTableColumn(blockAsTable(growable)))
+                          } else {
+                            replace(index, convertBlock(block, kind))
+                          }
+                          // The switch replaces the field itself — a text
+                          // `<textarea>` and a formula editor are different
+                          // components — so without this the caret is left on the
+                          // menu button and the user has to click back into the very
+                          // block they just converted before they can type in it.
+                          focusBlockAfterMenu(index)
+                        }}
+                      />
+                      {/* « Supprimer » est descendu du gutter : il est maintenant sous
+                          le menu de type, du même côté. Le gutter ne garde que le
+                          déplacement, et la corbeille garde la règle « jamais le
+                          dernier bloc » (`removeAt` la refuse). */}
+                      {blocks.length > 1 && (
+                        <GutterIcon
+                          label={`Supprimer le bloc ${index + 1}`}
+                          destructive
+                          onClick={() => removeAt(index)}
+                          icon={<Trash2 size={14} />}
+                        />
+                      )}
+                    </div>
+                  </div>
+    
+                </motion.div>
+              )
+            })}
+          </div>
+        ))}
       </div>
 
       <div style={{ display: 'flex', gap: 8, paddingTop: 10, flex: '0 0 auto' }}>
@@ -984,6 +1012,22 @@ ull quand l'utilisateur l'a refermé pour
     </div>
     </TooltipProvider>
   )
+}
+
+/**
+ * Le lavis qui marque la plage d'un en-tête.
+ *
+ * Un filet à gauche et un fond teinté, pas un cadre : la plage doit se voir sans
+ * ajouter une deuxième bordure autour de blocs qui en portent déjà une (le cadre
+ * du bloc actif, celui d'une image, les filets d'un tableau). C'est le jeton
+ * `--border` et non `--ring` : `--ring` veut dire « ce bloc est actif », et
+ * confondre les deux ferait passer tout un groupe pour sélectionné.
+ */
+const GROUP_STYLE: CSSProperties = {
+  borderLeft: '3px solid color-mix(in oklch, var(--border), transparent 35%)',
+  paddingLeft: 8,
+  borderRadius: 10,
+  background: 'color-mix(in oklch, var(--border), transparent 82%)',
 }
 
 const GHOST_BUTTON: CSSProperties = {
@@ -1143,7 +1187,7 @@ function BlockKindMenu({
           }
           style={{ ...GHOST_BUTTON, opacity: disabled ? 0.4 : 0.85, cursor: disabled ? 'default' : 'pointer' }}
         >
-          {kind === 'math' ? <Sigma size={13} /> : kind === 'table' ? <Table2 size={13} /> : kind === 'image' ? <ImagePlus size={13} /> : <Type size={13} />}
+          {kind === 'math' ? <Sigma size={13} /> : kind === 'table' ? <Table2 size={13} /> : kind === 'image' ? <ImagePlus size={13} /> : kind === 'question' ? <Heading1 size={13} /> : <Type size={13} />}
           {current}
           <ChevronDown size={12} />
         </button>
@@ -1191,6 +1235,19 @@ function BlockKindMenu({
           <Table2 size={14} />
           Tableau
           <span style={{ marginLeft: 'auto', opacity: 0.8 }}>{kind === 'table' && <Check size={13} />}</span>
+        </DropdownMenuItem>
+        {/* Marquer un texte comme question est le geste qui CRÉE le groupe : il
+            n'y a pas d'insertion de groupe séparée, parce qu'un en-tête naît
+            toujours de la phrase qu'on vient d'écrire dans ce bloc. */}
+        <DropdownMenuItem
+          onSelect={() => {
+            pickedType.current = true
+            onChange('question')
+          }}
+        >
+          <Heading1 size={14} />
+          Question
+          <span style={{ marginLeft: 'auto', opacity: 0.8 }}>{kind === 'question' && <Check size={13} />}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -1247,6 +1304,20 @@ function BlockField({ block, index, resolveAsset, onChange, onEnterBlock, onFiel
             }
             onChange({ kind: 'text', text })
           }}
+          onEnter={onEnterBlock}
+        />
+      )
+
+    case 'question':
+      // The same field as a text block, minus the `$$` fast path: a header is a
+      // title, and a title that turned into a formula because it happened to end
+      // in `$$` would take its whole group with it.
+      return (
+        <AutoGrowTextarea
+          aria-label={`Question du bloc ${index + 1}`}
+          data-block-index={index}
+          value={block.text}
+          onChange={text => onChange({ kind: 'question', text })}
           onEnter={onEnterBlock}
         />
       )

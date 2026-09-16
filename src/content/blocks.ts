@@ -118,6 +118,12 @@ function blockToPlainText(block: CardBlock): string {
         .filter(row => row.length > 0)
         .map(row => row.join(' | '))
         .join('\n')
+    case 'question':
+      // Read, never dropped: it is what the lines under it answer, and a quiz
+      // option or an XMind note missing that sentence would be wrong while
+      // still looking plausible. `blockToPlainText` stays linear here — there
+      // are no children to walk.
+      return block.text.trim()
   }
 }
 
@@ -137,6 +143,12 @@ function isEmptyBlock(block: CardBlock): boolean {
       return (
         block.header.every(cell => cell.trim() === '') && block.rows.flat().every(cellIsEmpty)
       )
+    case 'question':
+      // An empty header groups nothing and would tint a range with no title.
+      // Dropped like an empty text block, which is also what stops a header
+      // that was edited down to nothing from surviving as a lone `content`
+      // entry on a card that should have collapsed back to `definition`.
+      return block.text.trim() === ''
   }
 }
 
@@ -230,6 +242,11 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
       }
       return { kind: 'table', header: [...block.header], rows }
     }
+    case 'question':
+      // Every branch below rebuilds its block field by field, so this one has
+      // to name `text` explicitly: leaving it to the `default` branch would
+      // keep the words but lose the KIND, and the grouped style with it.
+      return typeof block.text === 'string' ? { kind: 'question', text: block.text } : null
     default: {
       // Unknown kind: keep whatever a human could still read out of it.
       const text = Object.entries(block)
@@ -282,10 +299,55 @@ export function contentOf(card: Card): CardBlock[] {
  * The order is fixed rather than first-seen so two cards with the same kinds
  * always show the same badges in the same places — a card is scanned, not
  * read, and a badge that moves between cards is a badge that has to be read.
+ *
+ * A `question` header is excluded as well, and the TYPE says so: these badges
+ * answer « what is in there? » and drive the « À quel titre correspond… ? »
+ * heading. A header is structure, so counting it would advertise a grouping
+ * as content — and would demand a heading neither record has an entry for.
  */
-export function nonTextKinds(blocks: CardBlock[]): Exclude<CardBlockKind, 'text'>[] {
-  const order: Exclude<CardBlockKind, 'text'>[] = ['math', 'image', 'table']
+export function nonTextKinds(blocks: CardBlock[]): Exclude<CardBlockKind, 'text' | 'question'>[] {
+  const order: Exclude<CardBlockKind, 'text' | 'question'>[] = ['math', 'image', 'table']
   return order.filter(kind => blocks.some(block => block.kind === kind))
+}
+
+/** A run of consecutive blocks sitting under one header, in reading order. */
+export interface BlockGroup {
+  /**
+   * The index of the `question` header that owns the run, or `null` for the
+   * blocks that come before the first header.
+   */
+  headerIndex: number | null
+  indexes: number[]
+}
+
+/**
+ * Cuts a block list into the ranges a group header owns.
+ *
+ * The whole grouping feature is this function plus a tinted wrapper: a
+ * `question` block owns itself and every following block up to the next
+ * header. Deriving a RANGE rather than nesting children is what keeps the
+ * model flat — no other part of the app has to learn about groups.
+ *
+ * Shared by the read-only renderer and the editor, for the same reason those
+ * two already share `BlockView`: a screen that drew the group boundary
+ * differently from the printed page would only ever be noticed by a user
+ * printing a revision sheet the night before a test.
+ */
+export function blockGroups(blocks: CardBlock[]): BlockGroup[] {
+  const groups: BlockGroup[] = []
+  for (let index = 0; index < blocks.length; index += 1) {
+    const isHeader = blocks[index].kind === 'question'
+    const current = groups[groups.length - 1]
+    // A header ALWAYS opens a range, even directly after another header: the
+    // second question answers nothing here, so absorbing it into the first
+    // range would tint its title as though it belonged to its predecessor.
+    if (isHeader || current === undefined) {
+      groups.push({ headerIndex: isHeader ? index : null, indexes: [index] })
+    } else {
+      current.indexes.push(index)
+    }
+  }
+  return groups
 }
 
 /** Every readable block of a raw `content` array. Exported for the repair path. */

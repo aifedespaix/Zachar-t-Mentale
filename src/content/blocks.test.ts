@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { blocksToPlainText, latexToPlainText, normalizeContent, contentOf, reconcileCards } from './blocks'
+import {
+  blockGroups,
+  blocksToPlainText,
+  latexToPlainText,
+  nonTextKinds,
+  normalizeContent,
+  contentOf,
+  reconcileCards,
+  sanitizeBlocks,
+} from './blocks'
 import type { CardBlock } from '../types/cardBlock'
 import type { Card } from '../types/card'
 
@@ -289,5 +298,127 @@ describe('reconcileCards', () => {
     const before = structuredClone(input)
     reconcileCards(input)
     expect(input).toEqual(before)
+  })
+})
+
+describe('the question block — a group header, not a container', () => {
+  it('keeps a question block, text and all, through `sanitizeBlocks`', () => {
+    // `sanitizeBlock` rebuilds every block field by field, so any field a
+    // branch forgets disappears silently — and the shared repair path
+    // (`repairCards` → `sanitizeBlocks`) is exactly what admin/ runs on a
+    // pasted map. If this regresses, a teacher's « Réparer » flattens the
+    // header back into plain text with no warning.
+    const raw = [{ kind: 'question', text: 'Quel est le coefficient directeur ?' }]
+    expect(sanitizeBlocks(raw)).toEqual([
+      { kind: 'question', text: 'Quel est le coefficient directeur ?' },
+    ])
+  })
+
+  it('drops a question block whose text is not a string, rather than inventing one', () => {
+    expect(sanitizeBlocks([{ kind: 'question' }])).toEqual([])
+  })
+
+  it('reads a question header back through `contentOf` without flattening it', () => {
+    const card: Card = {
+      id: 'a', level: 2, title: 'T', parentId: 'r', order: 0,
+      content: [
+        { kind: 'question', text: 'Quel est le coefficient directeur ?' },
+        { kind: 'text', text: 'Le a de ax + b.' },
+      ],
+      definition: 'Quel est le coefficient directeur ?\nLe a de ax + b.',
+    }
+    expect(contentOf(card)).toEqual(card.content)
+  })
+
+  it('gives the header its own line in the plain-text mirror the quiz, XMind and PDF read', () => {
+    const blocks: CardBlock[] = [
+      { kind: 'question', text: 'Quel est le coefficient directeur ?' },
+      { kind: 'text', text: 'Le a de ax + b.' },
+    ]
+    expect(blocksToPlainText(blocks)).toBe(
+      'Quel est le coefficient directeur ?\nLe a de ax + b.'
+    )
+  })
+
+  it('stores a header as `content`, never collapses it into `definition` alone', () => {
+    // The all-text shortcut would make the group disappear from the file: the
+    // header is a block kind, not a paragraph, so it must survive as content.
+    const blocks: CardBlock[] = [
+      { kind: 'question', text: 'Quel est le coefficient directeur ?' },
+      { kind: 'text', text: 'Le a de ax + b.' },
+    ]
+    expect(normalizeContent(blocks)).toEqual({ content: blocks, definition: blocksToPlainText(blocks) })
+  })
+
+  it('drops an empty header, the way it drops an empty text block', () => {
+    expect(
+      normalizeContent([{ kind: 'question', text: '   ' }, { kind: 'text', text: 'Une règle' }])
+    ).toEqual({ definition: 'Une règle' })
+    expect(normalizeContent([{ kind: 'question', text: '' }])).toEqual({})
+  })
+
+  it('copies a header, so a later keystroke cannot reach the stored content', () => {
+    const draft: CardBlock[] = [{ kind: 'question', text: 'Q' }, { kind: 'math', latex: 'x^2' }]
+    const { content } = normalizeContent(draft)
+    ;(draft[0] as { text: string }).text = 'MUTÉ'
+    expect(content![0]).toEqual({ kind: 'question', text: 'Q' })
+  })
+})
+
+describe('blockGroups — who owns whom', () => {
+  const q = (text: string): CardBlock => ({ kind: 'question', text })
+  const t = (text: string): CardBlock => ({ kind: 'text', text })
+
+  it('gives a header its own range, covering itself and everything after it', () => {
+    expect(blockGroups([q('Q1'), t('a'), t('b')])).toEqual([{ headerIndex: 0, indexes: [0, 1, 2] }])
+  })
+
+  it('starts a new range at the next header, closing the previous one', () => {
+    expect(blockGroups([q('Q1'), t('a'), q('Q2'), t('b')])).toEqual([
+      { headerIndex: 0, indexes: [0, 1] },
+      { headerIndex: 2, indexes: [2, 3] },
+    ])
+  })
+
+  it('leaves blocks before the first header unowned', () => {
+    expect(blockGroups([t('intro'), q('Q1'), t('a')])).toEqual([
+      { headerIndex: null, indexes: [0] },
+      { headerIndex: 1, indexes: [1, 2] },
+    ])
+  })
+
+  it('does not swallow a header that directly follows another one', () => {
+    // Two back-to-back questions are two groups, the first one holding only
+    // its own title — a header that answers nothing is still a header.
+    expect(blockGroups([q('Q1'), q('Q2'), t('a')])).toEqual([
+      { headerIndex: 0, indexes: [0] },
+      { headerIndex: 1, indexes: [1, 2] },
+    ])
+  })
+
+  it('is one unowned range when there is no header at all, and empty for no blocks', () => {
+    expect(blockGroups([t('a'), t('b')])).toEqual([{ headerIndex: null, indexes: [0, 1] }])
+    expect(blockGroups([])).toEqual([])
+  })
+})
+
+describe('nonTextKinds — a header is structure, not content', () => {
+  it('does not advertise a group header as something to look at', () => {
+    // The badges and the « À quel titre correspond… ? » heading answer « what
+    // is IN there? ». Counting a header would claim the card holds a figure
+    // when it holds a grouping — and would need a heading entry that has no
+    // meaning. The type enforces the same exclusion, so the two records in
+    // the UI stay three-keyed.
+    expect(nonTextKinds([{ kind: 'question', text: 'Q' }, { kind: 'text', text: 'a' }])).toEqual([])
+  })
+
+  it('still names the real content kinds, in the fixed order', () => {
+    expect(
+      nonTextKinds([
+        { kind: 'table', header: [], rows: [] },
+        { kind: 'question', text: 'Q' },
+        { kind: 'math', latex: 'x' },
+      ])
+    ).toEqual(['math', 'table'])
   })
 })

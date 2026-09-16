@@ -352,7 +352,10 @@ function DescriptionAction({
   )
 }
 
-const MEDIA_TITLE_HEADINGS: Record<Exclude<CardBlockKind, 'text'>, string> = {
+// `question` is absent here, exactly as from `nonTextKinds`: a media title is
+// asked about a picture, a table or a formula — never about a group header,
+// which titles itself with the sentence the user wrote in it.
+const MEDIA_TITLE_HEADINGS: Record<Exclude<CardBlockKind, 'text' | 'question'>, string> = {
   table: 'À quel titre correspond ce tableau ?',
   math: 'À quel titre correspond cette formule ?',
   image: 'À quel titre correspond cette image ?',
