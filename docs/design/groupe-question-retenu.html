@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Groupe question — piste retenue</title>
+<style>
+  * { box-sizing: border-box; }
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --border: oklch(0.922 0 0);
+    --info-bg: oklch(0.94 0.03 240);
+    --info-border: oklch(0.7 0.1 240);
+    --info-fg: oklch(0.35 0.08 240);
+    --page: oklch(0.965 0.004 250);
+    color-scheme: light;
+  }
+  [data-theme='dark'] {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --border: oklch(1 0 0 / 12%);
+    --info-bg: oklch(0.28 0.05 240);
+    --info-border: oklch(0.5 0.12 240);
+    --info-fg: oklch(0.88 0.06 240);
+    --page: oklch(0.11 0 0);
+    color-scheme: dark;
+  }
+  body { margin: 0; font-family: 'Geist Variable', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 14px; color: var(--foreground); background: var(--page); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 30px 20px 70px; }
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted-foreground); margin: 0 0 10px; font-size: 13.5px; max-width: 78ch; line-height: 1.55; }
+  .recipe { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0 22px; }
+  .pill { font-size: 12px; border: 1px solid var(--border); border-radius: 999px; padding: 4px 11px; background: var(--background); }
+  .pill b { color: var(--info-fg); }
+  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); font-weight: 600; margin: 26px 0 10px; }
+  .panes { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .pane { padding: 18px; background: var(--background); }
+  .pane + .pane { border-left: 1px solid var(--border); }
+  .pane .tag { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted-foreground); margin-bottom: 12px; }
+
+  /* --- le groupe retenu : fond du 1 + barre du 2 + bandeau du 4 + pastille du 5 --- */
+  .g {
+    position: relative; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;
+    border: 1px solid color-mix(in oklch, var(--info-border), transparent 30%);
+    border-left: 3px solid var(--info-border);
+    background: color-mix(in oklch, var(--info-bg), transparent 40%);
+  }
+  .gq {
+    display: flex; align-items: center; gap: 9px; padding: 10px 12px;
+    background: color-mix(in oklch, var(--info-border), transparent 84%);
+    border-bottom: 1px solid color-mix(in oklch, var(--info-border), transparent 50%);
+  }
+  .qtext { font-size: 15px; font-weight: 650; color: var(--info-fg); line-height: 1.35; }
+  .qchip { margin-left: auto; flex: 0 0 auto; font-size: 11px; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; opacity: 0.8; white-space: nowrap; }
+  .gbody { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+  .badge {
+    flex: 0 0 auto; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 999px;
+    background: var(--info-border); color: #fff;
+    display: grid; place-items: center; font-size: 12px; font-weight: 700; line-height: 1;
+  }
+  .badge.manual { background: var(--background); color: var(--info-fg); border: 1px solid var(--info-border); }
+  .badge.ring { outline: 2px solid color-mix(in oklch, var(--info-border), transparent 55%); outline-offset: 2px; }
+
+  .block { display: flex; align-items: stretch; gap: 8px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 10px; padding: 8px 10px 8px 3px; }
+  .gutter { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 26px; flex: 0 0 auto; padding-top: 1px; }
+  .gutter span { width: 22px; height: 22px; display: grid; place-items: center; font-size: 9px; opacity: 0.45; }
+  .bcontent { flex: 1; min-width: 0; font-size: 14.5px; line-height: 1.5; }
+  .btools { flex: 0 0 auto; }
+  .blkchip { font-size: 11.5px; border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; opacity: 0.85; white-space: nowrap; }
+  .frac { display: inline-grid; vertical-align: middle; text-align: center; margin: 0 0.2em; }
+  .frac .num { border-bottom: 1px solid currentColor; padding: 0 0.3em; }
+  .frac .den { padding: 0 0.3em; }
+
+  .add { font: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 8px; width: 100%; }
+  .add.in { padding: 7px 0; font-size: 12.5px; border: 1px dashed color-mix(in oklch, var(--info-border), transparent 35%); background: color-mix(in oklch, var(--info-border), transparent 93%); color: var(--info-fg); }
+  .add.out { padding: 8px 0; font-size: 12.5px; border: 1px dashed var(--border); background: none; color: inherit; opacity: 0.65; margin-top: 12px; }
+
+  .badgedemo { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .state { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--background); display: flex; align-items: flex-start; gap: 12px; }
+  .state p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--muted-foreground); }
+  .state strong { color: var(--foreground); }
+
+  .rules { width: 100%; border-collapse: collapse; background: var(--background); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .rules th, .rules td { text-align: left; padding: 9px 13px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  .rules th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted-foreground); font-weight: 600; }
+  .rules tr:last-child td { border-bottom: none; }
+  .rules td.arrow { color: var(--muted-foreground); }
+
+  @media (max-width: 900px) { .panes { grid-template-columns: 1fr; } .pane + .pane { border-left: none; border-top: 1px solid var(--border); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Groupe « question » — la piste retenue</h1>
+  <p class="sub">Le mélange de tes choix, montré avec deux questions qui s’enchaînent pour voir la numérotation automatique.</p>
+  <div class="recipe">
+    <span class="pill"><b>1</b> · fond bleu transparent + typographie</span>
+    <span class="pill"><b>2</b> · barre d’accent à gauche</span>
+    <span class="pill"><b>4</b> · bandeau teinté pour la question</span>
+    <span class="pill"><b>5</b> · pastille numérotée, éditable</span>
+  </div>
+
+  <div class="panes">
+    <div class="pane" data-theme="light"><div class="tag">Clair</div>
+  
+  <div class="g">
+    <div class="gq">
+      <span class="badge ">1</span>
+      <div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div>
+      <span class="qchip">Question</span>
+    </div>
+    <div class="gbody">
+      <div class="block "><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block "><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div>
+      <button class="add in" type="button">＋ Ajouter un bloc dans la question</button>
+    </div>
+  </div>
+  <button class="add out" type="button">＋ Ajouter un bloc</button>
+  
+  <div class="g">
+    <div class="gq">
+      <span class="badge">2</span>
+      <div class="qtext">Que représente ce coefficient pour la droite ?</div>
+      <span class="qchip">Question</span>
+    </div>
+    <div class="gbody">
+      <div class="block "><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">C’est le nombre qui dit de combien la droite monte quand on avance de 1.</div><div class="btools"><span class="blkchip">Texte</span></div></div>
+      <button class="add in" type="button">＋ Ajouter un bloc dans la question</button>
+    </div>
+  </div>
+  <button class="add out" type="button">＋ Ajouter un bloc</button>
+</div>
+    <div class="pane" data-theme="dark"><div class="tag">Sombre</div>
+  
+  <div class="g">
+    <div class="gq">
+      <span class="badge ">1</span>
+      <div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div>
+      <span class="qchip">Question</span>
+    </div>
+    <div class="gbody">
+      <div class="block "><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block "><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div>
+      <button class="add in" type="button">＋ Ajouter un bloc dans la question</button>
+    </div>
+  </div>
+  <button class="add out" type="button">＋ Ajouter un bloc</button>
+  
+  <div class="g">
+    <div class="gq">
+      <span class="badge">2</span>
+      <div class="qtext">Que représente ce coefficient pour la droite ?</div>
+      <span class="qchip">Question</span>
+    </div>
+    <div class="gbody">
+      <div class="block "><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">C’est le nombre qui dit de combien la droite monte quand on avance de 1.</div><div class="btools"><span class="blkchip">Texte</span></div></div>
+      <button class="add in" type="button">＋ Ajouter un bloc dans la question</button>
+    </div>
+  </div>
+  <button class="add out" type="button">＋ Ajouter un bloc</button>
+</div>
+  </div>
+
+  <h3>La pastille : auto, mais toujours éditable</h3>
+  
+  <div class="badgedemo">
+    <div class="state"><span class="badge">b</span><p><strong>Auto</strong> — rien de saisi : on hérite de la pastille précédente (a → b).</p></div>
+    <div class="state"><span class="badge ring">b</span><p><strong>Édition</strong> — on clique, on tape. Vider le champ rebascule en auto.</p></div>
+    <div class="state"><span class="badge">Ex 3</span><p><strong>Manuel</strong> — « Ex 3 » : la saisie gagne toujours sur l’auto.</p></div>
+  </div>
+
+  <h3>La règle d’héritage</h3>
+  <table class="rules">
+    <tr><th>Pastille précédente</th><th></th><th>Suivante</th><th>Pourquoi</th></tr>
+    <tr><td><span class="badge manual">1</span></td><td class="arrow">→</td><td><span class="badge">2</span></td><td>chiffre arabe : on incrémente</td></tr><tr><td><span class="badge manual">a</span></td><td class="arrow">→</td><td><span class="badge">b</span></td><td>lettre latine : la suivante, même casse</td></tr><tr><td><span class="badge manual">A</span></td><td class="arrow">→</td><td><span class="badge">B</span></td><td>majuscule → majuscule</td></tr><tr><td><span class="badge manual">z</span></td><td class="arrow">→</td><td><span class="badge">aa</span></td><td>fin d’alphabet : on allonge</td></tr><tr><td><span class="badge manual">IV</span></td><td class="arrow">→</td><td><span class="badge">—</span></td><td>nombre romain : ignoré, la pastille reste à saisir</td></tr>
+  </table>
+</div>
+</body>
+</html>

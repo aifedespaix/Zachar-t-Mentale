@@ -24,7 +24,7 @@
  */
 export type TableCell = string | { latex: string }
 
-export type CardBlock =
+type CardBlockShape =
   | { kind: 'text'; text: string }
   /**
    * Every math block is its own line by construction — the block list IS the
@@ -53,7 +53,28 @@ export type CardBlock =
    * on a build that does not know it: `sanitizeBlock` flattens the unknown
    * kind to a text block, so the question survives as words and only the
    * grouping is lost — never the sentence.
+   *
+   * `label` is the badge the question wears — « 1 », « b », « Ex 3 » — typed by
+   * the user when the automatic numbering would be wrong. ABSENT means "derive
+   * it from the question above" (see `questionLabels`), so a number nobody
+   * touched is never written to the file.
    */
-  | { kind: 'question'; text: string }
+  | { kind: 'question'; text: string; label?: string }
+
+/**
+ * A block, plus the one marker about the LIST rather than the content.
+ *
+ * `standalone` says « ce bloc n'appartient pas à la question au-dessus de lui ».
+ * It exists because a question owns every block that FOLLOWS it (flat model,
+ * `blockGroups`), so a block added from OUTSIDE the group would otherwise be
+ * swallowed by the last question — the exact opposite of the gesture. The
+ * editor's outside « Ajouter un bloc » button sets it, it travels with the
+ * block through reordering, and it is absent from every file written before it
+ * existed, which reads back as "owned" — i.e. exactly what those files drew.
+ *
+ * It sits on the intersection rather than inside each variant because it has
+ * nothing to do with any one kind: any block can be the one that closes a range.
+ */
+export type CardBlock = CardBlockShape & { standalone?: boolean }
 
 export type CardBlockKind = CardBlock['kind']

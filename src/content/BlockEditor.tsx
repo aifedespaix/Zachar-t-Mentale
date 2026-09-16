@@ -6,6 +6,7 @@ import {
   ChevronUp,
   Heading1,
   ImagePlus,
+  MessageCircleQuestion,
   Plus,
   Sigma,
   Table2,
@@ -13,7 +14,7 @@ import {
   Type,
 } from 'lucide-react'
 import type { CardBlock, CardBlockKind, TableCell } from '../types/cardBlock'
-import { blockGroups } from './blocks'
+import { blockGroups, questionLabels } from './blocks'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle, type MathfieldElement } from './MathFieldEditor'
 import { SymbolBand } from './SymbolBand'
@@ -49,6 +50,15 @@ export const KIND_LABEL: Record<CardBlockKind, string> = {
   image: 'Image',
   question: 'Question',
 }
+
+/**
+ * L'ordre dans lequel Tab fait le tour des types : texte → formule → tableau →
+ * question, et retour au texte.
+ *
+ * `image` n'y figure pas — un changement de type détruirait la référence au
+ * fichier (voir `convertBlock`), donc Tab ne l'atteint jamais.
+ */
+const KIND_CYCLE: CardBlockKind[] = ['text', 'math', 'table', 'question']
 
 /** The widths the image control offers, as a share of the definition's width. */
 const IMAGE_WIDTH_STEPS = [160, 240, 320, 480, 640] as const
@@ -98,20 +108,26 @@ export function convertBlock(block: CardBlock, kind: CardBlockKind): CardBlock {
   // if they want it gone.
   if (block.kind === 'image') return block
   const source = sourceOf(block)
+  // Le marqueur de LISTE suit le bloc : sans lui, un changement de type ferait
+  // retomber dans la question un bloc que le bouton extérieur venait d'en sortir.
+  const standalone = block.standalone === true ? { standalone: true } : {}
   switch (kind) {
     case 'text':
-      return { kind: 'text', text: source }
+      return { kind: 'text', text: source, ...standalone }
     case 'math':
-      return { kind: 'math', latex: source }
+      return { kind: 'math', latex: source, ...standalone }
     case 'question':
       // Marking a sentence as a header, and un-marking it, is the same
       // reversible gesture as text ↔ formula: the string crosses untouched.
-      return { kind: 'question', text: source }
+      // La pastille ne traverse pas : elle n'a de sens que sur une question, et
+      // en inventer une ici figerait une numérotation que personne n'a saisie.
+      return { kind: 'question', text: source, ...standalone }
     case 'table':
       return {
         kind: 'table',
         header: [],
         rows: source === '' ? [['', '']] : source.split('\n').map(line => line.split('\t')),
+        ...standalone,
       }
     case 'image':
       return block
@@ -137,7 +153,8 @@ export function convertBlock(block: CardBlock, kind: CardBlockKind): CardBlock {
 export function blockAsTable(block: Exclude<CardBlock, { kind: 'image' }>): TableBlock {
   if (block.kind === 'table') return block
   const cell: TableCell = block.kind === 'math' ? { latex: block.latex } : block.text
-  return { kind: 'table', header: [], rows: [[cell]] }
+  const standalone = block.standalone === true ? { standalone: true } : {}
+  return { kind: 'table', header: [], rows: [[cell]], ...standalone }
 }
 
 /**
@@ -557,6 +574,22 @@ export function BlockEditor({
     focusBlockLater(current.length)
   }
 
+  /**
+   * « Ajouter un bloc » DEPUIS L'EXTÉRIEUR du groupe : le bloc ne doit pas
+   * tomber dans la question du bas. Il porte le marqueur `standalone`, qui
+   * arrête la portée de cette question avant lui (voir `blockGroups`).
+   *
+   * Sans question au-dessus, le marqueur serait inerte : on ne l'écrit pas, et
+   * un fichier sans groupe reste byte-identique à ce qu'il était.
+   */
+  function appendOutside() {
+    const current = blocksRef.current
+    const groups = blockGroups(current)
+    const lastGroup = groups[groups.length - 1]
+    const block = emptyBlock(inheritableKind(current[current.length - 1]))
+    append(lastGroup !== undefined && lastGroup.headerIndex !== null ? { ...block, standalone: true } : block)
+  }
+
   /** Shared by paste, drop and the picker: one place decides what a failure looks like. */
   async function insert(produce: () => Promise<CardBlock | undefined>) {
     try {
@@ -733,6 +766,72 @@ export function BlockEditor({
     setActiveIndex(current => Math.max(0, current - (index <= current ? 1 : 0)))
   }
 
+  /**
+   * Retire un bloc VIDE dont le champ vient de recevoir Retour arrière, et rend
+   * le curseur à la fin du précédent — le geste de fusion qu'offre tout éditeur
+   * de texte. Le dernier bloc n'est jamais retiré, comme pour `removeAt`.
+   */
+  function deleteEmptyAt(index: number) {
+    if (blocks.length <= 1) return
+    const previous = blocks[index - 1]
+    onChange(blocks.filter((_, i) => i !== index))
+    setActiveIndex(Math.max(0, index - 1))
+    if (previous !== undefined && (previous.kind === 'text' || previous.kind === 'question')) {
+      pendingCaret.current = { index: index - 1, position: previous.text.length }
+    } else if (index > 0) {
+      // Une image ou un tableau n'a pas de « fin » où poser un caret : on se
+      // contente de ramener le focus sur son premier champ.
+      focusBlockLater(index - 1)
+    }
+  }
+
+  /**
+   * Applique un type à un bloc — le chemin UNIQUE du menu de type et de Tab.
+   *
+   * Extrait du menu pour que le clic et la touche ne puissent pas diverger : deux
+   * copies de cette règle auraient fini par ne plus traiter « Tableau » de la
+   * même façon, et c'est justement la conversion qui porte la sémantique du
+   * projet (un bloc EST déjà un tableau 1×1 qui grandit).
+   */
+  function applyKind(index: number, kind: CardBlockKind) {
+    const block = blocks[index]
+    if (block === undefined) return
+    if (kind === 'table') {
+      if (block.kind !== 'image') replace(index, addTableColumn(blockAsTable(block)))
+    } else {
+      replace(index, convertBlock(block, kind))
+    }
+    focusBlockAfterMenu(index)
+  }
+
+  /** Le type suivant (Tab) ou précédent (Maj+Tab) du bloc `index`. */
+  function cycleKind(index: number, direction: 1 | -1) {
+    const block = blocks[index]
+    if (block === undefined) return
+    const position = KIND_CYCLE.indexOf(block.kind)
+    if (position === -1) return
+    applyKind(index, KIND_CYCLE[(position + direction + KIND_CYCLE.length) % KIND_CYCLE.length])
+  }
+
+  /**
+   * Écrit (ou efface) la pastille saisie d'une question.
+   *
+   * Une pastille vidée DISPARAÎT du bloc au lieu de rester vide : le champ veut
+   * dire « saisi à la main », et le laisser à `''` figerait la numérotation sur
+   * un blanc sans qu'on puisse revenir à l'automatique.
+   */
+  function setQuestionLabel(index: number, label: string) {
+    const block = blocks[index]
+    if (block === undefined || block.kind !== 'question') return
+    const trimmed = label.trim()
+    replace(
+      index,
+      trimmed === ''
+        ? { kind: 'question', text: block.text }
+        : { kind: 'question', text: block.text, label: trimmed }
+    )
+  }
+
   /** Keeps the moved block selected, so a run of clicks walks it up the list. */
   function move(from: number, to: number) {
     const next = moveBlock(blocks, from, to)
@@ -809,6 +908,14 @@ ull quand l'utilisateur l'a refermé pour
   insertSymbolRef.current = insertSymbol
   const handleInsertSymbol = useCallback((symbol: PaletteSymbol) => insertSymbolRef.current(symbol), [])
 
+  // La pastille EFFECTIVE de chaque question, calculée une fois par rendu : la
+  // saisie n'entre pas dans le fichier, donc tout se rejoue à l'affichage.
+  const labels = questionLabels(blocks)
+  // Le RANG de chaque question (1, 2, 3…), pour nommer sa pastille et le bouton
+  // du groupe sans confondre « question n° 2 » avec « bloc n° 3 ».
+  let questionRank = 0
+  const questionNumbers = blocks.map(block => (block.kind === 'question' ? (questionRank += 1) : 0))
+
   return (
     // ONE provider for the whole editor. The app's tooltip defaults are used
     // unchanged, so a hint on a block's controls behaves like a hint anywhere
@@ -864,17 +971,20 @@ ull quand l'utilisateur l'a refermé pour
               display: 'flex',
               flexDirection: 'column',
               gap: 10,
+              // Sans ceci, la zone qui défile (un flex-column de hauteur bornée)
+              // comprime le groupe au lieu de la faire défiler : le groupe se
+              // rogne (`overflow: hidden`) et ses blocs sont coupés.
+              flexShrink: 0,
               ...(group.headerIndex === null ? {} : GROUP_STYLE),
             }}
           >
             {group.indexes.map(index => {
               const block = blocks[index]
               const isActive = index === activeIndex
-              // A `const`, not the condition inline: TypeScript drops narrowing
-              // inside a closure for a parameter it cannot prove is never
-              // reassigned, so `blockAsTable(growable)` below would not type-check
-              // on `block` itself.
-              const growable = block.kind === 'image' || block.kind === 'table' ? null : block
+              // La question d'un groupe se dessine en BANDEAU, pas en bloc : elle
+              // coiffe ceux du dessous, et c'est le groupe qui porte le cadre.
+              const isHeader = index === group.headerIndex
+              const isQuestionGroup = group.headerIndex !== null
               return (
                 <motion.div
                   // Une clé STABLE, pas l'index : c'est ce qui fait que React déplace
@@ -885,6 +995,7 @@ ull quand l'utilisateur l'a refermé pour
                   key={blockIds.current[index]}
                   data-row-index={index}
                   data-block-kind={block.kind}
+                  data-question-banner={isHeader ? '' : undefined}
                   // L'animation du déplacement : `layout="position"` anime les blocs
                   // qui CHANGENT DE PLACE — « lequel prend la place de l'autre » — et
                   // rien d'autre. `layout` seul animerait aussi les changements de
@@ -902,7 +1013,9 @@ ull quand l'utilisateur l'a refermé pour
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    borderRadius: 10,
+                    // Un bloc ne se comprime jamais non plus : sa hauteur est son
+                    // contenu, et c'est la zone qui défile qui l'absorbe.
+                    flexShrink: 0,
                     // `--ring`, not `--accent`: `--accent` is a SURFACE token
                     // (`oklch(0.97)` in the light theme, i.e. lighter than
                     // `--border` at `0.922`, on a `--popover` of `1`), so painting
@@ -910,14 +1023,38 @@ ull quand l'utilisateur l'a refermé pour
                     // something fainter than the border they replace — invisible in
                     // the light theme. `--ring` is the token the rest of the app
                     // already uses for exactly this, at `oklch(0.708)`.
-                    border: `1px solid ${isActive ? 'var(--ring, currentColor)' : 'var(--border)'}`,
-                    borderLeft: `3px solid ${isActive ? 'var(--ring, currentColor)' : 'var(--border)'}`,
-                    background: isActive ? 'color-mix(in oklch, var(--border), transparent 88%)' : 'transparent',
+                    ...(isHeader
+                      ? {
+                          // Le bandeau du groupe : la question n'est pas un bloc
+                          // encadré, elle coiffe ceux du dessous.
+                          borderRadius: 0,
+                          background: 'color-mix(in oklch, var(--info-border), transparent 84%)',
+                          borderBottom: '1px solid color-mix(in oklch, var(--info-border), transparent 50%)',
+                          boxShadow: isActive ? 'inset 3px 0 0 var(--ring, currentColor)' : undefined,
+                        }
+                      : {
+                          borderRadius: 10,
+                          border: `1px solid ${isActive ? 'var(--ring, currentColor)' : 'var(--border)'}`,
+                          borderLeft: `3px solid ${isActive ? 'var(--ring, currentColor)' : 'var(--border)'}`,
+                          background: isActive ? 'color-mix(in oklch, var(--border), transparent 88%)' : 'transparent',
+                          // Un bloc DANS un groupe laisse le fond bleu respirer
+                          // sur ses côtés : c'est le groupe qui fait la bordure.
+                          ...(isQuestionGroup ? { margin: '0 10px' } : {}),
+                        }),
     
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, padding: '8px 10px 8px 3px' }}>
-                    <BlockGutter index={index} count={blocks.length} onMove={move} />
+                  <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, padding: isHeader ? '10px 12px' : '8px 10px 8px 3px' }}>
+                    {isHeader ? (
+                      <QuestionBadge
+                        number={questionNumbers[index]}
+                        label={labels[index]}
+                        manual={block.kind === 'question' ? block.label ?? '' : ''}
+                        onCommit={label => setQuestionLabel(index, label)}
+                      />
+                    ) : (
+                      <BlockGutter index={index} count={blocks.length} onMove={move} />
+                    )}
     
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <BlockField
@@ -926,33 +1063,27 @@ ull quand l'utilisateur l'a refermé pour
                         resolveAsset={resolveAsset}
                         onChange={next => replace(index, next)}
                         onEnterBlock={() => insertBlockAfter(index, emptyBlock(inheritableKind(block)))}
+                        onSwitchKind={direction => cycleKind(index, direction)}
+                        onDeleteEmpty={() => deleteEmptyAt(index)}
                         onFieldChange={fieldSetterFor(index)}
                       />
                     </div>
     
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 0 auto' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: isHeader ? 'row' : 'column',
+                        alignItems: isHeader ? 'center' : undefined,
+                        gap: 4,
+                        flex: '0 0 auto',
+                      }}
+                    >
+                      {isHeader && <BlockGutter index={index} count={blocks.length} onMove={move} horizontal />}
                       <BlockKindMenu
                         index={index}
                         kind={block.kind}
                         disabled={block.kind === 'image'}
-                        onChange={kind => {
-                          // « Tableau » ne convertit pas au sens des deux autres : un
-                          // bloc EST déjà un tableau 1×1, donc devenir un tableau c'est
-                          // lui AJOUTER une colonne — le geste qui avait remplacé
-                          // « convertir en tableau ». Dans l'autre sens, « Texte »
-                          // ramène un tableau à son contenu.
-                          if (kind === 'table') {
-                            if (growable !== null) replace(index, addTableColumn(blockAsTable(growable)))
-                          } else {
-                            replace(index, convertBlock(block, kind))
-                          }
-                          // The switch replaces the field itself — a text
-                          // `<textarea>` and a formula editor are different
-                          // components — so without this the caret is left on the
-                          // menu button and the user has to click back into the very
-                          // block they just converted before they can type in it.
-                          focusBlockAfterMenu(index)
-                        }}
+                        onChange={kind => applyKind(index, kind)}
                       />
                       {/* « Supprimer » est descendu du gutter : il est maintenant sous
                           le menu de type, du même côté. Le gutter ne garde que le
@@ -972,6 +1103,39 @@ ull quand l'utilisateur l'a refermé pour
                 </motion.div>
               )
             })}
+
+            {group.headerIndex !== null && (
+              <div style={ADD_INSIDE_ROW_STYLE}>
+                <button
+                  type="button"
+                  aria-label={`Ajouter un bloc dans la question ${questionNumbers[group.headerIndex]}`}
+                  onClick={() =>
+                    insertBlockAfter(
+                      group.indexes[group.indexes.length - 1],
+                      emptyBlock(inheritableKind(blocks[group.indexes[group.indexes.length - 1]]))
+                    )
+                  }
+                  style={{ ...ADD_INSIDE_STYLE, flex: 1 }}
+                >
+                  <Plus size={13} />
+                  Ajouter un bloc dans la question
+                </button>
+                {/* Une question ouvre toujours son propre groupe : insérée après
+                    le DERNIER bloc de celui-ci, elle en prend la place SUIVANTE
+                    sans réassigner les blocs déjà écrits. */}
+                <button
+                  type="button"
+                  aria-label={`Nouvelle question après la question ${questionNumbers[group.headerIndex]}`}
+                  onClick={() =>
+                    insertBlockAfter(group.indexes[group.indexes.length - 1], { kind: 'question', text: '' })
+                  }
+                  style={{ ...ADD_INSIDE_STYLE, flex: 1 }}
+                >
+                  <MessageCircleQuestion size={13} />
+                  Nouvelle question
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -980,10 +1144,11 @@ ull quand l'utilisateur l'a refermé pour
         <button
           type="button"
           aria-label="Ajouter un bloc"
-          // The same inheritance as `Entrée`: "the block above" the button at the
-          // end of the list is the last block, so a run of formulas continues
-          // through the button as well as through the keyboard.
-          onClick={() => append(emptyBlock(inheritableKind(blocks[blocks.length - 1])))}
+          // The same inheritance as Ctrl+Entrée: "the block above" the button at
+          // the end of the list is the last block, so a run of formulas continues
+          // through the button as well as through the keyboard. Only the PLACE
+          // differs — this one lands OUTSIDE the last question (appendOutside).
+          onClick={appendOutside}
           style={ADD_BUTTON}
         >
           <Plus size={13} />
@@ -1024,10 +1189,47 @@ ull quand l'utilisateur l'a refermé pour
  * confondre les deux ferait passer tout un groupe pour sélectionné.
  */
 const GROUP_STYLE: CSSProperties = {
-  borderLeft: '3px solid color-mix(in oklch, var(--border), transparent 35%)',
-  paddingLeft: 8,
-  borderRadius: 10,
-  background: 'color-mix(in oklch, var(--border), transparent 82%)',
+  border: '1px solid color-mix(in oklch, var(--info-border), transparent 30%)',
+  borderLeft: '3px solid var(--info-border)',
+  borderRadius: 12,
+  // Rogne le bandeau d'en-tête aux coins du groupe. Sans lui, le fond du
+  // bandeau dépasserait des coins arrondis.
+  overflow: 'hidden',
+  background: 'color-mix(in oklch, var(--info-bg), transparent 40%)',
+}
+
+/**
+ * Le bouton d'ajout PROPRE au groupe, sous ses blocs.
+ *
+ * Il existe parce que le bouton général ajoute DÉSORMAIS en dehors de la
+ * question : sans celui-ci, il n'y aurait plus aucun geste pour écrire un bloc
+ * de plus sous une question une fois qu'elle a un premier bloc extérieur.
+ */
+const ADD_INSIDE_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  margin: 0,
+  padding: '7px 0',
+  fontSize: 12.5,
+  border: '1px dashed color-mix(in oklch, var(--info-border), transparent 35%)',
+  borderRadius: 8,
+  background: 'color-mix(in oklch, var(--info-border), transparent 93%)',
+  color: 'var(--info-fg)',
+  cursor: 'pointer',
+}
+
+/**
+ * La rangée de création du groupe : « ajouter un bloc ici » et « commencer la
+ * question suivante » sont deux gestes voisins, donc une seule rangée — deux
+ * barres empilées allongeraient encore le groupe.
+ */
+const ADD_INSIDE_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  flexShrink: 0,
+  gap: 8,
+  margin: '0 10px 10px',
 }
 
 const GHOST_BUTTON: CSSProperties = {
@@ -1072,25 +1274,119 @@ const ADD_BUTTON: CSSProperties = {
  * already is. The grip is a real handle: dragging it moves the block (the
  * arrows stay for the keyboard and for one-step nudges).
  */
+/**
+ * La pastille d'une question — « 1 », « b », « Ex 3 » — cliquable pour la saisir.
+ *
+ * Elle affiche la valeur EFFECTIVE (saisie, sinon déduite — voir
+ * `questionLabels`), et le remplissage dit laquelle des deux c'est : pleine
+ * quand elle est automatique, cerclée quand quelqu'un l'a tapée. Cliquer ouvre
+ * un champ ; le vider rend la main à l'automatique.
+ */
+function QuestionBadge({
+  number,
+  label,
+  manual,
+  onCommit,
+}: {
+  /** Le rang de la question — « 2 » pour la deuxième, quel que soit son bloc. */
+  number: number
+  label: string
+  /** La valeur saisie, vide quand la pastille est automatique. */
+  manual: string
+  onCommit: (label: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(manual)
+  const name = `Pastille de la question ${number}`
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        aria-label={name}
+        title="Changer la pastille"
+        onClick={() => {
+          setDraft(manual)
+          setEditing(true)
+        }}
+        style={{
+          flex: '0 0 auto',
+          minWidth: 24,
+          height: 24,
+          padding: '0 7px',
+          borderRadius: 999,
+          background: manual === '' ? 'var(--info-border)' : 'var(--background)',
+          color: manual === '' ? '#fff' : 'var(--info-fg)',
+          border: manual === '' ? '1px solid transparent' : '1px solid var(--info-border)',
+          fontSize: 12,
+          fontWeight: 700,
+          lineHeight: 1,
+          cursor: 'pointer',
+        }}
+      >
+        {label === '' ? '·' : label}
+      </button>
+    )
+  }
+
+  function commit() {
+    setEditing(false)
+    onCommit(draft)
+  }
+
+  return (
+    <input
+      aria-label={name}
+      // eslint-disable-next-line jsx-a11y/no-autofocus
+      autoFocus
+      value={draft}
+      onChange={event => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={event => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          commit()
+        }
+        if (event.key === 'Escape') setEditing(false)
+      }}
+      style={{
+        flex: '0 0 auto',
+        width: 46,
+        height: 24,
+        borderRadius: 999,
+        border: '1px solid var(--info-border)',
+        background: 'var(--background)',
+        color: 'var(--info-fg)',
+        textAlign: 'center',
+        fontSize: 12,
+        fontWeight: 700,
+      }}
+    />
+  )
+}
+
 function BlockGutter({
   index,
   count,
   onMove,
+  horizontal = false,
 }: {
   index: number
   count: number
   onMove: (from: number, to: number) => void
+  /** En bandeau, les deux flèches s'alignent à droite plutôt que de tenir une colonne. */
+  horizontal?: boolean
 }) {
   return (
     <div
       style={{
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: horizontal ? 'row' : 'column',
         alignItems: 'center',
         gap: 2,
-        width: 26,
+        width: horizontal ? undefined : 26,
         flex: '0 0 auto',
-        paddingTop: 1,
+        paddingTop: horizontal ? 0 : 1,
       }}
     >
       <GutterIcon
@@ -1272,13 +1568,26 @@ interface BlockFieldProps {
   index: number
   resolveAsset: (asset: string) => string
   onChange: (block: CardBlock) => void
-  /** Plain Enter anywhere in the block — inserts a new block right after this one. */
+  /** Ctrl+Entrée — insère un nouveau bloc juste après celui-ci. */
   onEnterBlock: () => void
+  /** Tab / Maj+Tab — passe au type suivant ou précédent. */
+  onSwitchKind: (direction: 1 | -1) => void
+  /** Retour arrière sur un bloc vide — le retire et rend le curseur au précédent. */
+  onDeleteEmpty: () => void
   /** Reports the block's live math handle, for the band's keys. Called with `null` when the block is not a formula (or unmounts as one). */
   onFieldChange: (handle: MathFieldHandle | null) => void
 }
 
-function BlockField({ block, index, resolveAsset, onChange, onEnterBlock, onFieldChange }: BlockFieldProps) {
+function BlockField({
+  block,
+  index,
+  resolveAsset,
+  onChange,
+  onEnterBlock,
+  onSwitchKind,
+  onDeleteEmpty,
+  onFieldChange,
+}: BlockFieldProps) {
   switch (block.kind) {
     case 'text':
       return (
@@ -1305,6 +1614,8 @@ function BlockField({ block, index, resolveAsset, onChange, onEnterBlock, onFiel
             onChange({ kind: 'text', text })
           }}
           onEnter={onEnterBlock}
+          onSwitchKind={onSwitchKind}
+          onDeleteEmpty={onDeleteEmpty}
         />
       )
 
@@ -1319,12 +1630,25 @@ function BlockField({ block, index, resolveAsset, onChange, onEnterBlock, onFiel
           value={block.text}
           onChange={text => onChange({ kind: 'question', text })}
           onEnter={onEnterBlock}
+          onSwitchKind={onSwitchKind}
+          onDeleteEmpty={onDeleteEmpty}
+          // Sans bordure ni fond : la question vit dans le bandeau du groupe,
+          // pas dans un cadre de bloc.
+          style={{ border: 'none', background: 'transparent', padding: '2px 0', minHeight: 24, fontSize: 15, fontWeight: 650, color: 'var(--info-fg)' }}
         />
       )
 
     case 'math':
       return (
-        <MathBlockField block={block} index={index} onChange={onChange} onEnterBlock={onEnterBlock} onFieldChange={onFieldChange} />
+        <MathBlockField
+          block={block}
+          index={index}
+          onChange={onChange}
+          onEnterBlock={onEnterBlock}
+          onSwitchKind={onSwitchKind}
+          onDeleteEmpty={onDeleteEmpty}
+          onFieldChange={onFieldChange}
+        />
       )
 
     case 'image':
@@ -1348,11 +1672,21 @@ function AutoGrowTextarea({
   value,
   onChange,
   onEnter,
+  onSwitchKind,
+  onDeleteEmpty,
+  style,
   ...rest
 }: {
   value: string
   onChange: (text: string) => void
+  /** Ctrl+Entrée : un nouveau bloc après celui-ci. */
   onEnter: () => void
+  /** Tab / Maj+Tab : le type suivant ou précédent. */
+  onSwitchKind: (direction: 1 | -1) => void
+  /** Retour arrière sur un champ vide : le bloc demande à disparaître. */
+  onDeleteEmpty: () => void
+  /** Ce qui distingue le champ d'une question de celui d'un texte. */
+  style?: CSSProperties
   'aria-label': string
   'data-block-index': number
 }) {
@@ -1379,11 +1713,29 @@ function AutoGrowTextarea({
       rows={1}
       onChange={event => onChange(event.target.value)}
       onKeyDown={event => {
-        if (event.key !== 'Enter' || event.shiftKey) return
-        event.preventDefault()
-        onEnter()
+        // Entrée écrit une ligne : c'est le défaut du champ, on n'y touche pas.
+        // Ctrl+Entrée est le geste « un bloc après celui-ci ».
+        if (event.key === 'Enter') {
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault()
+            onEnter()
+          }
+          return
+        }
+        if (event.key === 'Backspace' && value === '') {
+          event.preventDefault()
+          onDeleteEmpty()
+          return
+        }
+        // Tab appartient au TYPE du bloc — sauf quand une combinaison est tenue,
+        // où c'est un raccourci de l'application ou du système, pas le nôtre.
+        if (event.key === 'Tab') {
+          if (event.ctrlKey || event.metaKey || event.altKey) return
+          event.preventDefault()
+          onSwitchKind(event.shiftKey ? -1 : 1)
+        }
       }}
-      style={{ ...FIELD_STYLE, fontSize: 14.5, lineHeight: 1.5, minHeight: 60, resize: 'none', overflow: 'hidden' }}
+      style={{ ...FIELD_STYLE, fontSize: 14.5, lineHeight: 1.5, minHeight: 60, resize: 'none', overflow: 'hidden', ...style }}
     />
   )
 }
@@ -1393,12 +1745,16 @@ function MathBlockField({
   index,
   onChange,
   onEnterBlock,
+  onSwitchKind,
+  onDeleteEmpty,
   onFieldChange,
 }: {
   block: Extract<CardBlock, { kind: 'math' }>
   index: number
   onChange: (block: CardBlock) => void
   onEnterBlock: () => void
+  onSwitchKind: (direction: 1 | -1) => void
+  onDeleteEmpty: () => void
   onFieldChange: (handle: MathFieldHandle | null) => void
 }) {
   // WYSIWYG when MathLive is available, the raw LaTeX field until then — and
@@ -1420,6 +1776,8 @@ function MathBlockField({
       latex={block.latex}
       onChange={latex => onChange({ ...block, latex })}
       onEnter={onEnterBlock}
+      enter="modified"
+      onEmptyBackspace={onDeleteEmpty}
       ariaLabel={`Formule du bloc ${index + 1}`}
       fallback={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1431,9 +1789,25 @@ function MathBlockField({
             value={block.latex}
             onChange={event => onChange({ ...block, latex: event.target.value })}
             onKeyDown={event => {
-              if (event.key !== 'Enter' || event.shiftKey) return
-              event.preventDefault()
-              onEnterBlock()
+              // Le repli est un <textarea> : Entrée y écrit une ligne, et c'est
+              // Ctrl+Entrée qui demande le bloc suivant, comme dans un texte.
+              if (event.key === 'Enter') {
+                if (event.ctrlKey || event.metaKey) {
+                  event.preventDefault()
+                  onEnterBlock()
+                }
+                return
+              }
+              if (event.key === 'Backspace' && block.latex === '') {
+                event.preventDefault()
+                onDeleteEmpty()
+                return
+              }
+              if (event.key === 'Tab') {
+                if (event.ctrlKey || event.metaKey || event.altKey) return
+                event.preventDefault()
+                onSwitchKind(event.shiftKey ? -1 : 1)
+              }
             }}
             spellCheck={false}
             style={{ ...FIELD_STYLE, minHeight: 44, resize: 'vertical', fontFamily: 'monospace', fontSize: 13 }}

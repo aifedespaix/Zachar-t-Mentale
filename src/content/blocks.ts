@@ -178,8 +178,11 @@ export function blocksToPlainText(blocks: CardBlock[]): string {
  * it — so `definition` and `content` would silently drift apart.
  */
 function cloneBlock(block: CardBlock): CardBlock {
+  // Recopié à la main dans la branche `table`, qui reconstruit ses champs un
+  // par un ; l'autre branche l'emporte par le spread.
+  const standalone = block.standalone === true ? { standalone: true } : {}
   return block.kind === 'table'
-    ? { kind: 'table', header: [...block.header], rows: block.rows.map(row => row.map(cloneCell)) }
+    ? { kind: 'table', header: [...block.header], rows: block.rows.map(row => row.map(cloneCell)), ...standalone }
     : { ...block }
 }
 
@@ -201,14 +204,19 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
   const block = raw as Record<string, unknown>
 
+  // Le seul champ qui parle de la LISTE et non du contenu du bloc. Lu une fois
+  // ici pour que chaque genre accepté le rapporte ; absent veut dire « appartient
+  // à la question au-dessus », ce que disent tous les fichiers antérieurs.
+  const standalone = block.standalone === true ? { standalone: true } : {}
+
   switch (block.kind) {
     case 'text':
-      return typeof block.text === 'string' ? { kind: 'text', text: block.text } : null
+      return typeof block.text === 'string' ? { kind: 'text', text: block.text, ...standalone } : null
     case 'math':
       // `display` is read from nowhere any more (every math block is its own
       // line), but an older file may still carry it — dropped silently rather
       // than rejecting the block over a field that no longer means anything.
-      return typeof block.latex === 'string' ? { kind: 'math', latex: block.latex } : null
+      return typeof block.latex === 'string' ? { kind: 'math', latex: block.latex, ...standalone } : null
     case 'image':
       return typeof block.asset === 'string' &&
         typeof block.alt === 'string' &&
@@ -220,7 +228,7 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
         Number.isFinite(block.width) &&
         typeof block.height === 'number' &&
         Number.isFinite(block.height)
-        ? { kind: 'image', asset: block.asset, alt: block.alt, width: block.width, height: block.height }
+        ? { kind: 'image', asset: block.asset, alt: block.alt, width: block.width, height: block.height, ...standalone }
         : null
     case 'table': {
       if (!isStringArray(block.header) || !Array.isArray(block.rows)) return null
@@ -240,13 +248,21 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
         }
         rows.push(row)
       }
-      return { kind: 'table', header: [...block.header], rows }
+      return { kind: 'table', header: [...block.header], rows, ...standalone }
     }
-    case 'question':
+    case 'question': {
       // Every branch below rebuilds its block field by field, so this one has
       // to name `text` explicitly: leaving it to the `default` branch would
       // keep the words but lose the KIND, and the grouped style with it.
-      return typeof block.text === 'string' ? { kind: 'question', text: block.text } : null
+      //
+      // Une pastille blanche est JETÉE plutôt que stockée : le champ veut dire
+      // « saisi à la main », donc des espaces figeraient la numérotation sur une
+      // pastille vide sans qu'on puisse faire la différence.
+      const label = typeof block.label === 'string' && block.label.trim() !== '' ? { label: block.label } : {}
+      return typeof block.text === 'string'
+        ? { kind: 'question', text: block.text, ...label, ...standalone }
+        : null
+    }
     default: {
       // Unknown kind: keep whatever a human could still read out of it.
       const text = Object.entries(block)
@@ -254,7 +270,7 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
         .map(([, value]) => value as string)
         .join('\n')
         .trim()
-      return text === '' ? null : { kind: 'text', text }
+      return text === '' ? null : { kind: 'text', text, ...standalone }
     }
   }
 }
@@ -336,18 +352,92 @@ export interface BlockGroup {
 export function blockGroups(blocks: CardBlock[]): BlockGroup[] {
   const groups: BlockGroup[] = []
   for (let index = 0; index < blocks.length; index += 1) {
-    const isHeader = blocks[index].kind === 'question'
-    const current = groups[groups.length - 1]
+    const block = blocks[index]
     // A header ALWAYS opens a range, even directly after another header: the
     // second question answers nothing here, so absorbing it into the first
     // range would tint its title as though it belonged to its predecessor.
-    if (isHeader || current === undefined) {
-      groups.push({ headerIndex: isHeader ? index : null, indexes: [index] })
-    } else {
+    if (block.kind === 'question') {
+      groups.push({ headerIndex: index, indexes: [index] })
+      continue
+    }
+    const current = groups[groups.length - 1]
+    // Un bloc marqué `standalone` vient du bouton EXTÉRIEUR au groupe : il ferme
+    // la question au-dessus de lui au lieu de s'y faire absorber, et ouvre une
+    // portée sans en-tête — exactement ce que le geste promettait.
+    if (current !== undefined && current.headerIndex !== null && block.standalone !== true) {
       current.indexes.push(index)
+    } else if (current !== undefined && current.headerIndex === null) {
+      // Déjà dans une portée sans en-tête : elle se continue.
+      current.indexes.push(index)
+    } else {
+      groups.push({ headerIndex: null, indexes: [index] })
     }
   }
   return groups
+}
+
+/**
+ * La lettre suivante, sur la règle d'un tableur : `a` → `b`, `z` → `aa`.
+ * Reçoit toujours une minuscule ; la casse est reposée par l'appelant.
+ */
+function bumpLetter(letter: string): string {
+  if (letter < 'z') return String.fromCharCode(letter.charCodeAt(0) + 1)
+  return 'aa'
+}
+
+/**
+ * La pastille SUIVANTE, déduite de la précédente.
+ *
+ * Deux formes se continuent : un nombre arabe final (`1` → `2`, `Ex 3` →
+ * `Ex 4`) et une lettre latine finale (`a` → `b`, `A` → `B`, `z` → `aa`).
+ * Tout le reste rend une chaîne vide — un nombre romain de plusieurs lettres
+ * finit bien par une lettre, mais `IV` → `IW` serait une suite absurde, et la
+ * règle du projet est de ne rien inventer plutôt que d'inventer faux.
+ */
+export function nextQuestionLabel(previous: string): string {
+  const label = previous.trim()
+  if (label === '') return ''
+  if (label.length > 1 && /^[ivxlcdm]+$/i.test(label)) return ''
+  const digits = /[0-9]+$/.exec(label)
+  if (digits !== null) return label.slice(0, -digits[0].length) + String(Number(digits[0]) + 1)
+  const last = label[label.length - 1]
+  if (last >= 'a' && last <= 'z') return label.slice(0, -1) + bumpLetter(last)
+  if (last >= 'A' && last <= 'Z') return label.slice(0, -1) + bumpLetter(last.toLowerCase()).toUpperCase()
+  return ''
+}
+
+/**
+ * La pastille EFFECTIVE de chaque question, indexée comme la liste de blocs —
+ * chaîne vide pour tout ce qui n'est pas une question.
+ *
+ * Une pastille saisie à la main gagne toujours, et sert de base à la suivante.
+ * Sans saisie elle se déduit de la précédente, la toute première valant « 1 ».
+ * Rien de tout cela n'est écrit dans le fichier — seule la saisie l'est — donc
+ * corriger une pastille en amont renumérote la suite au rendu suivant.
+ */
+export function questionLabels(blocks: CardBlock[]): string[] {
+  const labels: string[] = []
+  let previous = ''
+  let seen = false
+  for (const block of blocks) {
+    if (block.kind !== 'question') {
+      labels.push('')
+      continue
+    }
+    const typed = (block.label ?? '').trim()
+    if (typed !== '') {
+      labels.push(typed)
+      previous = typed
+    } else {
+      const derived = seen ? nextQuestionLabel(previous) : '1'
+      labels.push(derived)
+      // Une déduction vide N'ÉCRASE pas la précédente : sans quoi la question
+      // d'après repartirait de « 1 » alors qu'elle suit toujours la même.
+      if (derived !== '') previous = derived
+    }
+    seen = true
+  }
+  return labels
 }
 
 /** Every readable block of a raw `content` array. Exported for the repair path. */

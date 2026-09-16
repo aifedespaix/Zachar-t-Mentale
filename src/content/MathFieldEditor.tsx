@@ -31,6 +31,17 @@ export interface MathFieldEditorProps {
    * a character this field needs to insert.
    */
   onEnter?: () => void
+  /**
+   * Which Entrée this field answers.
+   *
+   * `plain` (défaut) est le sens d'origine — celui d'une cellule de tableau, où
+   * Entrée ajoute une ligne. `modified` est celui d'un BLOC : Entrée seule écrit
+   * dans la formule, et Ctrl+Entrée demande le bloc suivant, comme dans les
+   * champs de texte.
+   */
+  enter?: 'plain' | 'modified'
+  /** Retour arrière sur un champ vide : le bloc demande à être supprimé. */
+  onEmptyBackspace?: () => void
   ref?: React.Ref<MathFieldHandle>
 }
 
@@ -107,7 +118,16 @@ function loadMathLive(): Promise<boolean> {
  * real editor as soon as the import settles, EXCEPT while the caret is inside
  * it — see `upgradeWhenIdle` in the component.
  */
-export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter, ref }: MathFieldEditorProps) {
+export function MathFieldEditor({
+  latex,
+  onChange,
+  ariaLabel,
+  fallback,
+  onEnter,
+  enter = 'plain',
+  onEmptyBackspace,
+  ref,
+}: MathFieldEditorProps) {
   // Which editor this block shows. It starts on the caller's field whenever
   // MathLive is not already in memory, so the user can type IMMEDIATELY, and it
   // is upgraded to the real editor once the import settles.
@@ -132,6 +152,10 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter,
   onChangeRef.current = onChange
   const onEnterRef = useRef(onEnter)
   onEnterRef.current = onEnter
+  const enterRef = useRef(enter)
+  enterRef.current = enter
+  const onEmptyBackspaceRef = useRef(onEmptyBackspace)
+  onEmptyBackspaceRef.current = onEmptyBackspace
   // Same reason as `onChangeRef`: the handle below is built once, so it must
   // not close over the formula as it was at mount.
   const latexRef = useRef(latex)
@@ -215,7 +239,15 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter,
     field.value = latex
     field.addEventListener('input', () => onChangeRef.current(field.value))
     field.addEventListener('keydown', event => {
+      if (event.key === 'Backspace' && field.value === '' && onEmptyBackspaceRef.current !== undefined) {
+        event.preventDefault()
+        onEmptyBackspaceRef.current()
+        return
+      }
       if (event.key !== 'Enter' || event.shiftKey) return
+      // Sur un bloc, Entrée seule écrit : c'est Ctrl+Entrée qui demande le bloc
+      // suivant. Sur une cellule (défaut), Entrée garde son sens d'origine.
+      if (enterRef.current === 'modified' && !(event.ctrlKey || event.metaKey)) return
       event.preventDefault()
       onEnterRef.current?.()
     })

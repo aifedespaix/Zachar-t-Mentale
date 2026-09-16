@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="fr" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maquettes — le groupe « question »</title>
+<style>
+  * { box-sizing: border-box; }
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --border: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --info-bg: oklch(0.94 0.03 240);
+    --info-border: oklch(0.7 0.1 240);
+    --info-fg: oklch(0.35 0.08 240);
+    --page: oklch(0.965 0.004 250);
+    color-scheme: light;
+  }
+  [data-theme='dark'] {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --border: oklch(1 0 0 / 12%);
+    --ring: oklch(0.556 0 0);
+    --info-bg: oklch(0.28 0.05 240);
+    --info-border: oklch(0.5 0.12 240);
+    --info-fg: oklch(0.88 0.06 240);
+    --page: oklch(0.11 0 0);
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    font-family: 'Geist Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    color: var(--foreground);
+    background: var(--page);
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 30px 20px 70px; }
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted-foreground); margin: 0 0 24px; font-size: 13.5px; max-width: 70ch; }
+
+  .panel { border: 1px solid var(--border); border-radius: 14px; background: var(--background); padding: 14px 16px; margin-bottom: 22px; }
+  .panel h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); font-weight: 600; }
+  .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+  .key { border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; }
+  .key kbd { display: inline-block; font: 600 11.5px/1 ui-monospace, 'Cascadia Code', monospace; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 3px 6px; background: var(--muted); }
+  .key p { margin: 7px 0 0; font-size: 12.5px; color: var(--muted-foreground); line-height: 1.45; }
+  .hint { margin: 12px 0 0; font-size: 12.5px; color: var(--muted-foreground); }
+
+  .option { border: 1px solid var(--border); border-radius: 14px; margin-top: 20px; background: var(--background); overflow: hidden; }
+  .option > header { padding: 13px 16px; border-bottom: 1px solid var(--border); }
+  .option h2 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 9px; }
+  .option h2 .num { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; background: var(--muted); font-size: 12px; }
+  .option .desc { margin: 6px 0 0; color: var(--muted-foreground); font-size: 12.5px; line-height: 1.5; max-width: 88ch; }
+  .panes { display: grid; grid-template-columns: 1fr 1fr; }
+  .pane { padding: 18px; background: var(--background); color: var(--foreground); }
+  .pane + .pane { border-left: 1px solid var(--border); }
+  .pane .tag { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted-foreground); margin-bottom: 12px; }
+
+  /* ---- Groupe question, commun à toutes les pistes ---- */
+  .g {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-radius: 12px;
+    padding: 12px;
+    border: 1px solid color-mix(in oklch, var(--info-border), transparent 30%);
+    background: color-mix(in oklch, var(--info-bg), transparent 40%);
+  }
+  .qrow { display: flex; align-items: center; gap: 8px; }
+  .qico { display: grid; place-items: center; flex: 0 0 auto; color: var(--info-border); }
+  .qtext { font-weight: 650; color: var(--info-fg); font-size: 15px; line-height: 1.35; }
+  .qchip {
+    margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 4px;
+    font-size: 11px; color: var(--muted-foreground);
+    border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; opacity: 0.8; white-space: nowrap;
+  }
+
+  .block {
+    display: flex; align-items: stretch; gap: 8px;
+    border: 1px solid var(--border); border-left: 3px solid var(--border);
+    border-radius: 10px; padding: 8px 10px 8px 3px;
+  }
+  .gutter { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 26px; flex: 0 0 auto; padding-top: 1px; }
+  .gutter span { width: 22px; height: 22px; display: grid; place-items: center; font-size: 9px; opacity: 0.45; }
+  .bcontent { flex: 1; min-width: 0; font-size: 14.5px; line-height: 1.5; }
+  .btools { flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px; }
+  .blkchip { font-size: 11.5px; border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; opacity: 0.85; white-space: nowrap; }
+  .math { font-size: 15px; }
+  .frac { display: inline-grid; vertical-align: middle; text-align: center; margin: 0 0.2em; }
+  .frac .num { border-bottom: 1px solid currentColor; padding: 0 0.3em; }
+  .frac .den { padding: 0 0.3em; }
+
+  .add { font: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 8px; width: 100%; }
+  .add.in {
+    padding: 7px 0; font-size: 12.5px;
+    border: 1px dashed color-mix(in oklch, var(--info-border), transparent 35%);
+    background: color-mix(in oklch, var(--info-border), transparent 93%);
+    color: var(--info-fg);
+  }
+  .add.out { padding: 8px 0; font-size: 12.5px; border: 1px dashed var(--border); background: none; color: inherit; opacity: 0.65; margin-top: 12px; }
+
+  /* ---- Piste 2 : barre d’accent ---- */
+  .g.e2 { border-left: 3px solid var(--info-border); }
+  .g.e2 .qtext { text-transform: uppercase; letter-spacing: 0.065em; font-size: 11.5px; font-weight: 700; }
+  .g.e2 .qico { color: var(--info-border); }
+
+  /* ---- Piste 3 : filet sous la question ---- */
+  .g.e3 .qrow { border-bottom: 1px solid color-mix(in oklch, var(--info-border), transparent 55%); padding-bottom: 9px; }
+
+  /* ---- Piste 4 : bandeau plein ---- */
+  .g.e4 { padding: 0; overflow: hidden; gap: 0; background: color-mix(in oklch, var(--info-bg), transparent 25%); }
+  .qhead {
+    display: flex; align-items: center; gap: 8px; padding: 11px 12px;
+    background: color-mix(in oklch, var(--info-border), transparent 84%);
+    border-bottom: 1px solid color-mix(in oklch, var(--info-border), transparent 50%);
+  }
+  .qhead .qtext { font-size: 14.5px; }
+  .g.e4 .gbody { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* ---- Piste 5 : pastille numérotée ---- */
+  .qbadge {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 999px;
+    background: var(--info-border); color: #fff;
+    display: grid; place-items: center; font-size: 11.5px; font-weight: 700;
+  }
+  .g.e5 .qtext { font-weight: 650; }
+
+  @media (max-width: 900px) { .panes { grid-template-columns: 1fr; } .pane + .pane { border-left: none; border-top: 1px solid var(--border); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Le groupe « question » — 5 pistes</h1>
+  <p class="sub">Maquettes statiques, rendues avec les jetons réels de l’application (<code>src/index.css</code>), y compris le bleu existant <code>--info-border</code> / <code>--info-bg</code>. Chaque piste est montrée en thème clair et sombre. Le bloc question y perd son cadre : il devient un en-tête. Le groupe entier, lui, gagne le contour bleu et le fond bleu transparent.</p>
+
+  <div class="panel">
+    <h3>Raccourcis proposés (à confirmer)</h3>
+    <div class="keys">
+      <div class="key"><kbd>Entrée</kbd><p>Ajoute une ligne <em>dans</em> le bloc. Vaut aussi en mode formule et en cellule de tableau si MathLive le permet.</p></div>
+      <div class="key"><kbd>Ctrl</kbd>+<kbd>Entrée</kbd><p>Ajoute un nouveau bloc après celui-ci et place le curseur dedans.</p></div>
+      <div class="key"><kbd>Tab</kbd> / <kbd>Maj</kbd>+<kbd>Tab</kbd><p>Change le type du bloc : texte → formule → tableau → question, et retour. Hors cellule de tableau (où Tab continue de circuler entre cellules).</p></div>
+      <div class="key"><kbd>Retour arrière</kbd><p>Sur un bloc vide, efface le bloc et replace le curseur à la fin du précédent.</p></div>
+    </div>
+    <p class="hint">Deux boutons d’ajout : <strong>dans la question</strong> (en bas du groupe, bleu) et <strong>hors question</strong> (le bouton général, en dessous du cadre).</p>
+  </div>
+
+  
+  <section class="option">
+    <header>
+      <h2><span class="num">1</span> Contour simple</h2>
+      <p class="desc">Un filet bleu fin autour du groupe, la question en gras bleu foncé, aucun ornement. La lecture la plus neutre.</p>
+    </header>
+    <div class="panes">
+      <div class="pane" data-theme="light"><div class="tag">Clair</div><div class="g e1"><div class="qrow"><span class="qico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 12l2-1v7"/></svg></span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+      <div class="pane" data-theme="dark"><div class="tag">Sombre</div><div class="g e1"><div class="qrow"><span class="qico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 12l2-1v7"/></svg></span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+    </div>
+  </section>
+
+  <section class="option">
+    <header>
+      <h2><span class="num">2</span> Barre d’accent</h2>
+      <p class="desc">Même filet, plus une barre bleue épaisse à gauche. La question passe en petites capitales espacées : elle agit comme un titre, pas comme une phrase de contenu.</p>
+    </header>
+    <div class="panes">
+      <div class="pane" data-theme="light"><div class="tag">Clair</div><div class="g e2"><div class="qrow"><span class="qico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 12l2-1v7"/></svg></span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+      <div class="pane" data-theme="dark"><div class="tag">Sombre</div><div class="g e2"><div class="qrow"><span class="qico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 12l2-1v7"/></svg></span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+    </div>
+  </section>
+
+  <section class="option">
+    <header>
+      <h2><span class="num">3</span> Filet de séparation</h2>
+      <p class="desc">Le group cadre, et un filet sous la question la sépare visiblement des blocs qu’elle coiffe — le geste « en-tête de plusieurs blocs » au plus près.</p>
+    </header>
+    <div class="panes">
+      <div class="pane" data-theme="light"><div class="tag">Clair</div><div class="g e3"><div class="qrow"><span class="qico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 12l2-1v7"/></svg></span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+      <div class="pane" data-theme="dark"><div class="tag">Sombre</div><div class="g e3"><div class="qrow"><span class="qico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 12l2-1v7"/></svg></span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+    </div>
+  </section>
+
+  <section class="option">
+    <header>
+      <h2><span class="num">4</span> Bandeau teinté</h2>
+      <p class="desc">La question occupe un bandeau bleu plein, coins supérieurs arrondis, et les blocs vivent dessous dans le fond bleu transparent. La hiérarchie est la plus forte.</p>
+    </header>
+    <div class="panes">
+      <div class="pane" data-theme="light"><div class="tag">Clair</div><div class="g e4"><div class="qhead"><span class="qico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 12l2-1v7"/></svg></span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="gbody"><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+      <div class="pane" data-theme="dark"><div class="tag">Sombre</div><div class="g e4"><div class="qhead"><span class="qico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 12l2-1v7"/></svg></span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="gbody"><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+    </div>
+  </section>
+
+  <section class="option">
+    <header>
+      <h2><span class="num">5</span> Pastille numérotée</h2>
+      <p class="desc">Un rang numéroté devant la question, sur le fond bleu transparent. Utile quand une fiche enchaîne plusieurs questions et qu’on veut les compter.</p>
+    </header>
+    <div class="panes">
+      <div class="pane" data-theme="light"><div class="tag">Clair</div><div class="g e5"><div class="qrow"><span class="qbadge">1</span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+      <div class="pane" data-theme="dark"><div class="tag">Sombre</div><div class="g e5"><div class="qrow"><span class="qbadge">1</span><div class="qtext">Comment déterminer le coefficient directeur d’une droite ?</div><span class="qchip">Question</span></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent">On lit deux points A et B sur la droite, puis on calcule le rapport des variations.</div><div class="btools"><span class="blkchip">Texte</span></div></div><div class="block"><div class="gutter"><span>▲</span><span>▼</span></div><div class="bcontent math">a = <span class="frac"><span class="num">y<sub>B</sub> − y<sub>A</sub></span><span class="den">x<sub>B</sub> − x<sub>A</sub></span></span></div><div class="btools"><span class="blkchip">Formule</span></div></div><button class="add in" type="button">＋ Ajouter un bloc dans la question</button></div><button class="add out" type="button">＋ Ajouter un bloc</button></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

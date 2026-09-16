@@ -432,7 +432,7 @@ describe('the kind a new block starts as', () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([{ kind: 'math', latex: 'x^2' }])
 
-    await user.type(screen.getByRole('textbox', { name: /formule du bloc 1 \(latex\)/i }), '{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /formule du bloc 1 \(latex\)/i }), '{Control>}{Enter}{/Control}')
 
     expect(latest()).toEqual([
       { kind: 'math', latex: 'x^2' },
@@ -444,7 +444,7 @@ describe('the kind a new block starts as', () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([{ kind: 'text', text: 'une règle' }])
 
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), '{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), '{Control>}{Enter}{/Control}')
 
     expect(latest()).toEqual([
       { kind: 'text', text: 'une règle' },
@@ -656,7 +656,7 @@ describe('le bandeau de symboles', () => {
       { kind: 'text', text: 'deux' },
     ])
 
-    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), '{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), '{Control>}{Enter}{/Control}')
 
     expect(screen.getByRole('textbox', { name: /texte du bloc 2/i })).toHaveFocus()
   })
