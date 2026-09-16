@@ -1,7 +1,7 @@
 // src/components/sidebar/FileTreeRow.tsx
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { Folder, FolderOpen, FolderInput, FolderSearch, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, ClipboardCopy, CloudUpload, CloudOff, Check, Tag } from 'lucide-react'
+import { Folder, FolderOpen, FolderInput, FolderSearch, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, ClipboardCopy, CloudUpload, CloudOff, Check, Tag, Info } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
 import type { Card } from '../../types/card'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
@@ -40,6 +40,7 @@ import { canClassify, canEditContent } from '../../sync/permissions'
 import { MAP_TYPES, MAP_TYPE_LABELS, type MapType } from '../../types/mapType'
 import { MapTypeBadge } from './MapTypeBadge'
 import { CopyLinkBadge } from './CopyLinkBadge'
+import { PropertiesDialog } from './PropertiesDialog'
 
 /**
  * The class list shared by every row: the base, then whichever state modifiers
@@ -197,6 +198,8 @@ export function FileTreeRow({
   const { planDelete, applyDelete } = useDeleteMindMap()
   const [exportCards, setExportCards] = useState<Card[] | null>(null)
   const [namingAction, setNamingAction] = useState<NamingAction | null>(null)
+  /** The « Propriétés » sheet — one per row, opened from either context menu. */
+  const [propertiesOpen, setPropertiesOpen] = useState(false)
   // Set right before the deferred `setRenaming(true)` below, and consumed by
   // this row's `onCloseAutoFocus` handlers so the close-focus-restore
   // suppression they need for the rename race doesn't also apply to every
@@ -482,6 +485,11 @@ export function FileTreeRow({
    * the text keeps the row's indentation instead of jumping left when the field
    * appears, and the file still shows which icon it is.
    */
+  /** Shared by the folder row and the mind map row: it describes `node`, whichever kind it is. */
+  const propertiesDialog = propertiesOpen && (
+    <PropertiesDialog node={node} isRoot={isRoot} onClose={() => setPropertiesOpen(false)} />
+  )
+
   const renameField = (
     <input
       autoFocus
@@ -600,6 +608,9 @@ export function FileTreeRow({
             <ContextMenuItem onSelect={copyPath}>
               <ClipboardCopy size={14} /> Copier le chemin
             </ContextMenuItem>
+            <ContextMenuItem onSelect={() => setPropertiesOpen(true)}>
+              <Info size={14} /> Propriétés
+            </ContextMenuItem>
             {!isRoot && (
               <>
                 <ContextMenuSeparator />
@@ -649,6 +660,8 @@ export function FileTreeRow({
         {/* The creation trio owns its own dialog: it is shared with the file
             sidebar's empty-area menu, so it cannot reuse `namingAction`. */}
         {folderCreationDialog}
+
+        {propertiesDialog}
 
         {isExpanded &&
           node.children
@@ -775,6 +788,9 @@ export function FileTreeRow({
             <ContextMenuItem onSelect={copyPath}>
               <ClipboardCopy size={14} /> Copier le chemin
             </ContextMenuItem>
+            <ContextMenuItem onSelect={() => setPropertiesOpen(true)}>
+              <Info size={14} /> Propriétés
+            </ContextMenuItem>
             <ContextMenuItem onSelect={openExport}>
               <Download size={14} /> Exporter
             </ContextMenuItem>
@@ -849,6 +865,8 @@ export function FileTreeRow({
             inputLabel={namingAction.inputLabel}
           />
         )}
+
+        {propertiesDialog}
 
         {exportCards && (
           <ExportDialog

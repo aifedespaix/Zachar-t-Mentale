@@ -175,15 +175,17 @@ export function createWorkspaceStore(): WorkspaceStore {
           failed.push(path)
           return { path, tree: [] }
         })
-        // `state.currentFilePath` may already be set by the time this scan
-        // resolves — the user opened a file while init was still in flight.
-        // That choice wins; the session is only a fallback for a truly fresh
-        // start, never something that overrides what's already on screen.
+        // The session's open file is deliberately NOT restored: launching the
+        // app lands on the home screen, with no map open. Everything else the
+        // session carried — the expanded folders, the recent-files list — does
+        // come back, so the last map is one click away without the app ever
+        // reopening a file on its own. `state.currentFilePath` is only what the
+        // user opened while this scan was still in flight, and it still wins.
         const session = loadSessionState()
         set(state => ({
           rootFolders,
           workspaceError: failed.length > 0 ? scanFailureMessage(failed) : null,
-          currentFilePath: state.currentFilePath ?? session.currentFilePath,
+          currentFilePath: state.currentFilePath,
           expandedPaths: new Set([...state.expandedPaths, ...session.expandedPaths]),
           recentFiles: mergeRecentFiles(state.recentFiles, session.recentFiles),
         }))

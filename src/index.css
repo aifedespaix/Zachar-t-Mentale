@@ -1086,6 +1086,20 @@
 }
 
 /*
+ * Le filtre de type, posé à côté de la recherche. Même champ, mais une largeur
+ * qui suit son libellé au lieu de prendre 100 % : il partage la ligne avec la
+ * recherche, qui garde tout le reste.
+ */
+.sidebar-type-filter {
+  width: auto;
+  flex-shrink: 0;
+  min-width: 76px;
+  max-width: 118px;
+  cursor: pointer;
+  padding-right: 4px;
+}
+
+/*
  * The padlock in the toolbar, in the SAME orange as the locked rows of the tree:
  * one state, one colour, so nobody has to learn two conventions. Scoped to the
  * outline variant — and written after the Tailwind imports — so it wins against

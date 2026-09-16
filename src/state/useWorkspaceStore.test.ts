@@ -271,20 +271,25 @@ describe('useWorkspaceStore', () => {
     expect(store.getState().currentFilePath).toBeNull()
   })
 
-  it('init restores the open file and expanded folders from the saved session', async () => {
+  it('init restores expanded folders and recent files, but never reopens a map', async () => {
     vi.mocked(loadWorkspaceConfig).mockResolvedValue({ rootFolders: ['/cours'] })
     vi.mocked(scanFolder).mockResolvedValue([])
     vi.mocked(loadSessionState).mockReturnValue({
       currentFilePath: '/cours/fractions.json',
       expandedPaths: ['/cours'],
-      recentFiles: [],
+      recentFiles: [{ path: '/cours/fractions.json', openedAt: '2026-01-01T00:00:00.000Z' }],
     })
     const store = createWorkspaceStore()
 
     await store.getState().init()
 
-    expect(store.getState().currentFilePath).toBe('/cours/fractions.json')
+    // Landing on the home screen with nothing open is the point: the last file
+    // is offered in the recent list, not opened for the user.
+    expect(store.getState().currentFilePath).toBeNull()
     expect(store.getState().expandedPaths.has('/cours')).toBe(true)
+    expect(store.getState().recentFiles).toEqual([
+      { path: '/cours/fractions.json', openedAt: '2026-01-01T00:00:00.000Z' },
+    ])
   })
 
   it('setCurrentFile persists the session', () => {

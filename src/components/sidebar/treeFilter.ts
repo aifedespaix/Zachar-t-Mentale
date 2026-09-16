@@ -70,35 +70,62 @@ export interface TreeFilterResult {
  *   means wanting to see what is inside it — while a folder that merely
  *   CONTAINS a match is kept as an ancestor, with only the matching branches.
  *
+ * `fileMatches` adds a second, independent constraint on every FILE — the
+ * sidebar's type filter. It combines with the name query (a file has to satisfy
+ * both) and applies even inside a folder that matched by name, because a type
+ * filter is a promise about what is listed, not a hint. Folders are then kept
+ * only when they lead to a file that passes it.
+ *
  * The `expanded` set is returned rather than applied: the search is a view, and
  * clearing the field has to restore exactly the tree the user had before, which
  * only holds if the persisted `expandedPaths` was never touched.
  */
-export function filterTree(nodes: FileTreeNode[], query: string, showUnreadable: boolean): TreeFilterResult {
+export function filterTree(
+  nodes: FileTreeNode[],
+  query: string,
+  showUnreadable: boolean,
+  fileMatches?: (node: FileTreeNode) => boolean
+): TreeFilterResult {
   const needle = normalizeForComparison(query)
   const expanded = new Set<string>()
   let count = 0
-  if (needle === '') return { nodes, expanded, count }
+  const hasQuery = needle !== ''
+  const keepFile = fileMatches ?? (() => true)
+  // With no predicate an empty query means « nothing to do »: the caller wants
+  // the very same tree back, not a deep copy walked for nothing.
+  if (!hasQuery && fileMatches === undefined) return { nodes, expanded, count }
 
-  /** The whole subtree, minus what the eye button hides. */
+  /** The whole subtree, minus what the eye button hides and minus files the predicate rejects. */
   const visibleChildren = (children: FileTreeNode[]): FileTreeNode[] =>
     children
       .filter(child => isRowVisible(child, showUnreadable))
       .map(child => (child.type === 'folder' ? { ...child, children: visibleChildren(child.children) } : child))
+      // Without a predicate a folder is kept even when empty (the original
+      // « search a folder by name » shape); with one, an emptied folder leads to
+      // no listed file and would only be noise.
+      .filter(child =>
+        child.type === 'folder' ? fileMatches === undefined || child.children.length > 0 : keepFile(child)
+      )
 
   const walk = (node: FileTreeNode): FileTreeNode | null => {
     if (!isRowVisible(node, showUnreadable)) return null
 
     if (node.type !== 'folder') {
-      if (!normalizeForComparison(node.name).includes(needle)) return null
+      if (!keepFile(node)) return null
+      if (hasQuery && !normalizeForComparison(node.name).includes(needle)) return null
       count += 1
       return node
     }
 
-    if (normalizeForComparison(node.name).includes(needle)) {
+    if (hasQuery && normalizeForComparison(node.name).includes(needle)) {
+      const children = visibleChildren(node.children)
+      // A folder that matched by NAME but leads to no file the predicate accepts
+      // is not a result: a type filter promises what is LISTED, so an emptied
+      // folder would be a heading over nothing.
+      if (fileMatches !== undefined && children.length === 0) return null
       count += 1
       expanded.add(node.path)
-      return { ...node, children: visibleChildren(node.children) }
+      return { ...node, children }
     }
 
     const children = node.children.map(walk).filter((child): child is FileTreeNode => child !== null)

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -22,6 +23,7 @@ import { formatRelativeTime } from '../../utils/relativeTime'
 import { FileTreeRow } from './FileTreeRow'
 import { TreeDragGhost } from './TreeDragGhost'
 import { filterTree } from './treeFilter'
+import { useMindMapTypeIndex } from '../../hooks/useMindMapTypeIndex'
 import { prefersReducedMotion } from '../../utils/prefersReducedMotion'
 import {
   clampSidebarWidth,
@@ -38,6 +40,7 @@ import { NameDialog } from './NameDialog'
 import { useFolderCreation } from './useFolderCreation'
 import { useCommand } from '../../hooks/useCommand'
 import type { FileTreeNode } from '../../types/workspace'
+import { MAP_TYPES, MAP_TYPE_LABELS, type MapType } from '../../types/mapType'
 
 /** How far one arrow-key press moves the border, for a keyboard resize. */
 const KEYBOARD_RESIZE_STEP = 16
@@ -122,11 +125,27 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   /** What the search field holds. A view over the tree — never persisted. */
   const [search, setSearch] = useState('')
   /**
+   * Le type retenu dans le filtre. `'all'` = pas de filtre. Comme la recherche,
+   * c'est une VUE sur l'arbre : rien n'est écrit, ni dans le fichier ni dans
+   * `expandedPaths`.
+   */
+  const [typeFilter, setTypeFilter] = useState<MapType | 'all'>('all')
+  /**
    * Bumped by « Mod + F ». A counter rather than a boolean, so pressing the
    * shortcut twice re-focuses and re-selects the field instead of being a no-op
    * the second time.
    */
   const [searchFocusRequest, setSearchFocusRequest] = useState(0)
+  /**
+   * Bumped when a publish or a pull rewrote a `.zmap`'s header: the type index
+   * has to re-read then, or the filter would keep classing a map under the type
+   * it no longer has.
+   */
+  const fileMetaRevision = useWorkspaceStore(s => s.fileMetaRevision)
+  // One flat list of every row in the workspace, stable across renders unless the
+  // tree itself changed — the index keys its reads off it.
+  const mindMapNodes = useMemo(() => rootFolders.flatMap(folder => folder.tree), [rootFolders])
+  const typeIndex = useMindMapTypeIndex(mindMapNodes, typeFilter !== 'all', fileMetaRevision)
   /** The folder « Nouveau dossier » is about to create in — `null` when the dialog is closed. */
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null)
   // Same reason as the width below: read synchronously so the tree doesn't
@@ -433,9 +452,25 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
    * Each root goes through `filterTree` WHOLE rather than only its children, so
    * a root that matches by NAME keeps its whole subtree like any other folder —
    * and a root with no match disappears instead of sitting there empty.
+   *
+   * Le filtre de type est la seconde contrainte, indépendante du nom : une carte
+   * doit satisfaire les deux, et les dossiers ne restent que pour y mener.
    */
   const query = search.trim()
   const searching = query !== ''
+  const filteringByType = typeFilter !== 'all'
+  /**
+   * Le prédicat n'est appliqué que lorsque l'index est prêt : tant que les
+   * en-têtes se lisent, l'arbre reste filtré par la seule recherche au lieu de se
+   * vider le temps d'un rendu — puis le type s'applique d'un coup, quand il sait
+   * de quoi il parle.
+   */
+  const fileMatches =
+    filteringByType && typeIndex.ready
+      ? (node: FileTreeNode) => node.type === 'mindmap' && (typeIndex.types.get(node.path) ?? 'default') === typeFilter
+      : undefined
+  const filtering = searching || fileMatches !== undefined
+  const typeFilterLabel = typeFilter === 'all' ? 'Tous types' : MAP_TYPE_LABELS[typeFilter]
   const visibleRoots = rootFolders.map(root => {
     const rootNode: FileTreeNode = {
       type: 'folder',
@@ -443,8 +478,8 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
       path: root.path,
       children: root.tree,
     }
-    if (!searching) return { root, node: rootNode, forcedExpanded: undefined, matches: 0 }
-    const result = filterTree([rootNode], query, showUnreadable)
+    if (!filtering) return { root, node: rootNode, forcedExpanded: undefined, matches: 0 }
+    const result = filterTree([rootNode], query, showUnreadable, fileMatches)
     return { root, node: result.nodes[0], forcedExpanded: result.expanded, matches: result.count }
   })
   const matchCount = visibleRoots.reduce((total, entry) => total + entry.matches, 0)
@@ -496,39 +531,56 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
             */}
             <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>Cartes mentales</span>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <Search
-                  size={13}
-                  style={{ position: 'absolute', left: 7, color: 'var(--muted-foreground)', pointerEvents: 'none' }}
-                />
-                <input
-                  ref={searchInputRef}
-                  className="sidebar-search"
-                  type="text"
-                  value={search}
-                  placeholder="Rechercher…"
-                  aria-label="Rechercher une carte ou un dossier"
-                  onChange={event => setSearch(event.target.value)}
-                  onKeyDown={event => {
-                    // Échap hands the keyboard back to the tree without leaving
-                    // the field through a second, different gesture.
-                    if (event.key !== 'Escape') return
-                    setSearch('')
-                    event.currentTarget.blur()
-                  }}
-                  style={{ paddingLeft: 24, paddingRight: search === '' ? 8 : 26 }}
-                />
-                {search !== '' && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Effacer la recherche"
-                    onClick={() => setSearch('')}
-                    style={{ position: 'absolute', right: 2 }}
-                  >
-                    <X size={13} />
-                  </Button>
-                )}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                  <Search
+                    size={13}
+                    style={{ position: 'absolute', left: 7, color: 'var(--muted-foreground)', pointerEvents: 'none' }}
+                  />
+                  <input
+                    ref={searchInputRef}
+                    className="sidebar-search"
+                    type="text"
+                    value={search}
+                    placeholder="Rechercher…"
+                    aria-label="Rechercher une carte ou un dossier"
+                    onChange={event => setSearch(event.target.value)}
+                    onKeyDown={event => {
+                      // Échap hands the keyboard back to the tree without leaving
+                      // the field through a second, different gesture.
+                      if (event.key !== 'Escape') return
+                      setSearch('')
+                      event.currentTarget.blur()
+                    }}
+                    style={{ paddingLeft: 24, paddingRight: search === '' ? 8 : 26 }}
+                  />
+                  {search !== '' && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Effacer la recherche"
+                      onClick={() => setSearch('')}
+                      style={{ position: 'absolute', right: 2 }}
+                    >
+                      <X size={13} />
+                    </Button>
+                  )}
+                </div>
+                <select
+                  className="sidebar-search sidebar-type-filter"
+                  aria-label="Filtrer par type"
+                  title="Filtrer par type"
+                  value={typeFilter}
+                  onChange={event => setTypeFilter(event.target.value as MapType | 'all')}
+                >
+                  <option value="all">Tous types</option>
+                  {MAP_TYPES.map(type => (
+                    <option key={type} value={type}>
+                      {MAP_TYPE_LABELS[type]}
+                    </option>
+                  ))}
+                  <option value="default">{MAP_TYPE_LABELS.default}</option>
+                </select>
               </div>
             </div>
 
@@ -536,13 +588,22 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
                 a matter of keeping it near the state it renders. */}
             <TreeDragGhost />
 
-            <div style={{ overflowY: 'auto', flex: 1 }}>
+            <div data-testid="file-tree" style={{ overflowY: 'auto', flex: 1 }}>
               {rootFolders.length === 0 && (
                 <p style={{ padding: 8, fontSize: 13, color: 'var(--muted-foreground)' }}>Aucun dossier configuré.</p>
               )}
-              {searching && matchCount === 0 && (
+              {filteringByType && !typeIndex.ready && (
                 <p role="status" style={{ padding: 8, fontSize: 13, color: 'var(--muted-foreground)' }}>
-                  Aucun résultat pour « {query} ».
+                  Analyse des types…
+                </p>
+              )}
+              {filtering && matchCount === 0 && (
+                <p role="status" style={{ padding: 8, fontSize: 13, color: 'var(--muted-foreground)' }}>
+                  {searching && filteringByType
+                    ? `Aucune carte « ${typeFilterLabel} » ne correspond à « ${query} ».`
+                    : searching
+                      ? `Aucun résultat pour « ${query} ».`
+                      : `Aucune carte « ${typeFilterLabel} ».`}
                 </p>
               )}
               {visibleRoots.map(({ root, node, forcedExpanded }) =>

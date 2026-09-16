@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { FileSidebar } from './FileSidebar'
@@ -15,7 +15,10 @@ vi.mock('../../persistence/workspaceConfig', () => ({
   loadWorkspaceConfig: vi.fn(),
   saveWorkspaceConfig: vi.fn(),
 }))
-vi.mock('../../persistence/fileTree', () => ({ scanFolder: vi.fn() }))
+vi.mock('../../persistence/fileTree', () => ({
+  scanFolder: vi.fn(),
+  collectMindMapPaths: vi.fn(() => new Set<string>()),
+}))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('../../persistence/sessionState', () => ({
   loadSessionState: vi.fn(),
@@ -790,8 +793,8 @@ describe('FileSidebar — recherche', () => {
 
     await user.type(screen.getByRole('textbox', SEARCH_FIELD), 'evaluation')
 
-    expect(await screen.findByText('Évaluation')).toBeInTheDocument()
-    expect(screen.queryByText('Cours')).not.toBeInTheDocument()
+    expect(await within(screen.getByTestId('file-tree')).findByText('Évaluation')).toBeInTheDocument()
+    expect(within(screen.getByTestId('file-tree')).queryByText('Cours')).not.toBeInTheDocument()
   })
 
   it('montre le dossier qui correspond avec tout ce qu’il contient', async () => {
@@ -801,8 +804,8 @@ describe('FileSidebar — recherche', () => {
 
     await user.type(screen.getByRole('textbox', SEARCH_FIELD), 'chapitre')
 
-    expect(await screen.findByText('Évaluation')).toBeInTheDocument()
-    expect(screen.getByText('Cours')).toBeInTheDocument()
+    expect(await within(screen.getByTestId('file-tree')).findByText('Évaluation')).toBeInTheDocument()
+    expect(within(screen.getByTestId('file-tree')).getByText('Cours')).toBeInTheDocument()
   })
 
   it('rend l’arbre exactement comme avant quand on efface la recherche', async () => {
