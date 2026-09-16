@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { BlockEditor, convertBlock } from './BlockEditor'
+import { BlockEditor, convertBlock, isFormulaTrigger } from './BlockEditor'
 import { SYMBOL_FAMILIES } from './symbolSets'
 import type { CardBlock } from '../types/cardBlock'
 
@@ -395,6 +395,38 @@ describe('the kind a new block starts as', () => {
       { kind: 'table', header: [], rows: [['a']] },
       { kind: 'text', text: '' },
     ])
+  })
+})
+
+describe('the `$$` formula shortcut', () => {
+  it('fires on a block that was empty, turning it into a formula', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: '' }])
+
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), '$$')
+
+    expect(latest()).toEqual([{ kind: 'math', latex: '' }])
+  })
+
+  it('leaves a sentence that merely ends in `$$` as prose', async () => {
+    // The old trigger was "the text ends with `$$`", so this sentence became
+    // LaTeX source and the words were swallowed. Nobody typing a price means
+    // to start a formula.
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: '' }])
+
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), 'le cours coûte 5$$')
+
+    expect(latest()).toEqual([{ kind: 'text', text: 'le cours coûte 5$$' }])
+  })
+
+  it('fires only when `$$` stands alone on its line', () => {
+    expect(isFormulaTrigger('$$')).toBe(true)
+    expect(isFormulaTrigger('  $$')).toBe(true)
+    expect(isFormulaTrigger('première ligne\n$$')).toBe(true)
+    expect(isFormulaTrigger('coûte 5$$')).toBe(false)
+    expect(isFormulaTrigger('5$$')).toBe(false)
+    expect(isFormulaTrigger('x$$')).toBe(false)
   })
 })
 

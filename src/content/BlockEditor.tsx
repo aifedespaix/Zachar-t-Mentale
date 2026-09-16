@@ -152,6 +152,25 @@ export function emptyBlock(kind: SwitchableKind): CardBlock {
 }
 
 /**
+ * Whether typing `$$` at the end of a text block should turn the WHOLE block into
+ * a formula.
+ *
+ * `$$` is a fast path for someone taking notes live, who should not have to reach
+ * for the type switch mid-sentence. But "the text ends with `$$`" is too broad: a
+ * sentence that legitimately ends in « … coûte 5$$ » was swallowed into LaTeX
+ * source, and nobody meant that. The trigger is therefore narrowed to what is
+ * actually meant — an empty block, or `$$` alone on its own line (leading
+ * whitespace allowed) — so anything else stays the prose the user typed.
+ */
+export function isFormulaTrigger(text: string): boolean {
+  if (!text.endsWith('$$')) return false
+  // What precedes the trigger on its LINE has to be whitespace, not words. The
+  // block is empty when there is no line at all, which `''` answers too.
+  const lineSoFar = text.slice(0, -2).split('\n').pop() ?? ''
+  return lineSoFar.trim() === ''
+}
+
+/**
  * Moves one block, returning a new list. Out-of-range targets return the list
  * unchanged rather than wrapping around: the first block's "up" is a no-op, not
  * a jump to the bottom.
@@ -1216,11 +1235,13 @@ function BlockField({ block, index, resolveAsset, onChange, onEnterBlock, onFiel
           onChange={text => {
             // `$$` converts in place: the fast path for someone taking notes
             // live, who should not have to reach for the selector mid-sentence.
+            // The trigger is deliberately narrow (see `isFormulaTrigger`): a
+            // sentence that ends in « … coûte 5$$ » is prose, not a formula.
             //
             // ONE call, not an onChange followed by a convert: both would read
             // the same stale `blocks` closure, so the conversion would run on
             // the pre-keystroke block and swallow the last character.
-            if (text.endsWith('$$')) {
+            if (isFormulaTrigger(text)) {
               onChange({ kind: 'math', latex: text.slice(0, -2) })
               return
             }
