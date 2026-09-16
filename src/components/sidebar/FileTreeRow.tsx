@@ -16,6 +16,7 @@ import { flattenFolders, isRowVisible, type FolderOption } from './treeFilter'
 import { validateCards } from '../../validation/cardsValidation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
+import { Hint } from '../ui/hint'
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -697,6 +698,37 @@ export function FileTreeRow({
         )}
       </>
     )
+    // The visible name is the extension-less one (see `displayName`), so the
+    // row's `title` was what still told the real file name. It becomes a Hint —
+    // which, unlike the native title, also opens on keyboard focus — but only
+    // when the two differ: repeating the visible label would be noise.
+    const mindMapRow = (
+      <button
+        type="button"
+        onClick={() => {
+          // The click that follows the pointerup ending a drag is not
+          // a request to open the map: the map just moved.
+          if (consumeSwallowedClick()) return
+          onOpenFile(node.path)
+        }}
+        onDoubleClick={() => setRenaming(true)}
+        className={rowClassName([
+          isActive && 'file-tree-row--active',
+          isDropTarget && 'file-tree-row--drop-target',
+          dragging && 'file-tree-row--dragging',
+        ])}
+        data-tree-row={node.path}
+        data-tree-kind="mindmap"
+        onPointerDown={event =>
+          beginTreeDrag(event, { path: node.path, name: displayName, kind: 'mindmap' })
+        }
+        style={{ ...indent }}
+      >
+        {mindMapIcon}
+        <span className="file-tree-row__name">{displayName}</span>
+        {mindMapTrailing}
+      </button>
+    )
     return (
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <ContextMenu>
@@ -708,33 +740,10 @@ export function FileTreeRow({
                   {renameField}
                   {mindMapTrailing}
                 </div>
+              ) : displayName === node.name ? (
+                mindMapRow
               ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    // The click that follows the pointerup ending a drag is not
-                    // a request to open the map: the map just moved.
-                    if (consumeSwallowedClick()) return
-                    onOpenFile(node.path)
-                  }}
-                  onDoubleClick={() => setRenaming(true)}
-                  title={displayName === node.name ? undefined : node.name}
-                  className={rowClassName([
-                    isActive && 'file-tree-row--active',
-                    isDropTarget && 'file-tree-row--drop-target',
-                    dragging && 'file-tree-row--dragging',
-                  ])}
-                  data-tree-row={node.path}
-                  data-tree-kind="mindmap"
-                  onPointerDown={event =>
-                    beginTreeDrag(event, { path: node.path, name: displayName, kind: 'mindmap' })
-                  }
-                  style={{ ...indent }}
-                >
-                  {mindMapIcon}
-                  <span className="file-tree-row__name">{displayName}</span>
-                  {mindMapTrailing}
-                </button>
+                <Hint label={node.name}>{mindMapRow}</Hint>
               )}
             </div>
           </ContextMenuTrigger>

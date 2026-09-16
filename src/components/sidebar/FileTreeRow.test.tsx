@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render as rtlRender, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { FileTreeRow, RENAME_CLICK_GRACE_MS } from './FileTreeRow'
@@ -6,6 +6,16 @@ import { useWorkspaceStore, createWorkspaceStore } from '../../state/useWorkspac
 import type { FileTreeNode } from '../../types/workspace'
 import type { MindMapMeta } from '../../types/card'
 import { TooltipProvider } from '../ui/tooltip'
+import type { ReactElement } from 'react'
+
+/**
+ * Toute ligne de carte mentale porte désormais un `Hint`, et le `Tooltip` Radix
+ * exige le `TooltipProvider` que `FileSidebar` monte en vrai : les tests le
+ * fournissent une fois pour toutes, plutôt qu'autour de chaque montage.
+ */
+function render(ui: ReactElement) {
+  return rtlRender(<TooltipProvider>{ui}</TooltipProvider>)
+}
 
 vi.mock('../../persistence/fileOps', async importOriginal => {
   const actual = await importOriginal<typeof import('../../persistence/fileOps')>()
@@ -1072,6 +1082,24 @@ describe('FileTreeRow — mise en page de la ligne', () => {
     // horizontalement au lieu de terminer le nom par « … ».
     const button = screen.getByRole('button', { name: /Chapitre très long/ })
     expect(button.parentElement).toHaveStyle({ minWidth: '0px' })
+  })
+
+  it('explains the extension-less name with a tooltip, not a native title', async () => {
+    // The row drops the « .zmap » (see `displayName`); the native `title` was
+    // what still gave the real file name, and only to a pointer. The tooltip
+    // opens on focus as well, which is the whole point of the migration.
+    const user = userEvent.setup()
+    render(
+      <TooltipProvider>
+        <FileTreeRow node={node} depth={0} onOpenFile={() => {}} />
+      </TooltipProvider>
+    )
+
+    const row = screen.getByRole('button', { name: /Chapitre très long/ })
+    expect(row).not.toHaveAttribute('title')
+
+    await user.hover(row)
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('Chapitre très long.zmap'))
   })
 })
 

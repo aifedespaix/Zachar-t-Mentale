@@ -1,9 +1,11 @@
 // src/components/quiz/QuizConfigModal.tsx
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Sprout, Zap, Flame, Check, type LucideIcon } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog'
 import { Button } from '../ui/button'
+import { Hint } from '../ui/hint'
+import { TooltipProvider } from '../ui/tooltip'
 import { useQuizStore } from '../../state/useQuizStore'
 import { useCardsStore } from '../../state/useCardsStore'
 import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsStore'
@@ -92,6 +94,10 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
+        {/* One provider for the whole modal: a provider per level tile would give
+            each one its own skip-delay state, which is what makes a row of
+            instant tooltips flicker as the pointer crosses it. */}
+        <TooltipProvider>
         <DialogHeader>
           <DialogTitle>Configurer le quiz</DialogTitle>
         </DialogHeader>
@@ -106,10 +112,8 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
               const checked = available && enabledLevels.includes(level)
               const bg = toCss(levelAppearance[level].color[theme].border)
               const text = toCss(pickReadableTextColor(levelAppearance[level].color[theme].border))
-              return (
+              const tile = (
                 <label
-                  key={level}
-                  title={available ? undefined : ABSENT_LEVEL_HINT}
                   style={{
                     flex: 1,
                     aspectRatio: '1 / 1',
@@ -136,6 +140,16 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
                   />
                   {levelAppearance[level].label}
                 </label>
+              )
+              // The checkbox is disabled when the level is absent, and a disabled
+              // control shows no tooltip: the hint rides the non-disabled label
+              // that wraps it, while `aria-label` keeps doing the naming.
+              return available ? (
+                <Fragment key={level}>{tile}</Fragment>
+              ) : (
+                <Hint key={level} label={ABSENT_LEVEL_HINT}>
+                  {tile}
+                </Hint>
               )
             })}
           </div>
@@ -269,6 +283,7 @@ export function QuizConfigModal({ open, onOpenChange }: QuizConfigModalProps) {
             Lancer le quiz
           </Button>
         </DialogFooter>
+        </TooltipProvider>
       </DialogContent>
     </Dialog>
   )

@@ -1,5 +1,5 @@
 // src/components/quiz/QuizConfigModal.test.tsx
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { QuizConfigModal } from './QuizConfigModal'
@@ -161,6 +161,25 @@ describe('QuizConfigModal absent levels', () => {
     render(<QuizConfigModal open onOpenChange={() => {}} />)
 
     expect(checkbox(/^info$/i)).toBeDisabled()
+  })
+
+  it('explains an absent level with a tooltip, not a native title, and keeps its accessible name', async () => {
+    // A disabled checkbox shows no tooltip, so the hint has to ride the
+    // non-disabled label that wraps it — and the input keeps its `aria-label`,
+    // which a tooltip is not.
+    setCards(1, 2)
+    const user = userEvent.setup()
+    render(<QuizConfigModal open onOpenChange={() => {}} />)
+
+    const info = checkbox(/^info$/i)
+    expect(info).toHaveAttribute('aria-label', 'Info')
+    const tile = info.closest('label')
+    expect(tile).not.toHaveAttribute('title')
+
+    await user.hover(tile!)
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Aucune carte à ce niveau dans la carte mentale')
+    )
   })
 })
 

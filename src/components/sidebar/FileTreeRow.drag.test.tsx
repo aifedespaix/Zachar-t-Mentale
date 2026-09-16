@@ -1,6 +1,13 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { FileTreeRow, RENAME_CLICK_GRACE_MS } from './FileTreeRow'
+import { TooltipProvider } from '../ui/tooltip'
+import type { ReactElement } from 'react'
+
+/** Même raison que dans `FileTreeRow.test.tsx` : le `Hint` de la ligne exige le provider de la sidebar. */
+function render(ui: ReactElement) {
+  return rtlRender(<TooltipProvider>{ui}</TooltipProvider>)
+}
 import { TreeDragGhost } from './TreeDragGhost'
 import { useWorkspaceStore, createWorkspaceStore } from '../../state/useWorkspaceStore'
 import { useTreeDragStore } from '../../state/useTreeDragStore'
