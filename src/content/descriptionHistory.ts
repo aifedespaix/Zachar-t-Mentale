@@ -29,6 +29,49 @@ const MAX_DEPTH = 100
 
 const entries = new Map<string, Entry>()
 
+/**
+ * Whoever is watching, so the undo/redo buttons can be disabled for the right
+ * reasons.
+ *
+ * This history lives at module scope and changes from OUTSIDE React — an
+ * autosave debounce, a keyboard shortcut, a symbol inserted from the palette —
+ * so nothing would re-render as a step is added or walked back. Without a
+ * subscriber list the buttons would keep the state they were first painted
+ * with, and a button that stays enabled when there is nothing left to undo is
+ * worse than no button at all: the user clicks it and nothing happens, twice.
+ */
+const listeners = new Set<() => void>()
+
+function notify(): void {
+  for (const listener of [...listeners]) listener()
+}
+
+/** Subscribes to changes of ANY description's history. Returns the unsubscribe. */
+export function subscribeDescriptionHistory(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/**
+ * Whether there is a step to walk back to.
+ *
+ * Read-only, and that is the point: `undoDescription` answers the same question
+ * by MUTATING the index, so asking it in order to decide whether the button
+ * should be greyed out would silently spend the user's undo step.
+ */
+export function canUndoDescription(cardId: string): boolean {
+  const entry = entries.get(cardId)
+  return entry !== undefined && entry.index > 0
+}
+
+/** Whether there is a step to walk forward to again. Read-only, like `canUndoDescription`. */
+export function canRedoDescription(cardId: string): boolean {
+  const entry = entries.get(cardId)
+  return entry !== undefined && entry.index < entry.stack.length - 1
+}
+
 function entryFor(cardId: string, initial: CardBlock[]): Entry {
   let entry = entries.get(cardId)
   if (entry === undefined) {
@@ -40,7 +83,11 @@ function entryFor(cardId: string, initial: CardBlock[]): Entry {
 
 /** Starts (or resumes) a card's history at `initial` — call once when the dialog opens. */
 export function ensureDescriptionHistory(cardId: string, initial: CardBlock[]): void {
+  const known = entries.has(cardId)
   entryFor(cardId, initial)
+  // A resumed history is already what the buttons are showing; a NEW one starts
+  // with nothing to undo, which the buttons have to learn about.
+  if (!known) notify()
 }
 
 /** Records a new state, dropping any redo tail — a no-op if nothing actually changed. */
@@ -54,6 +101,7 @@ export function recordDescriptionState(cardId: string, blocks: CardBlock[]): voi
     entry.stack.shift()
     entry.index -= 1
   }
+  notify()
 }
 
 /** The previous state, or `null` when there is nothing to undo to. */
@@ -61,6 +109,7 @@ export function undoDescription(cardId: string): CardBlock[] | null {
   const entry = entries.get(cardId)
   if (entry === undefined || entry.index <= 0) return null
   entry.index -= 1
+  notify()
   return entry.stack[entry.index]
 }
 
@@ -69,5 +118,6 @@ export function redoDescription(cardId: string): CardBlock[] | null {
   const entry = entries.get(cardId)
   if (entry === undefined || entry.index >= entry.stack.length - 1) return null
   entry.index += 1
+  notify()
   return entry.stack[entry.index]
 }

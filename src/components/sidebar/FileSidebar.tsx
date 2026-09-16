@@ -11,6 +11,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { CloudSync, Eye, EyeOff, FolderPlus, FolderSearch, FoldVertical, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, ClipboardCopy, X } from 'lucide-react'
 import { Button } from '../ui/button'
+import { Hint } from '../ui/hint'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '../ui/context-menu'
 import { CommandButton } from '../commands/CommandButton'
@@ -736,6 +737,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
               standard split-pane contract, so the width is also adjustable with the
               arrow keys once the handle has focus.
             */}
+            <Hint label="Glisser pour redimensionner (double-clic : largeur par défaut)">
             <div
               ref={handleRef}
               role="separator"
@@ -751,7 +753,6 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
               onPointerCancel={handleResizeEnd}
               onDoubleClick={() => commitWidth(DEFAULT_SIDEBAR_WIDTH)}
               onKeyDown={handleResizeKeyDown}
-              title="Glisser pour redimensionner (double-clic : largeur par défaut)"
               style={{
                 position: 'absolute',
                 top: 0,
@@ -775,6 +776,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
                 if (!resizing) event.currentTarget.style.background = 'transparent'
               }}
             />
+            </Hint>
             {newFolderDialog}
             {folderCreation.dialog}
               </>

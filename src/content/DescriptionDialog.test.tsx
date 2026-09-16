@@ -1,7 +1,8 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { DescriptionDialog } from './DescriptionDialog'
+import { isModalOpen } from '../hooks/useGlobalShortcuts'
 import type { CardBlock } from '../types/cardBlock'
 
 // MathLive genuinely resolves under jsdom, which would make these tests depend
@@ -42,6 +43,10 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof Description
 describe('DescriptionDialog', () => {
   afterEach(() => {
     vi.useRealTimers()
+    // Le réglage des familles vit dans `localStorage`, partagé par tous les tests
+    // du fichier : sans ce nettoyage, un test masquerait une famille pour les
+    // suivants.
+    localStorage.clear()
   })
 
   it('says which card is being edited, ancestors included', () => {
@@ -51,6 +56,68 @@ describe('DescriptionDialog', () => {
     // The breadcrumb is what makes the card unambiguous when the editor opens
     // over a canvas of near-identical boxes.
     expect(screen.getByText('Nombres relatifs › Addition')).toBeInTheDocument()
+  })
+
+  it('announces itself as an open modal, so the global shortcuts stand down', () => {
+    // `useGlobalShortcuts` recognises "a modal is up" from this attribute, and
+    // it listens in CAPTURE on `window` — so it runs BEFORE this dialog's own
+    // handlers. Without the attribute the dispatcher stayed armed while the
+    // description was open: with the caret on a button rather than in a field,
+    // `isTypingTarget` no longer shielded it, so `Ctrl+Z` ran the DOCUMENT undo
+    // and its `stopPropagation` swallowed the description's own. The same hole
+    // left `Mod+Entrée` (which OPENS this dialog) able to fire behind it.
+    renderDialog()
+
+    expect(isModalOpen()).toBe(true)
+  })
+
+  it('règle les familles de symboles depuis le pied, et retient le choix', async () => {
+    // Le bouton vit dans le pied, à gauche de « Supprimer » : le réglage et sa
+    // commande au même endroit, sur un support qui ne se replie pas comme le
+    // bandeau — une commande posée en fin de bandeau atterrit sur la dernière
+    // ligne, souvent hors de vue.
+    const user = userEvent.setup()
+    renderDialog({ blocks: [{ kind: 'math', latex: 'x' }] })
+
+    expect(screen.getByRole('group', { name: 'Grec' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /choisir les familles/i }))
+    const overlay = screen.getByRole('dialog', { name: /familles de symboles/i })
+
+    await user.click(within(overlay).getByRole('checkbox', { name: /grec/i }))
+
+    expect(screen.queryByRole('group', { name: 'Grec' })).not.toBeInTheDocument()
+    // Enregistré, pas seulement affiché.
+    expect(JSON.parse(localStorage.getItem('zachart-mentale:band-hidden-families') ?? 'null')).toEqual(['Grec'])
+
+    await user.click(within(overlay).getByRole('button', { name: /tout afficher/i }))
+    expect(screen.getByRole('group', { name: 'Grec' })).toBeInTheDocument()
+  })
+
+  it('applique dès le premier rendu un réglage de familles retrouvé', () => {
+    // Lu à l'initialisation, pas dans un effet : sinon le bandeau se peindrait
+    // complet puis se réduirait — le saut visuel que tout ce bandeau évite.
+    localStorage.setItem('zachart-mentale:band-hidden-families', JSON.stringify(['Grec']))
+
+    renderDialog({ blocks: [{ kind: 'math', latex: 'x' }] })
+
+    expect(screen.queryByRole('group', { name: 'Grec' })).not.toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Comparaisons' })).toBeInTheDocument()
+  })
+
+  it('explains an icon-only control with the app’s tooltip, not a native title', async () => {
+    // `title` appeared only for pointer users, only after about a second, and
+    // could not be styled. The Radix tooltip opens on FOCUS as well, so a
+    // keyboard user gets the same explanation — which is the whole reason for
+    // the migration rather than a cosmetic swap.
+    const user = userEvent.setup()
+    renderDialog()
+
+    const cross = screen.getByRole('button', { name: /fermer la description/i })
+    expect(cross).not.toHaveAttribute('title')
+
+    await user.hover(cross)
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('Fermer'))
   })
 
   it('renames the card from the title field when a rename handler is given', async () => {
@@ -196,6 +263,47 @@ describe('DescriptionDialog', () => {
     expect(props.onSave).not.toHaveBeenCalled()
   })
 
+  it('greys out the undo and redo buttons until there is a step to walk', async () => {
+    const user = userEvent.setup()
+    renderDialog({ blocks: text('Départ') })
+
+    const undoButton = () => screen.getByRole('button', { name: /annuler la dernière modification/i })
+    const redoButton = () => screen.getByRole('button', { name: /rétablir la modification annulée/i })
+
+    // Nothing typed yet: nothing to walk back to, nothing to walk forward to.
+    expect(undoButton()).toBeDisabled()
+    expect(redoButton()).toBeDisabled()
+
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' et suite')
+
+    // The step is recorded by the autosave debounce, not by the keystroke — so
+    // the button has to learn about it from the history, which is the whole
+    // reason the read API exists.
+    await waitFor(() => expect(undoButton()).toBeEnabled(), { timeout: 2000 })
+    expect(redoButton()).toBeDisabled()
+  })
+
+  it('undoes and redoes from the buttons, not only from the keyboard', async () => {
+    const user = userEvent.setup()
+    renderDialog({ blocks: text('Départ') })
+
+    await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), ' et suite')
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /annuler la dernière modification/i })).toBeEnabled(),
+      { timeout: 2000 }
+    )
+
+    await user.click(screen.getByRole('button', { name: /annuler la dernière modification/i }))
+    expect(screen.getByRole('textbox', { name: /texte du bloc 1/i })).toHaveValue('Départ')
+
+    // A real `disabled` attribute, not a dimmed style: this state has to be
+    // announced, and the button that was inert is now the way forward.
+    const redoButton = screen.getByRole('button', { name: /rétablir la modification annulée/i })
+    expect(redoButton).toBeEnabled()
+    await user.click(redoButton)
+    expect(screen.getByRole('textbox', { name: /texte du bloc 1/i })).toHaveValue('Départ et suite')
+  })
+
   it('asks before deleting a description that exists, and says what it deletes', async () => {
     const user = userEvent.setup()
     const props = renderDialog()
@@ -331,7 +439,10 @@ describe('DescriptionDialog', () => {
     expect(props.onSave).toHaveBeenCalledWith([{ kind: 'math', latex: 'x\\times ' }])
   })
 
-  it('shows the palette only for the block being edited', async () => {
+  it('garde le bandeau à la même place, et c’est lui qui nomme le bloc visé', async () => {
+    // Le contrat a changé, et c'est tout l'intérêt : la palette ne se déplace
+    // plus d'un bloc à l'autre — c'était elle qui faisait sauter le contenu de
+    // 120 à 190 px. Un seul bandeau, fixe, dit lequel il sert.
     const user = userEvent.setup()
     renderDialog({
       blocks: [
@@ -340,10 +451,14 @@ describe('DescriptionDialog', () => {
       ],
     })
 
-    expect(screen.getAllByRole('group', { name: /symboles mathématiques/i })).toHaveLength(1)
+    expect(screen.getByRole('group', { name: /symboles à insérer/i })).toBeInTheDocument()
+    expect(screen.getByText('Bloc 1 · Formule')).toBeInTheDocument()
 
     await user.click(screen.getByRole('textbox', { name: /formule du bloc 2 \(latex\)/i }))
-    expect(screen.getAllByRole('group', { name: /symboles mathématiques/i })).toHaveLength(1)
+
+    expect(screen.getByText('Bloc 2 · Formule')).toBeInTheDocument()
+    // Toujours un seul, et toujours au même endroit : rien n'a été dupliqué.
+    expect(screen.getAllByRole('group', { name: /symboles à insérer/i })).toHaveLength(1)
   })
 
   it('hides the image affordance when there is nowhere to store one', () => {

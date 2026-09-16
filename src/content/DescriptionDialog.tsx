@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { motion, useReducedMotion } from 'motion/react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
-import { Keyboard, Pencil, Trash2, X } from 'lucide-react'
+import { Keyboard, LayoutGrid, Pencil, Redo2, Trash2, Undo2, X } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
 import { blocksDiffer } from './blocks'
 import { BlockEditor, type BlockEditorProps } from './BlockEditor'
+import { BandOptionsOverlay } from './BandOptionsOverlay'
+import { loadHiddenFamilies, saveHiddenFamilies } from '../persistence/bandFamilies'
 import { Button } from '../components/ui/button'
+import { Hint } from '../components/ui/hint'
+import { TooltipProvider } from '../components/ui/tooltip'
 import {
   ensureDescriptionHistory,
   recordDescriptionState,
   redoDescription,
   undoDescription,
 } from './descriptionHistory'
+import { useDescriptionHistory } from './useDescriptionHistory'
 
 /**
  * A definition that has never been written yet still needs somewhere to type,
@@ -138,6 +144,34 @@ export function DescriptionDialog({
   // so there is no external re-render to re-seed against mid-edit.
   const [titleDraft, setTitleDraft] = useState(cardTitle)
 
+  // The undo/redo buttons' state, read from the description's own history rather
+  // than tracked here. Undo used to be reachable only by `Ctrl+Z` — nothing on
+  // screen said it existed, which is the worst place to put the one gesture that
+  // makes it safe to try things. Reading it from the store (rather than keeping
+  // a copy in step) is what makes the buttons follow a step recorded by the
+  // autosave debounce, by the keyboard or by the palette.
+  const { canUndo, canRedo } = useDescriptionHistory(cardId)
+
+  /**
+   * Le réglage des familles de signes vit ICI, et pas dans l'éditeur, parce que
+   * le bouton qui l'ouvre est dans le pied de la modale : le réglage et sa
+   * commande doivent être au même endroit. Le pied est aussi un support plus
+   * stable que le bandeau, qui se replie sur deux ou trois lignes — une commande
+   * posée en fin de bandeau atterrit sur la dernière ligne, souvent hors de vue.
+   *
+   * Lu SYNCHRONEMENT à l'initialisation, pas dans un effet : un effet ferait
+   * peindre le bandeau complet, puis le réduirait — exactement le saut visuel que
+   * tout ce bandeau existe pour éviter.
+   */
+  const [hiddenFamilies, setHiddenFamilies] = useState<string[]>(() => loadHiddenFamilies())
+  const [bandOptionsOpen, setBandOptionsOpen] = useState(false)
+
+  /** Retient le réglage ET l'applique : les deux vont ensemble, jamais l'un sans l'autre. */
+  function setFamilies(next: string[]) {
+    setHiddenFamilies(next)
+    saveHiddenFamilies(next)
+  }
+
   const draftRef = useRef(draft)
   draftRef.current = draft
   const lastSavedRef = useRef(initial.current)
@@ -237,7 +271,29 @@ export function DescriptionDialog({
         <DialogPrimitive.Overlay
           style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0, 0, 0, 0.35)' }}
         />
+        {/* ONE provider for the whole dialog, mounted here rather than per
+            button. The app's tooltip defaults are used unchanged — every other
+            surface's provider does the same — so a hint in this dialog appears
+            and disappears exactly like a hint anywhere else. Radix renders a
+            provider as context alone, so it adds no element to the modal's
+            layout. A provider per button would be the mistake this avoids: each
+            one carries its own skip-delay state, which is what makes a row of
+            instant tooltips flicker as the pointer crosses it. */}
+        <TooltipProvider>
         <DialogPrimitive.Content
+          // `data-slot` is not decoration: `isModalOpen` (see
+          // `hooks/useGlobalShortcuts`) recognises an open modal by
+          // `[data-slot="dialog-content"][data-state="open"]`, and the shared
+          // `ui/dialog` is the only thing that used to set it. This dialog
+          // renders `DialogPrimitive.Content` directly, so without this
+          // attribute the global dispatcher — which listens in CAPTURE on
+          // `window`, and therefore runs BEFORE this dialog's own key handlers —
+          // stayed armed while the description was open. With the caret on a
+          // button rather than in a field, `isTypingTarget` no longer protected
+          // it either, so `Ctrl+Z` ran the DOCUMENT undo instead of the
+          // description's own, and its `stopPropagation` swallowed the local
+          // one: the meaning of an undo depended on where focus happened to be.
+          data-slot="dialog-content"
           aria-label={`Description de « ${cardTitle} »`}
           // The dialog opens ON the field being written in. Radix's default is
           // to focus the first tabbable element, which here is a panel
@@ -283,10 +339,10 @@ export function DescriptionDialog({
           {/* The cross, one of the only two ways out. It carries its own
               accessible name because the glyph says nothing about what it
               closes. */}
+          <Hint label="Fermer">
           <button
             type="button"
             aria-label="Fermer la description"
-            title="Fermer"
             onClick={close}
             style={{
               position: 'absolute',
@@ -308,6 +364,7 @@ export function DescriptionDialog({
           >
             <X size={17} />
           </button>
+          </Hint>
 
           <header style={{ padding: '16px 56px 14px 20px', borderBottom: '1px solid var(--border)' }}>
             {breadcrumb.length > 0 && (
@@ -391,6 +448,7 @@ export function DescriptionDialog({
                 onPickImage={onPickImage}
                 onError={onError}
                 autoFocusField
+                hiddenFamilies={hiddenFamilies}
               />
             </div>
           </div>
@@ -407,12 +465,56 @@ export function DescriptionDialog({
               borderTop: '1px solid var(--border)',
             }}
           >
+            {/* Icon-only, et à gauche de « Supprimer » : c'est un réglage
+                d'affichage, pas une action sur la fiche, donc il ne doit pas se
+                mêler au groupe d'actions de droite (Raccourcis, Fermer) ni
+                concurrencer la seule action destructive. */}
+            <Hint label="Choisir les familles de symboles affichées">
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Choisir les familles de symboles affichées"
+                aria-expanded={bandOptionsOpen}
+                onClick={() => setBandOptionsOpen(open => !open)}
+              >
+                <LayoutGrid />
+              </Button>
+            </Hint>
             {blocks.length > 0 && (
               <Button variant="destructive" onClick={() => setConfirmingDelete(true)}>
                 <Trash2 />
                 Supprimer
               </Button>
             )}
+            {/* Beside the destructive action rather than beside "Fermer": these
+                are edits to the description, which is what "Supprimer" acts on
+                too. `disabled` is a real attribute, not a dimmed style — the
+                hook can answer "is there anything to walk back to?" because
+                `canUndoDescription` reads the history instead of consuming it,
+                and a greyed-out button that is still clickable would be a lie
+                to a screen reader. */}
+            <Hint label="Annuler (Ctrl+Z)">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Annuler la dernière modification de la description"
+              disabled={!canUndo}
+              onClick={undo}
+            >
+              <Undo2 />
+            </Button>
+            </Hint>
+            <Hint label="Rétablir (Ctrl+Maj+Z)">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Rétablir la modification annulée"
+              disabled={!canRedo}
+              onClick={redo}
+            >
+              <Redo2 />
+            </Button>
+            </Hint>
             <span
               aria-hidden
               style={{
@@ -457,7 +559,22 @@ export function DescriptionDialog({
               }
             />
           )}
+          {bandOptionsOpen && (
+            <BandOptionsOverlay
+              hidden={hiddenFamilies}
+              onToggle={family =>
+                setFamilies(
+                  hiddenFamilies.includes(family)
+                    ? hiddenFamilies.filter(name => name !== family)
+                    : [...hiddenFamilies, family]
+                )
+              }
+              onShowAll={() => setFamilies([])}
+              onClose={() => setBandOptionsOpen(false)}
+            />
+          )}
         </DialogPrimitive.Content>
+        </TooltipProvider>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   )
@@ -479,12 +596,19 @@ const NAV_GLYPH = { top: '↑', bottom: '↓', left: '←', right: '→' } as co
  * put a hierarchy move on the vertical axis and a same-level move on the
  * horizontal one — exactly the two relations a reader is most likely to
  * confuse, on the two axes that were most likely to suggest the opposite.
+ *
+ * The centering offsets are written as motion's own `x`/`y` style values, never
+ * as a CSS `transform` string: `whileHover` below composes its `scale` into that
+ * same `transform` property, so a literal `translateX(-50%)` here would be
+ * clobbered the instant the pointer landed on an arrow and the button would
+ * visibly jump off its edge. `CardNode`'s `EdgeButton` documents the same trap.
  */
-const NAV_POSITION: Record<keyof typeof NAV_GLYPH, CSSProperties> = {
-  top: { top: -18, left: '50%', transform: 'translateX(-50%)' },
-  bottom: { bottom: -18, left: '50%', transform: 'translateX(-50%)' },
-  left: { left: -18, top: '50%', transform: 'translateY(-50%)' },
-  right: { right: -18, top: '50%', transform: 'translateY(-50%)' },
+type NavPosition = CSSProperties & { x?: string; y?: string }
+const NAV_POSITION: Record<keyof typeof NAV_GLYPH, NavPosition> = {
+  top: { top: -18, left: '50%', x: '-50%' },
+  bottom: { bottom: -18, left: '50%', x: '-50%' },
+  left: { left: -18, top: '50%', y: '-50%' },
+  right: { right: -18, top: '50%', y: '-50%' },
 }
 
 /** What each edge leads to, in one word, so the arrow does not have to be decoded. */
@@ -517,6 +641,10 @@ function NavArrow({
   target?: DescriptionNavTarget
   onNavigate?: (id: string) => void
 }) {
+  // Called BEFORE the early return below: a hook may not sit behind a condition,
+  // and this component returns `null` for the three edges a card has no
+  // neighbour on.
+  const reduceMotion = useReducedMotion()
   if (target === undefined || onNavigate === undefined) return null
   // More than one child: naming one of them would be picking for the user, so
   // the arrow says how many there are instead — and then the count IS the
@@ -527,11 +655,25 @@ function NavArrow({
   const colors = target.colors
 
   return (
-    <button
+    <Hint label={`${relation} : ${target.title}`}>
+    <motion.button
       type="button"
       aria-label={`Aller à « ${target.title} »`}
-      title={`${relation} : ${target.title}`}
       onClick={() => onNavigate(target.id)}
+      // The pills had no hover or press feedback at all, while the palette's own
+      // keys did — so the four controls that move you around the map were the
+      // only ones that did not look clickable. This is the app's existing feel
+      // for a small action chip (the spring `CardNode`'s edge buttons use),
+      // not a new animation language; the scale stays gentler than theirs
+      // because these are wide pills rather than round badges.
+      //
+      // `reduceMotion ? undefined` is load-bearing: motion does NOT consult
+      // `prefers-reduced-motion` on its own (`reducedMotion` defaults to
+      // `"never"`), so without the gate this would animate for the users who
+      // asked it not to.
+      whileHover={reduceMotion ? undefined : { scale: 1.06 }}
+      whileTap={reduceMotion ? undefined : { scale: 0.96 }}
+      transition={{ type: 'spring', stiffness: 500, damping: 25 }}
       style={{
         position: 'absolute',
         zIndex: 2,
@@ -558,7 +700,8 @@ function NavArrow({
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
       )}
       {(side === 'right' || side === 'bottom') && <span aria-hidden>{NAV_GLYPH[side]}</span>}
-    </button>
+    </motion.button>
+    </Hint>
   )
 }
 
@@ -587,6 +730,7 @@ function ShortcutsPanel({ onClose }: { onClose: () => void }) {
       <Shortcut keys="Ctrl/Cmd + Z" label="Annuler" />
       <Shortcut keys="Ctrl/Cmd + Maj + Z" label="Rétablir" />
       <Shortcut keys="Échap" label="Fermer" />
+      <Hint label="Masquer les raccourcis">
       <button
         type="button"
         aria-label="Masquer les raccourcis"
@@ -608,6 +752,7 @@ function ShortcutsPanel({ onClose }: { onClose: () => void }) {
       >
         <X size={14} />
       </button>
+      </Hint>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { Languages } from 'lucide-react'
+import { Hint } from '../components/ui/hint'
 import { LANGUAGES, languageHelp, type LanguageId, type SpecialCharacter } from './languageHelp'
 
 /** Small enough to sit inside a toolbar button without enlarging it. */
@@ -92,7 +93,7 @@ function UnionJack() {
  * a pale wash on the light theme and as a deep one on the dark theme. A colour
  * mixed with white would have been unreadable in the dark, and vice versa.
  */
-const GROUP_TONES = [
+export const GROUP_TONES = [
   'oklch(0.6 0.17 250)',
   'oklch(0.66 0.16 75)',
   'oklch(0.62 0.15 155)',
@@ -100,7 +101,7 @@ const GROUP_TONES = [
 ] as const
 
 /** A tinted surface: `share` is how much of the hue survives the mix. */
-function tint(hue: string, share: number): string {
+export function tint(hue: string, share: number): string {
   return `color-mix(in oklch, ${hue}, transparent ${100 - share}%)`
 }
 
@@ -212,11 +213,15 @@ export function LanguageCharacterPalette({
                 </span>
                 <div role="group" aria-label={group.name} style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                   {group.characters.map(character => (
+                    // The key shows the GLYPH — `¿`, `»`, `œ` — and the label is
+                    // what names it. That is the case a hint is for; a `title`
+                    // only ever reached pointer users, and never on keyboard
+                    // focus, which is exactly how these keys are meant to be
+                    // reached.
+                    <Hint key={character.char} label={character.label}>
                     <button
-                      key={character.char}
                       type="button"
                       aria-label={character.label}
-                      title={character.label}
                       // Same reasoning as the language buttons, plus the insert
                       // itself is left to `onClick` so the keyboard (Enter/Space,
                       // which never fire a mousedown) reaches every character too.
@@ -240,6 +245,7 @@ export function LanguageCharacterPalette({
                     >
                       {faceOf(character)}
                     </button>
+                    </Hint>
                   ))}
                 </div>
               </div>

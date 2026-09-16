@@ -34,13 +34,20 @@ export interface MathFieldEditorProps {
   ref?: React.Ref<MathFieldHandle>
 }
 
-type MathfieldElement = HTMLElement & {
+/**
+ * The `<math-field>` element as this app uses it, exported because a caller
+ * sometimes has to reach the LIVE element rather than the declared handle — the
+ * table's cell palette inserts into whichever cell holds the caret, and finds it
+ * through `document.activeElement` rather than through a registry that a
+ * column insertion would invalidate.
+ */
+export type MathfieldElement = HTMLElement & {
   value: string
   insert?: (fragment: string, options?: { focus?: boolean }) => void
 }
 
 /** Module-level: the import is shared by every math block and resolves once. */
-let loadPromise: Promise<void> | undefined
+let loadPromise: Promise<boolean> | undefined
 let loaded = false
 
 /**
@@ -66,14 +73,19 @@ function hideVirtualKeyboardToggle(field: MathfieldElement): void {
   shadow.append(style)
 }
 
-function loadMathLive(): Promise<void> {
+function loadMathLive(): Promise<boolean> {
   loadPromise ??= import('mathlive')
     .then(() => {
       loaded = true
+      return true
     })
     .catch(() => {
       // Left unloaded on purpose: the raw LaTeX field is a complete editor on
       // its own, so a failed import degrades to it rather than to nothing.
+      // `false` is a settled answer rather than a failure to retry — the caller
+      // keeps the raw field for good instead of waiting on an editor that is
+      // never coming.
+      return false
     })
   return loadPromise
 }
@@ -86,22 +98,33 @@ function loadMathLive(): Promise<void> {
  * opened for editing: MathLive is ~5.7 MB unpacked, and startup must not pay
  * for a feature most cards never use.
  *
- * Which editor to show is decided ONCE at mount and never changes while the
- * block is open. Rendering `fallback` rather than a spinner is the same
- * principle: a slow — or failed — load must never leave the user unable to
- * type, and a field that swaps itself out mid-sentence is worse than one that
- * never upgrades.
+ * While the import is in flight — and forever if it fails — the caller's
+ * `fallback` is what the user types into, so a slow or failed load never leaves
+ * a formula unwritable. That field is a PAIR of boxes (the raw LaTeX source and
+ * its KaTeX preview), which is the right thing to show when MathLive is never
+ * arriving and the wrong thing to leave on screen once it has: it is what the
+ * user sees as "two fields for one formula". So the block is upgraded to the
+ * real editor as soon as the import settles, EXCEPT while the caret is inside
+ * it — see `upgradeWhenIdle` in the component.
  */
 export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter, ref }: MathFieldEditorProps) {
-  // Decided ONCE, at mount, and never revisited while this block is open.
+  // Which editor this block shows. It starts on the caller's field whenever
+  // MathLive is not already in memory, so the user can type IMMEDIATELY, and it
+  // is upgraded to the real editor once the import settles.
   //
-  // Reacting to the import resolving would mean the field can be replaced
-  // mid-sentence — destroying the caret, the focus and possibly the keystroke
-  // in flight. Deciding at mount makes that impossible by construction: the
-  // first math block of a session edits as raw LaTeX (and starts the load),
-  // every one opened afterwards gets the WYSIWYG field.
-  const [showMathField] = useState(() => loaded)
+  // This used to be decide-once-and-never-revisit, on the reasoning that
+  // swapping mid-sentence destroys the caret and the keystroke in flight. That
+  // reasoning still holds — which is why the upgrade refuses to run while the
+  // caret is inside this field — but making it absolute meant the FIRST formula
+  // of every session kept the degraded pair of boxes (raw LaTeX plus preview)
+  // permanently, reported as "two fields for one formula" and only cleared by a
+  // text→formula round-trip, which remounts this component and re-reads the
+  // flag.
+  const [showMathField, setShowMathField] = useState(() => loaded)
   const hostRef = useRef<HTMLDivElement>(null)
+  // Wraps BOTH branches, so "is the user typing in this field?" is a single
+  // `contains` call whichever editor is on screen.
+  const rootRef = useRef<HTMLDivElement>(null)
   const fieldRef = useRef<MathfieldElement | null>(null)
   // Kept in a ref so the element's listener always calls the latest handler
   // without the effect having to tear the element down and rebuild it.
@@ -136,10 +159,40 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter,
     []
   )
 
-  // Kicks the import off without waiting for it: this block keeps whichever
-  // editor it decided on, the next one benefits.
+  /**
+   * Moves this block from the caller's raw field to the real editor — but only
+   * when nothing of the user's is at stake.
+   *
+   * Two guards, and both are load-bearing. `loaded` is the module flag, set only
+   * once the import has actually SUCCEEDED: without it, a blur would upgrade a
+   * block whose editor never arrived, replacing the raw LaTeX field the user can
+   * type in with an empty host element they cannot. And if the caret is anywhere
+   * inside this field's own markup they are mid-edit, so replacing the element
+   * under them would throw away the caret, the focus and possibly the keystroke
+   * in flight; `onBlur` below catches that case the moment they look away, so
+   * the upgrade is deferred rather than lost.
+   */
+  function upgradeWhenIdle() {
+    if (showMathField || !loaded) return
+    const root = rootRef.current
+    if (root !== null && root.contains(document.activeElement)) return
+    setShowMathField(true)
+  }
+
+  // Kicks the import off without waiting for it, and upgrades THIS field when it
+  // lands — unless the import failed, in which case the caller's raw-LaTeX pair
+  // is not a loading state but the only editor this block will ever have.
   useEffect(() => {
-    void loadMathLive()
+    let cancelled = false
+    void loadMathLive().then(available => {
+      if (cancelled || !available) return
+      upgradeWhenIdle()
+    })
+    return () => {
+      cancelled = true
+    }
+    // Runs once: the import is started at mount and settles once per session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -152,10 +205,11 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter,
     field.setAttribute('aria-label', ariaLabel)
     // Le clavier virtuel de MathLive ne sert à rien ici : l'élève écrit sur un
     // vrai clavier, et les symboles dont il a besoin sont déjà à portée de clic
-    // dans le footer du bloc (voir `MathPalette`). Le laisser s'ouvrir à chaque
-    // focus recouvrait la formule qu'on était en train d'écrire. « manual » dit
-    // à MathLive de ne JAMAIS l'afficher tout seul ; `index.css` masque aussi le
-    // bouton qui restait dans la barre latérale du champ.
+    // dans le bandeau au-dessus de la description (voir `SymbolBand`). Le
+    // laisser s'ouvrir à chaque focus recouvrait la formule qu'on était en train
+    // d'écrire. « manual » dit à MathLive de ne JAMAIS l'afficher tout seul ;
+    // `index.css` masque aussi le bouton qui restait dans la barre latérale du
+    // champ.
     field.setAttribute('math-virtual-keyboard-policy', 'manual')
     field.style.width = '100%'
     field.value = latex
@@ -185,6 +239,25 @@ export function MathFieldEditor({ latex, onChange, ariaLabel, fallback, onEnter,
     if (field !== null && field.value !== latex) field.value = latex
   }, [latex])
 
-  if (!showMathField) return <>{fallback}</>
-  return <div ref={hostRef} data-testid="math-field" />
+  return (
+    <div
+      ref={rootRef}
+      onBlur={upgradeWhenIdle}
+      // `flexGrow`/`flexBasis` and `minWidth: 0` are what let a formula CELL
+      // fill its column. A table cell lays this out as an item of a flex ROW,
+      // where a block element that only sets `width: 100%` still sizes to its
+      // own content — which is why the raw field (an `<input>`, itself a flex
+      // item that grows) filled the cell while the WYSIWYG host did not. Written
+      // as longhands so the intent is exact rather than at the mercy of a
+      // shorthand. In the description's own flow the parent is not a flex row,
+      // so the grow is inert and only the width applies.
+      style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, width: '100%' }}
+    >
+      {showMathField ? (
+        <div ref={hostRef} data-testid="math-field" style={{ width: '100%' }} />
+      ) : (
+        fallback
+      )}
+    </div>
+  )
 }
