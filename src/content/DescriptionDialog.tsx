@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FocusEvent, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Keyboard, LayoutGrid, Pencil, Plus, Redo2, Trash2, Undo2, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Keyboard, LayoutGrid, Maximize2, Minimize2, Pencil, Plus, Redo2, Trash2, Undo2, X } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
 import { blocksDiffer } from './blocks'
 import { BlockEditor, type BlockEditorProps } from './BlockEditor'
 import { BandOptionsOverlay } from './BandOptionsOverlay'
 import { loadHiddenFamilies, saveHiddenFamilies } from '../persistence/bandFamilies'
+import { loadDescriptionNarrow, saveDescriptionNarrow } from '../persistence/descriptionNarrow'
 import { Button } from '../components/ui/button'
 import { Hint } from '../components/ui/hint'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip'
@@ -114,6 +115,35 @@ export interface DescriptionDialogProps {
 const AUTOSAVE_DELAY_MS = 600
 
 /**
+ * The dialog's two widths. The default is the roomy one a description has
+ * always opened in; the toggle switches to roughly two thirds of the screen,
+ * CAPPED so the 1080px reading column is never squeezed: on a very wide
+ * screen the narrow dialog stops growing once the column fits, instead of
+ * tracking 65vw past the point where extra width is only empty space.
+ */
+const DESCRIPTION_WIDTH_LARGE = 'min(1600px, 96vw)'
+const DESCRIPTION_WIDTH_NARROW = 'min(1250px, 65vw)'
+
+/**
+ * The shared look for the dialog's two top-right buttons — the width toggle
+ * and the cross. Same kind of chrome control, so they differ only in glyph
+ * and action, never in shape. Positioning belongs to the row that holds them.
+ */
+const CORNER_BUTTON: CSSProperties = {
+  display: 'grid',
+  placeItems: 'center',
+  width: 30,
+  height: 30,
+  padding: 0,
+  borderRadius: 8,
+  border: '1px solid transparent',
+  background: 'transparent',
+  color: 'inherit',
+  opacity: 0.65,
+  cursor: 'pointer',
+}
+
+/**
  * The one place a card's description is written.
  *
  * It replaces the popover this app used to edit a definition in — a plain
@@ -169,6 +199,14 @@ export function DescriptionDialog({
   const [draft, setDraft] = useState<CardBlock[]>(initial.current)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  // The width the dialog was last closed in, read SYNCHRONOUSLY at mount so
+  // the first paint is already the chosen one. The dialog is remounted on
+  // every opening (`key={cardId}`), so this flag — not a component state that
+  // outlives it — is what carries the choice from one opening to the next.
+  const [narrow, setNarrow] = useState(loadDescriptionNarrow)
+  // What the toggle offers: the width the dialog is NOT wearing. One string
+  // for both the tooltip and the accessible name, so the two cannot drift.
+  const widthToggleLabel = narrow ? 'Élargir la modale' : 'Rétrécir la modale'
   // Its own short-lived draft, same idea as the card's own title field but
   // simpler: this dialog is mounted fresh on every open (see the note above),
   // so there is no external re-render to re-seed against mid-edit.
@@ -245,6 +283,13 @@ export function DescriptionDialog({
   function setFamilies(next: string[]) {
     setHiddenFamilies(next)
     saveHiddenFamilies(next)
+  }
+
+  /** Flips the dialog between its wide and narrow widths, and remembers the choice. */
+  function toggleWidth() {
+    const next = !narrow
+    setNarrow(next)
+    saveDescriptionNarrow(next)
   }
 
   const draftRef = useRef(draft)
@@ -389,8 +434,8 @@ export function DescriptionDialog({
           onFocusCapture={noteCaretScope}
           // Inline styles rather than utility classes: the shared
           // `DialogContent` caps itself at `sm:max-w-sm` and lays out as a
-          // grid, and this dialog is deliberately the widest surface in the
-          // app.
+          // grid, and this dialog is deliberately the roomiest surface in the
+          // app — narrowed only when the corner toggle asks for that.
           style={{
             position: 'fixed',
             top: '50%',
@@ -399,7 +444,7 @@ export function DescriptionDialog({
             zIndex: 50,
             display: 'flex',
             flexDirection: 'column',
-            width: 'min(1600px, 96vw)',
+            width: narrow ? DESCRIPTION_WIDTH_NARROW : DESCRIPTION_WIDTH_LARGE,
             height: 'min(94vh, 1180px)',
             background: 'var(--popover)',
             color: 'var(--popover-foreground)',
@@ -414,37 +459,49 @@ export function DescriptionDialog({
           <NavArrow side="left" target={parentTarget} create={onCreate?.left} onNavigate={onNavigate && navigate} />
           <NavArrow side="right" target={childTarget} create={onCreate?.right} onNavigate={onNavigate && navigate} />
 
-          {/* The cross, one of the only two ways out. It carries its own
-              accessible name because the glyph says nothing about what it
-              closes. */}
-          <Hint label="Fermer">
-          <button
-            type="button"
-            aria-label="Fermer la description"
-            onClick={close}
+          {/* The two chrome controls of the top-right corner, in ONE
+              absolutely-positioned row: the width toggle and the cross. The row
+              — not each button — is what the header's right padding clears, and
+              holding them in flow together is what keeps them from drifting
+              apart when the dialog itself resizes. */}
+          <div
             style={{
               position: 'absolute',
               top: 10,
               right: 10,
               zIndex: 3,
-              display: 'grid',
-              placeItems: 'center',
-              width: 30,
-              height: 30,
-              padding: 0,
-              borderRadius: 8,
-              border: '1px solid transparent',
-              background: 'transparent',
-              color: 'inherit',
-              opacity: 0.65,
-              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
             }}
           >
-            <X size={17} />
-          </button>
-          </Hint>
+            {/* One button, two states: it offers the width the dialog is NOT
+                wearing, and says so both to the eye (the glyph) and to a screen
+                reader (aria-pressed plus the same label). Rendered BEFORE the
+                cross, so the cross stays the outermost, most reachable control. */}
+            <Hint label={widthToggleLabel}>
+            <button
+              type="button"
+              aria-label={widthToggleLabel}
+              aria-pressed={narrow}
+              onClick={toggleWidth}
+              style={CORNER_BUTTON}
+            >
+              {narrow ? <Maximize2 size={17} /> : <Minimize2 size={17} />}
+            </button>
+            </Hint>
 
-          <header style={{ padding: '16px 56px 14px 20px', borderBottom: '1px solid var(--border)' }}>
+            {/* The cross, one of the only two ways out. It carries its own
+                accessible name because the glyph says nothing about what it
+                closes. */}
+            <Hint label="Fermer">
+            <button type="button" aria-label="Fermer la description" onClick={close} style={CORNER_BUTTON}>
+              <X size={17} />
+            </button>
+            </Hint>
+          </div>
+
+          <header style={{ padding: '16px 90px 14px 20px', borderBottom: '1px solid var(--border)' }}>
             {breadcrumb.length > 0 && (
               <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 7 }}>{breadcrumb.join(' › ')}</div>
             )}

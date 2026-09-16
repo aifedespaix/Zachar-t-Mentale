@@ -584,4 +584,48 @@ describe('DescriptionDialog', () => {
     expect(title.selectionStart).toBe(0)
     expect(title.selectionEnd).toBe('Nouveau titre'.length)
   })
+
+  describe('la largeur de la modale', () => {
+    // The dialog is recognised the same way useGlobalShortcuts recognises an
+    // open modal — by its data-slot attribute, which this component sets itself
+    // rather than inheriting it from the shared ui/dialog.
+    function dialogContent(): HTMLElement {
+      return document.querySelector('[data-slot="dialog-content"]') as HTMLElement
+    }
+
+    function dialogWidth(): string {
+      return dialogContent().style.width
+    }
+
+    it('ouvre large, avec un bouton pour la rétrécir', () => {
+      // L'état d'aujourd'hui sert de référence : la modale s'ouvre large, donc le
+      // bouton neuf doit proposer l'autre sens — la rétrécir.
+      renderDialog()
+
+      expect(dialogWidth()).toBe('min(1600px, 96vw)')
+      expect(screen.getByRole('button', { name: /rétrécir la modale/i })).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('la rétrécit à environ deux tiers de l’écran, et retient le choix', async () => {
+      const user = userEvent.setup()
+      renderDialog()
+
+      await user.click(screen.getByRole('button', { name: /rétrécir la modale/i }))
+
+      expect(dialogWidth()).toBe('min(1250px, 65vw)')
+      // Le bouton bascule : au clic suivant, c'est l'élargissement qu'il propose.
+      expect(screen.getByRole('button', { name: /élargir la modale/i })).toHaveAttribute('aria-pressed', 'true')
+      expect(localStorage.getItem('zachart-mentale:description-narrow')).toBe('true')
+    })
+
+    it('rouvre dans la largeur choisie la fois d’avant', () => {
+      // La modale est remontée à chaque ouverture (key={cardId}) : le choix est
+      // donc relu au montage, pas conservé dans un état de composant.
+      localStorage.setItem('zachart-mentale:description-narrow', 'true')
+
+      renderDialog()
+
+      expect(dialogWidth()).toBe('min(1250px, 65vw)')
+    })
+  })
 })
