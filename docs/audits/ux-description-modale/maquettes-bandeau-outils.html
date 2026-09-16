@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Maquettes — bandeau d'outils de la modale de description</title>
+<style>
+  /* ==========================================================================
+     Jetons RÉELS de l'app, recopiés de src/index.css. Les maquettes doivent se
+     juger sur les vraies couleurs, pas sur des approximations.
+     ========================================================================== */
+  .mock[data-theme="light"] {
+    color-scheme: light;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+  }
+  .mock[data-theme="dark"] {
+    color-scheme: dark;
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --ring: oklch(0.556 0 0);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    background: #f4f4f5;
+    color: #18181b;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .lede { font-size: 13.5px; line-height: 1.55; max-width: 900px; color: #3f3f46; margin: 0 0 18px; }
+  .lede code { background: #e4e4e7; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 16px; align-items: flex-start; }
+  fieldset {
+    border: 1px solid #d4d4d8; border-radius: 10px; padding: 8px 12px 10px; margin: 0; background: #fff;
+  }
+  legend { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #71717a; }
+  .controls button {
+    font: inherit; font-size: 12.5px; padding: 5px 11px; margin: 2px 3px 0 0; border-radius: 999px;
+    border: 1px solid #d4d4d8; background: #fafafa; cursor: pointer; color: inherit;
+  }
+  .controls button[aria-pressed="true"] { background: #18181b; color: #fafafa; border-color: #18181b; }
+
+  /* ==========================================================================
+     La modale, telle qu'elle est : min(1600px, 96vw) × min(94vh, ...), mais
+     réduite ici pour tenir dans une page.
+     ========================================================================== */
+  .mock {
+    background: var(--popover);
+    color: var(--popover-foreground);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 1100px;
+    height: 640px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 16px 48px rgba(0,0,0,.18);
+    position: relative;
+  }
+  .crumb { font-size: 11px; opacity: .6; padding: 12px 18px 0; }
+  .title {
+    font-size: 16px; font-weight: 650; padding: 8px 18px 12px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 9px;
+  }
+  .title .dot { width: 10px; height: 10px; border-radius: 999px; background: var(--ring); flex: 0 0 auto; }
+
+  /* Le conteneur qui défile : c'est LUI qui rend le comportement collant
+     observable, comme dans la vraie modale. */
+  .scroller { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 14px; }
+
+  /* --- Bandeau du haut (variantes v1 / v2) ------------------------------- */
+  .band {
+    display: none;
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklch, var(--border), transparent 93%);
+    padding: 8px 18px 9px;
+  }
+  .mock[data-variant="v1"] .band, .mock[data-variant="v2"] .band { display: block; }
+  .band__head {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 7px;
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; opacity: .62;
+  }
+  .band__target {
+    margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 650; opacity: 1;
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; font-size: 11px;
+  }
+  .band__rows { display: flex; flex-direction: column; gap: 7px; }
+  .band__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+  /* --- v2 raffiné : une seule rangée qui se replie ------------------------ */
+  /* La légende et la cible passent DANS le flux : une ligne de moins, et la
+     cible reste visible sans bandeau de titre. */
+  .mock[data-variant="v2"] .band__head { display: none; }
+  .band__flow { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; }
+  .band__seg { display: flex; align-items: center; gap: 4px; }
+  .band__seglabel {
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 2px 6px; border-radius: 999px; white-space: nowrap;
+  }
+  .band__chip {
+    font-size: 11px; font-weight: 650; padding: 2px 9px; border-radius: 999px;
+    border: 1px solid var(--ring); white-space: nowrap;
+  }
+  .key--band { min-width: 32px; height: 32px; padding: 0 5px; font-size: 15px; border-radius: 8px; }
+  .band__height { font-size: 10.5px; opacity: .5; margin-left: auto; white-space: nowrap; }
+  .band__label {
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; opacity: .45;
+    width: 74px; flex: 0 0 auto;
+  }
+  .band__target-hint {
+    font-size: 11px; opacity: .55; margin: 0; padding: 4px 0 0;
+  }
+
+  /* --- Blocs ------------------------------------------------------------- */
+  .block {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    background: transparent;
+  }
+  .block[data-active="true"] {
+    border-color: var(--ring);
+    border-left-color: var(--ring);
+    background: color-mix(in oklch, var(--border), transparent 88%);
+  }
+  .block__body { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 3px; }
+  .block__gutter {
+    width: 26px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center;
+    gap: 2px; opacity: .5; font-size: 13px; color: var(--foreground);
+  }
+  .block__field {
+    flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; font-size: 14px; background: transparent; min-height: 34px;
+    display: flex; align-items: center;
+  }
+  .block__field--prose { display: block; line-height: 1.5; }
+  .block__kind {
+    font-size: 12px; opacity: .85; border: 1px solid var(--border); border-radius: 6px;
+    padding: 3px 7px; white-space: nowrap; flex: 0 0 auto; display: flex; align-items: center; gap: 4px;
+  }
+  .grid-mock {
+    display: grid; grid-template-columns: repeat(3, minmax(60px, 1fr)); gap: 4px;
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px; font-size: 13px;
+  }
+  .grid-mock span { border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; }
+
+  /* --- Le pied actuel (v0) et le pied collant (v3) ----------------------- */
+  .footer {
+    display: none;
+    border-top: 1px dashed color-mix(in oklch, var(--foreground), transparent 80%);
+    background: color-mix(in oklch, var(--border), transparent 93%);
+    border-radius: 0 0 10px 10px;
+    padding: 9px 12px 11px 37px;
+    flex-direction: column; gap: 8px;
+  }
+  .mock[data-variant="v0"] .block[data-active="true"] .footer,
+  .mock[data-variant="v3"] .block[data-active="true"] .footer { display: flex; }
+  /* v3 : le pied garde sa place dans le flux, il se contente de rester visible
+     en bas de la zone tant que son bloc est à l'écran. C'est toute la
+     différence avec un bandeau hors flux — et c'est pourquoi il ne supprime
+     PAS le décalage. */
+  .mock[data-variant="v3"] .footer { position: sticky; bottom: 0; }
+
+  .footer__title {
+    margin: 0; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; opacity: .6;
+  }
+  .keys { display: flex; flex-wrap: wrap; gap: 4px; }
+  .key {
+    min-width: 40px; height: 40px; padding: 0 8px; border-radius: 9px; font-size: 17px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid color-mix(in oklch, var(--border), currentColor 12%);
+    background: color-mix(in oklch, var(--border), transparent 82%);
+    cursor: pointer; font-family: inherit; color: inherit;
+  }
+  .key--op { min-width: 46px; height: 44px; border-radius: 10px; font-size: 19px; }
+  .key--named { min-width: 70px; height: 52px; flex-direction: column; gap: 3px; font-size: 19px; }
+  .key--named small { font-size: 10px; opacity: .85; white-space: nowrap; }
+  .key--action {
+    height: 28px; min-width: 0; padding: 0 11px; border-radius: 999px; font-size: 12px; gap: 5px;
+  }
+  .key[data-disabled="true"] {
+    border-style: dashed;
+    border-color: color-mix(in oklch, var(--foreground), transparent 70%);
+    background: transparent;
+    color: color-mix(in oklch, var(--foreground), transparent 62%);
+    cursor: not-allowed;
+  }
+  .footer__note { margin: 0; font-size: 12px; line-height: 1.45; opacity: .7; }
+
+  /* --- Annotations ------------------------------------------------------- */
+  .notes { max-width: 1100px; margin-top: 16px; display: grid; gap: 10px; }
+  .note {
+    background: #fff; border: 1px solid #d4d4d8; border-radius: 10px; padding: 11px 14px;
+    font-size: 13px; line-height: 1.6;
+  }
+  .note h3 { margin: 0 0 5px; font-size: 13.5px; }
+  .note ul { margin: 5px 0 0; padding-left: 19px; }
+  .note li { margin-bottom: 3px; }
+  .pro { color: #15803d; font-weight: 600; }
+  .con { color: #b91c1c; font-weight: 600; }
+  .verdict {
+    display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    background: #e4e4e7; margin-bottom: 6px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Bandeau d'outils de la modale de description — 4 maquettes</h1>
+<p class="lede">
+  Clique sur un bloc pour le rendre actif, puis change de variante et de cas. Les couleurs sont
+  les jetons réels de l'app. Le point à observer est double : <strong>le contenu des blocs
+  saute-t-il quand tu changes de bloc actif ?</strong> et <strong>atteins-tu encore les outils
+  quand la description est longue ?</strong>
+</p>
+<p class="lede">
+  <strong>Ce que j'ai vérifié et qui change la donne :</strong> <code>position: sticky</code> ne
+  retire pas l'élément du flux. Un pied collant garde donc sa place et <em>ne supprime pas</em> le
+  décalage — seule une bande <em>hors des blocs</em> le supprime. C'est l'argument technique en
+  faveur de ton idée.
+</p>
+
+<div class="controls">
+  <fieldset>
+    <legend>Variante</legend>
+    <button data-variant="v0" aria-pressed="true">v0 — aujourd'hui</button>
+    <button data-variant="v1" aria-pressed="false">v1 — haut, suit le type</button>
+    <button data-variant="v2" aria-pressed="false">v2 — haut, unifié</button>
+    <button data-variant="v3" aria-pressed="false">v3 — pied collant</button>
+  </fieldset>
+  <fieldset>
+    <legend>Cas</legend>
+    <button data-case="single" aria-pressed="false">un seul bloc</button>
+    <button data-case="mixed" aria-pressed="true">blocs de types différents</button>
+    <button data-case="long" aria-pressed="false">beaucoup de blocs (défile)</button>
+  </fieldset>
+  <fieldset>
+    <legend>Densité du bandeau v2</legend>
+    <button data-density="essential" aria-pressed="true">essentiel (1 ligne)</button>
+    <button data-density="full" aria-pressed="false">complet (2 lignes)</button>
+  </fieldset>
+  <fieldset>
+    <legend>Thème</legend>
+    <button data-theme="light" aria-pressed="true">clair</button>
+    <button data-theme="dark" aria-pressed="false">sombre</button>
+  </fieldset>
+</div>
+
+<div class="mock" data-variant="v0" data-theme="light">
+  <div class="crumb">Nombres relatifs › Addition</div>
+  <div class="title"><span class="dot"></span><span>Signes contraires</span></div>
+
+  <div class="band">
+    <div class="band__head">
+      <span id="bandCaption">Outils du bloc actif</span>
+      <span class="band__target" id="bandTarget">Bloc 1 · Texte</span>
+    </div>
+    <div class="band__rows" id="bandRows"></div>
+  </div>
+
+  <div class="scroller" id="scroller"></div>
+</div>
+
+<div class="notes" id="notes"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Jeux de touches, recopiés des palettes réelles de l'app.
+// ---------------------------------------------------------------------------
+const SIGNS = ['≤','≥','≠','≈','×','÷','±','·','→','⇒','⇔','∈','√','π','∞','°'];
+const OPS = [['×','Multiplié'],['÷','Divisé'],['≤','Inférieur ou égal'],['≥','Supérieur ou égal'],['≠','Différent'],['π','Pi']];
+const GREEK = ['α','β','γ','θ','Δ','Σ'];
+
+// ---------------------------------------------------------------------------
+// Le modèle UNIFIÉ du bandeau v2.
+//
+// Deux décisions, et ce sont elles qui font gagner la place :
+//
+//  1. UN SEUL glyphe par signe. `≤` apparaissait dans la palette de texte ET
+//     dans celle de formule ; dans un bandeau unifié, l'afficher deux fois
+//     serait un doublon visuel et une place perdue. La même touche écrit
+//     l'Unicode dans un texte et le LaTeX dans une formule : même endroit,
+//     même couleur, même sens à l'écran.
+//  2. Les teintes sont celles de l'app (`GROUP_TONES` de LanguageHelpPalette,
+//     mixées en transparence pour rester lisibles en clair COMME en sombre) —
+//     une teinte par catégorie, comme aujourd'hui.
+// ---------------------------------------------------------------------------
+const TONES = ['oklch(0.6 0.17 250)', 'oklch(0.66 0.16 75)', 'oklch(0.62 0.15 155)', 'oklch(0.62 0.17 20)'];
+
+/** La même fonction que l'app : un voile de teinte qui marche sur les deux thèmes. */
+const tint = (hue, share) => `color-mix(in oklch, ${hue}, transparent ${100 - share}%)`;
+
+/** [glyphe, libellé, ce qu'il écrit dans une formule] */
+const UNIFIED = [
+  { name: 'Comparaisons', hue: 0, essential: true,
+    items: [['≤','Inférieur ou égal','\\leq'], ['≥','Supérieur ou égal','\\geq'], ['≠','Différent de','\\neq'], ['≈','Environ égal à','\\approx']] },
+  { name: 'Opérations', hue: 1, essential: true,
+    items: [['×','Multiplié par','\\times'], ['÷','Divisé par','\\div'], ['±','Plus ou moins','\\pm'], ['·','Point multiplicatif','\\cdot'], ['√','Racine carrée','\\sqrt{#0}']] },
+  { name: 'Divers', hue: 2, essential: true,
+    items: [['→','Tend vers','\\to'], ['π','Pi','\\pi'], ['∞','Infini','\\infty'], ['°','Degré','^{\\circ}']] },
+  { name: 'Ensembles', hue: 3, essential: false,
+    items: [['∈','Appartient à','\\in'], ['∉','N’appartient pas à','\\notin'], ['∪','Union','\\cup'], ['∩','Intersection','\\cap'], ['∅','Ensemble vide','\\varnothing']] },
+  { name: 'Logique', hue: 3, essential: false,
+    items: [['⇒','Donc, implique','\\Rightarrow'], ['⇔','Équivalent à','\\Leftrightarrow']] },
+  { name: 'Grec', hue: 2, essential: false,
+    items: [['α','Alpha','\\alpha'], ['β','Bêta','\\beta'], ['θ','Thêta','\\theta'], ['Δ','Delta','\\Delta'], ['Σ','Sigma','\\Sigma']] },
+];
+
+const el = (tag, props = {}, children = []) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') node.className = v;
+    else if (k === 'text') node.textContent = v;
+    else if (k === 'html') node.innerHTML = v;
+    else if (k.startsWith('data-')) node.setAttribute(k, v);
+    else node[k] = v;
+  }
+  for (const child of [].concat(children)) if (child) node.append(child);
+  return node;
+};
+
+const keys = (chars, cls = 'key') => el('div', { class: 'keys' },
+  chars.map(c => el('span', { class: cls, text: c })));
+
+const namedKey = ([glyph, name]) => el('span', { class: 'key key--op key--named' }, [
+  el('span', { text: glyph }), el('small', { text: name })
+]);
+
+/** Les touches nommées arrivent DÉJÀ construites : ne pas les repasser par `keys`,
+ *  qui les ré-envelopperait dans un span vide. */
+const namedKeys = list => el('div', { class: 'keys' }, list.map(namedKey));
+
+const actionKey = text => el('span', { class: 'key key--action', text });
+
+// ---------------------------------------------------------------------------
+// Les trois cas demandés.
+// ---------------------------------------------------------------------------
+function blocksFor(scenario) {
+  if (scenario === 'single') {
+    return [{ kind: 'text', prose: "Deux nombres sont dits opposés quand leur somme est nulle." }];
+  }
+  if (scenario === 'mixed') {
+    return [
+      { kind: 'text', prose: "Pour tous nombres a et b : si a &lt; b alors a + c &lt; b + c." },
+      { kind: 'math', formula: 'a + c &lt; b + c' },
+      { kind: 'table', rows: [['a', '-3', '-1'], ['-a', '3', '1']] },
+      { kind: 'image', caption: 'droite graduée' },
+    ];
+  }
+  const many = [];
+  for (let i = 1; i <= 9; i++) {
+    if (i % 4 === 0) many.push({ kind: 'math', formula: 'x_' + i + ' + ' + i });
+    else if (i % 4 === 3) many.push({ kind: 'table', rows: [[i, -i], [i + 1, -(i + 1)]] });
+    else many.push({ kind: 'text', prose: 'Point ' + i + ' de la leçon, avec une phrase assez longue pour occuper la ligne et rendre le défilement réaliste.' });
+  }
+  return many;
+}
+
+const KIND_LABEL = { text: 'Texte', math: 'Formule', table: 'Tableau', image: 'Image' };
+
+const state = { variant: 'v0', scenario: 'mixed', active: 1, theme: 'light', density: 'essential' };
+
+// ---------------------------------------------------------------------------
+// Le contenu d'un bloc, hors outils.
+// ---------------------------------------------------------------------------
+function blockBody(block) {
+  const field = el('div', { class: 'block__field' + (block.kind === 'text' ? ' block__field--prose' : '') });
+  if (block.kind === 'text') field.innerHTML = block.prose;
+  else if (block.kind === 'math') field.innerHTML = '<em>' + block.formula + '</em>';
+  else if (block.kind === 'image') field.innerHTML = '🖼 ' + block.caption + ' <span style="opacity:.55">(120 × 60)</span>';
+  else {
+    const grid = el('div', { class: 'grid-mock' });
+    block.rows.flat().forEach(c => grid.append(el('span', { text: c })));
+    field.style.border = 'none';
+    field.style.padding = '0';
+    field.append(grid);
+  }
+  return el('div', { class: 'block__body' }, [
+    el('div', { class: 'block__gutter', html: '⣿<br>⌃<br>⌄' }),
+    field,
+    el('span', { class: 'block__kind', text: KIND_LABEL[block.kind] }),
+  ]);
+}
+
+// ---------------------------------------------------------------------------
+// Le pied « sur le bloc » (v0 et v3).
+// ---------------------------------------------------------------------------
+function footerFor(block) {
+  const footer = el('div', { class: 'footer' });
+  if (block.kind === 'text') {
+    footer.append(el('p', { class: 'footer__title', text: 'Caractères et symboles' }));
+    footer.append(keys(SIGNS));
+    footer.append(keys(['’', '«', '»', '—'], 'key'));
+  } else if (block.kind === 'math') {
+    footer.append(el('p', { class: 'footer__title', text: 'Symboles mathématiques' }));
+    footer.append(namedKeys(OPS));
+    footer.append(keys(GREEK, 'key key--op'));
+  } else if (block.kind === 'table') {
+    footer.append(el('p', { class: 'footer__title', text: 'Tableau' }));
+    footer.append(el('div', { class: 'keys' }, [
+      actionKey('＋ Ajouter une ligne'), actionKey('＋ Ajouter une colonne'), actionKey('Aa Transformer en texte'),
+    ]));
+    footer.append(el('p', { class: 'footer__note', text: "Les + au-dessus des colonnes et à gauche des lignes insèrent exactement là où tu cliques ; les corbeilles retirent." }));
+  } else {
+    footer.append(el('p', { class: 'footer__title', text: 'Image' }));
+    footer.append(el('div', { class: 'keys' }, [actionKey('160'), actionKey('240'), actionKey('320'), actionKey('480')]));
+  }
+  return footer;
+}
+
+// ---------------------------------------------------------------------------
+// Le bandeau du haut (v1 : suit le type ; v2 : unifié, positions fixes).
+// ---------------------------------------------------------------------------
+function renderBand(blocks) {
+  const rows = document.getElementById('bandRows');
+  const active = blocks[state.active] || blocks[0];
+  document.getElementById('bandCaption').textContent =
+    state.variant === 'v2' ? 'Outils — mêmes touches, mêmes places' : 'Outils du bloc actif';
+  document.getElementById('bandTarget').textContent =
+    'Bloc ' + (state.active + 1) + ' · ' + KIND_LABEL[active.kind];
+  rows.replaceChildren();
+
+  // v0 et v3 n'ont PAS de bande : ne rien y laisser, sinon le contenu de la
+  // variante précédente y traîne et réapparaît au retour.
+  if (state.variant === 'v0' || state.variant === 'v3') {
+    document.getElementById('bandCaption').textContent = '';
+    document.getElementById('bandTarget').textContent = '';
+    return;
+  }
+
+  const row = (label, content) => el('div', { class: 'band__row' }, [
+    el('span', { class: 'band__label', text: label }), content,
+  ]);
+
+  if (state.variant === 'v1') {
+    // Le contenu SUIT le type : les touches changent de place et de nature.
+    if (active.kind === 'text') rows.append(row('Signes', keys(SIGNS)));
+    else if (active.kind === 'math') rows.append(row('Formule', namedKeys(OPS)));
+    else if (active.kind === 'table') rows.append(row('Tableau', el('div', { class: 'keys' }, [
+      actionKey('＋ Ajouter une ligne'), actionKey('＋ Ajouter une colonne')])));
+    else rows.append(row('Image', el('div', { class: 'keys' }, [actionKey('160'), actionKey('240'), actionKey('320')])));
+    rows.append(el('p', { class: 'band__target-hint', text: "Le bloc visé est surligné et nommé ci-dessus — sans ça, on ne saurait pas où le clic va écrire." }));
+    return;
+  }
+
+  // -------------------------------------------------------------------------
+  // v2 RAFFINÉ — une seule rangée qui se replie, familles EN LIGNE avec leur
+  // teinte, et aucune touche qui se déplace d'un bloc à l'autre.
+  // -------------------------------------------------------------------------
+  const t = active.kind;
+  // Une image n'a aucun champ texte : là, et là seulement, les signes ne
+  // peuvent pas s'appliquer.
+  const symbolsApply = t !== 'image';
+  const shown = UNIFIED.filter(segment => state.density === 'full' || segment.essential);
+
+  const flow = el('div', { class: 'band__flow' });
+  // La cible est DANS le flux : une ligne de titre en moins, et l'information la
+  // plus importante de la bande reste sous les yeux.
+  flow.append(el('span', { class: 'band__chip', text: 'Bloc ' + (state.active + 1) + ' · ' + KIND_LABEL[t] }));
+
+  for (const segment of shown) {
+    const hue = TONES[segment.hue];
+    const seg = el('div', { class: 'band__seg' });
+    seg.append(el('span', {
+      class: 'band__seglabel',
+      text: segment.name,
+      style: { background: tint(hue, 16), border: '1px solid ' + tint(hue, 40) },
+    }));
+    const segKeys = el('div', { class: 'keys' });
+    for (const [glyph, label, latex] of segment.items) {
+      const key = el('button', {
+        type: 'button',
+        class: 'key key--band',
+        text: glyph,
+        // L'infobulle dit aussi ce que la touche écrira DANS CE BLOC : le même
+        // signe écrit l'Unicode dans un texte et le LaTeX dans une formule.
+        title: label + '  →  ' + (t === 'math' ? latex : glyph),
+      });
+      key.style.border = '1px solid ' + tint(hue, 38);
+      key.style.background = tint(hue, 13);
+      // Grisé, jamais retiré ni déplacé : c'est la définition de v2.
+      if (!symbolsApply) key.setAttribute('data-disabled', 'true');
+      segKeys.append(key);
+    }
+    seg.append(segKeys);
+    flow.append(seg);
+  }
+
+  // Les actions du tableau ne sont pas des signes : teinte neutre, et elles
+  // occupent leur place définitive même quand elles ne s'appliquent pas — un
+  // bandeau dont la hauteur ne change jamais est ce qui supprime le décalage.
+  const actions = el('div', { class: 'band__seg' });
+  actions.append(el('span', { class: 'band__seglabel', text: 'Tableau', style: { border: '1px solid var(--border)' } }));
+  const pills = el('div', { class: 'keys' }, [actionKey('＋ Ligne'), actionKey('＋ Colonne')]);
+  if (t !== 'table') pills.querySelectorAll('.key').forEach(k => k.setAttribute('data-disabled', 'true'));
+  actions.append(pills);
+  flow.append(actions);
+
+  // La hauteur RÉELLEMENT occupée, mesurée : c'est le chiffre qui répond à
+  // « minimum d'espace vertical ». jsdom ne calcule pas de mise en page, donc la
+  // mesure est simplement sautée quand `requestAnimationFrame` n'existe pas.
+  const measured = el('span', { class: 'band__height' });
+  flow.append(measured);
+  rows.append(flow);
+  if (typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => {
+      const band = document.querySelector('.band');
+      if (band !== null && band.offsetHeight > 0) measured.textContent = 'bande : ' + band.offsetHeight + ' px';
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+function render() {
+  const blocks = blocksFor(state.scenario);
+  if (state.active >= blocks.length) state.active = blocks.length - 1;
+  if (state.active < 0) state.active = 0;
+
+  const scroller = document.getElementById('scroller');
+  scroller.replaceChildren();
+  blocks.forEach((block, i) => {
+    const wrap = el('div', { class: 'block', 'data-active': String(i === state.active) });
+    wrap.append(blockBody(block));
+    wrap.append(footerFor(block));
+    wrap.addEventListener('click', () => { state.active = i; render(); });
+    scroller.append(wrap);
+  });
+
+  renderBand(blocks);
+
+  document.querySelectorAll('.mock')[0].setAttribute('data-variant', state.variant);
+  document.querySelectorAll('.mock')[0].setAttribute('data-theme', state.theme);
+  renderNotes(blocks);
+}
+
+// ---------------------------------------------------------------------------
+const NOTES = {
+  v0: {
+    title: 'v0 — aujourd\'hui : le pied est sous le bloc actif',
+    pros: ['Proximité maximale : 45–70 px entre le curseur et la palette.', 'Aucun chrome permanent.'],
+    cons: [
+      'Changer de bloc fait sauter le contenu de 120–190 px : le pied quitte un bloc et apparaît sous un autre.',
+      'Sur une description longue, le pied sort de l\'écran avec son bloc : il faut faire défiler pour retrouver la palette.',
+    ],
+  },
+  v1: {
+    title: 'v1 — bandeau en haut, contenu qui SUIT le type du bloc actif',
+    pros: [
+      'Le décalage disparaît complètement : la bande est hors des blocs, sa hauteur ne change jamais.',
+      'Toujours visible, même sur une description très longue — c\'est la vraie réponse au défilement.',
+      'Peu de chrome : une seule rangée.',
+    ],
+    cons: [
+      'Les touches CHANGENT de nature et de place d\'un bloc à l\'autre : plus de mémoire du geste.',
+      'Sans le nom du bloc cible et le surlignage, on ne sait pas où le clic va écrire (l\'audit en faisait son objection principale).',
+      'Trajet curseur → haut : jusqu\'à ~800 px, contre 50 px pour le pied.',
+    ],
+  },
+  v2: {
+    title: 'v2 — bandeau en haut, unifié : le raffinement demandé',
+    pros: [
+      'Le décalage disparaît : bande hors des blocs, hauteur constante.',
+      'AUCUN doublon de glyphe. `≤` n\'a plus deux touches : la même écrit l\'Unicode dans un texte et le LaTeX dans une formule — même endroit, même teinte, même sens à l\'écran. C\'était la place perdue de la version précédente.',
+      'Mêmes touches aux mêmes places quel que soit le bloc : la mémoire du geste tient, ce qui répond à l\'objection la plus solide de l\'audit.',
+      'Les familles restent en LIGNE, avec la teinte par catégorie de l\'app (les 4 teintes de `LanguageHelpPalette`, mixées en transparence — lisibles en clair comme en sombre).',
+      'La cible (« Bloc 2 · Formule ») est DANS le flux : une ligne de titre en moins.',
+      'Densité « essentiel » : une seule ligne, 13 touches. Densité « complet » : 25 touches, une ou deux lignes selon la largeur. La hauteur RÉELLE est mesurée en direct et affichée à droite du bandeau — je ne l\'annonce pas de mémoire.',
+    ],
+    cons: [
+      'Trajet curseur → haut : jusqu\'à ~800 px, contre 50 px pour le pied. C\'est le prix réel, et il ne disparaît pas.',
+      'En densité « complet », une deuxième ligne de chrome permanent sur les fenêtres étroites.',
+      'Les actions de tableau restent grisées hors tableau : une interface avec du gris permanent peut donner une impression de « en panne ».',
+    ],
+  },
+  v3: {
+    title: 'v3 — pied collant (position: sticky) sous le bloc actif',
+    pros: ['Reste proche du bloc.', 'Survit au défilement tant que son bloc est à l\'écran.'],
+    cons: [
+      'NE supprime PAS le décalage : un élément collant garde sa place dans le flux. C\'est ce que j\'ai vérifié, et pourquoi j\'avais tort de te le présenter comme la solution.',
+      'Quand le bloc actif est passé au-dessus de l\'écran, le pied reste à sa place dans le flux, donc il disparaît aussi.',
+    ],
+  },
+};
+
+function renderNotes(blocks) {
+  const n = NOTES[state.variant];
+  const box = el('div', { class: 'note' });
+  box.append(el('span', { class: 'verdict', text: 'Variante ' + state.variant.toUpperCase() }));
+  box.append(el('h3', { text: n.title }));
+  box.append(el('ul', {}, [
+    ...n.pros.map(p => el('li', { html: '<span class="pro">＋</span> ' + p })),
+    ...n.cons.map(c => el('li', { html: '<span class="con">−</span> ' + c })),
+  ]));
+
+  const caseBox = el('div', { class: 'note' });
+  const activeBlock = blocks[state.active] || blocks[0];
+  caseBox.append(el('h3', { text: 'Cas affiché : ' + document.querySelector('[data-case][aria-pressed="true"]').textContent }));
+  caseBox.append(el('p', {
+    html: state.scenario === 'single'
+      ? 'Avec <strong>un seul bloc</strong>, un bandeau en haut est en partie redondant : le bloc et ses outils sont déjà dans le même écran. C\'est le cas où v0 est le plus défendable, et où v2 (contenu unifié) coûte le plus de chrome pour rien.'
+      : state.scenario === 'mixed'
+        ? 'Avec <strong>des blocs de types différents</strong>, c\'est ici que la différence entre v1 et v2 se voit : en v1 les touches sautent quand tu passes du texte à la formule, en v2 elles restent en place et se grisent.'
+        : 'Avec <strong>beaucoup de blocs</strong>, fais défiler : en v0 et v3 le pied finit par sortir de l\'écran avec son bloc, en v1 et v2 la bande reste. C\'est l\'argument le plus fort pour une bande hors des blocs.',
+  }));
+  caseBox.append(el('p', {
+    html: 'Bloc actif : <strong>Bloc ' + (state.active + 1) + ' · ' + KIND_LABEL[activeBlock.kind] + '</strong>. Change de bloc et regarde si le contenu saute.',
+  }));
+
+  const openBox = el('div', { class: 'note' });
+  openBox.append(el('h3', { text: 'Ce que je te demande de trancher' }));
+  openBox.append(el('p', {
+    html: 'v1 ou v2 ? Autrement dit : acceptes-tu que <strong>les touches changent de place</strong> entre un bloc texte et un bloc formule (v1, sobre), ou préfères-tu <strong>un jeu unique toujours aux mêmes places</strong>, avec ce qui ne s\'applique pas grisé (v2, plus de chrome mais le geste se mémorise) ?',
+  }));
+
+  document.getElementById('notes').replaceChildren(box, caseBox, openBox);
+}
+
+// ---------------------------------------------------------------------------
+document.querySelectorAll('.controls button').forEach(button => {
+  button.addEventListener('click', () => {
+    const group = button.parentElement;
+    group.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    button.setAttribute('aria-pressed', 'true');
+    if (button.dataset.variant) state.variant = button.dataset.variant;
+    if (button.dataset.case) { state.scenario = button.dataset.case; state.active = 1; }
+    if (button.dataset.theme) state.theme = button.dataset.theme;
+    if (button.dataset.density) state.density = button.dataset.density;
+    render();
+  });
+});
+
+render();
+</script>
+</body>
+</html>
