@@ -178,9 +178,9 @@ describe('DescriptionDialog', () => {
     const user = userEvent.setup()
     const props = renderDialog({ blocks: text('Como estas') })
 
-    // The palette is the current block's footer: the languages are there from
-    // the start, with no button to open first.
-    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    // Les langues sont des onglets du bandeau, présents dès le premier rendu :
+    // on ouvre l'onglet, puis on clique le caractère.
+    await user.click(screen.getByRole('button', { name: 'Espagnol' }))
     await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
     await user.click(screen.getByRole('button', { name: /^fermer$/i }))
 

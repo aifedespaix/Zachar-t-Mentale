@@ -1,5 +1,6 @@
 import { FlaskConical, Sigma } from 'lucide-react'
-import type { SymbolTab } from '../types/symbolBand'
+import type { SymbolFamily, SymbolTab } from '../types/symbolBand'
+import { LANGUAGES, type LanguageHelp } from './languageHelp'
 import { SCIENCES_FAMILIES, SYMBOL_FAMILIES } from './symbolSets'
 
 /**
@@ -19,11 +20,9 @@ import { SCIENCES_FAMILIES, SYMBOL_FAMILIES } from './symbolSets'
  *    ouvertures de la modale et entre deux lancements (voir
  *    `persistence/bandTab`), et il ne part jamais dans un fichier.
  *
- * ⚠️ **Les onglets de langue (Anglais / Espagnol / Français) ne sont pas encore
- * ici.** Leur contenu est prêt — `languageHelp` porte déjà les groupes — mais les
- * ajouter exige de retirer la palette d'accents du pied du bloc *dans le même
- * passage* : sinon les mêmes caractères existeraient à deux endroits. C'est
- * l'étape suivante, avec la migration des tests qui vont avec.
+ * Les onglets de langue ont `icon: null` : leur visuel est un DRAPEAU, dessiné
+ * en SVG par `LanguageFlag`. Pas d'emoji drapeau — il s'affiche « GB » sur
+ * Windows, où vit cette app.
  */
 export const SYMBOL_TABS: SymbolTab[] = [
   {
@@ -38,7 +37,41 @@ export const SYMBOL_TABS: SymbolTab[] = [
     icon: FlaskConical,
     families: SCIENCES_FAMILIES,
   },
+  // Les langues étaient les dernières à garder un pied de bloc, parce qu'elles
+  // dépendaient d'une langue à choisir. Elles passent au bandeau comme les
+  // autres : le choix devient un onglet, donc un geste en plus au lieu d'un
+  // état de plus, et le pied n'a plus rien à porter.
+  ...LANGUAGES.map(language => ({
+    id: language.id,
+    label: language.label,
+    icon: null,
+    families: familiesOf(language),
+  })),
 ]
+
+/**
+ * Un groupe de caractères de langue, vu comme une famille du bandeau.
+ *
+ * `textOnly` est ce qui grise la famille hors d'un texte (voir `SymbolBand`),
+ * et `hue` est l'INDEX du groupe : c'est la même table `GROUP_TONES` que la
+ * palette d'origine, donc les couleurs suivent le groupe et non l'onglet.
+ *
+ * `closesWith`/`spaced` sont repris TELS QUELS : `¿…?` et `« … »` s'écrivent
+ * d'un seul clic, curseur au milieu, et aplatir la paire serait une régression.
+ */
+function familiesOf(language: LanguageHelp): SymbolFamily[] {
+  return language.groups.map((group, hue) => ({
+    name: group.name,
+    hue,
+    textOnly: true,
+    symbols: group.characters.map(character => ({
+      glyph: character.char,
+      label: character.label,
+      closesWith: character.closesWith,
+      spaced: character.spaced,
+    })),
+  }))
+}
 
 /** L'onglet ouvert par défaut, et celui qu'on retrouve quand le réglage est illisible. */
 export const DEFAULT_TAB: SymbolTab['id'] = 'maths'

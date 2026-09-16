@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react'
 import type { CardBlockKind } from '../types/cardBlock'
 import type { BandTabId, PaletteSymbol } from '../types/symbolBand'
 import { Hint } from '../components/ui/hint'
-import { GROUP_TONES, tint } from './LanguageHelpPalette'
+import { GROUP_TONES, LanguageFlag, tint } from './LanguageHelpPalette'
 import { SYMBOL_TABS } from './symbolTabs'
 
 export interface SymbolBandProps {
@@ -80,6 +80,10 @@ export function SymbolBand({
           {SYMBOL_TABS.map(tab => {
             const Icon = tab.icon
             const open = tab.id === activeTab
+            // Un onglet de langue porte un DRAPEAU et non une icône (`icon:
+            // null`) : le drapeau est un SVG, jamais un emoji, qui s'afficherait
+            // « GB » sur Windows.
+            const flag = tab.id === 'en' || tab.id === 'es' || tab.id === 'fr' ? tab.id : null
             return (
               <Hint key={tab.id} label={open ? `${tab.label} — cliquer pour fermer` : tab.label}>
                 <button
@@ -101,7 +105,7 @@ export function SymbolBand({
                     fontWeight: open ? 650 : 500,
                   }}
                 >
-                  {Icon !== null && <Icon size={14} />}
+                  {flag !== null ? <LanguageFlag id={flag} /> : Icon !== null && <Icon size={14} />}
                   {tab.label}
                 </button>
               </Hint>
@@ -164,7 +168,7 @@ export function SymbolBand({
                           // magique.
                           symbol.latex !== undefined && kind === 'math'
                             ? `${symbol.label} — écrit ${symbol.latex}`
-                            : `${symbol.label} — écrit ${symbol.glyph}`
+                            : `${symbol.label} — écrit ${keyFace(symbol)}`
                         }
                       >
                         <button
@@ -185,7 +189,7 @@ export function SymbolBand({
                             background: tint(hue, 20),
                           }}
                         >
-                          {symbol.glyph}
+                          {keyFace(symbol)}
                         </button>
                       </Hint>
                     )
@@ -198,6 +202,16 @@ export function SymbolBand({
       )}
     </div>
   )
+}
+
+/**
+ * Ce qu'une touche MONTRE : les deux signes d'une paire (`¿ ?`, `« »`) quand le
+ * clic les écrit ensemble, sinon le glyphe seul. C'est le contrat de la palette
+ * de langue d'origine, repris tel quel : une touche se lit comme le texte
+ * qu'elle écrit, donc la paire n'a pas à être reconstituée de tête.
+ */
+function keyFace(symbol: PaletteSymbol): string {
+  return symbol.closesWith === undefined ? symbol.glyph : `${symbol.glyph} ${symbol.closesWith}`
 }
 
 /**

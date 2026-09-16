@@ -17,8 +17,7 @@ import { MathFieldEditor, type MathFieldHandle, type MathfieldElement } from './
 import { SymbolBand } from './SymbolBand'
 import type { BandTabId, PaletteSymbol } from '../types/symbolBand'
 import { loadBandTab, saveBandTab } from '../persistence/bandTab'
-import { LanguageCharacterPalette } from './LanguageHelpPalette'
-import { insertCharacter, type LanguageId, type SpecialCharacter } from './languageHelp'
+import { insertCharacter, type SpecialCharacter } from './languageHelp'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -327,9 +326,9 @@ export interface BlockEditorProps {
  * permanent 280px column holding the mode switch, the symbol palette and the
  * character help, all acting on "whichever block is active" — is gone. In its
  * place, each block wears its own controls: reorder and delete in a gutter on
- * its left, its type switch on its right, and its own footer of writing aids
- * underneath (`BlockFooter`). Nothing has to be looked up, and nothing acts on
- * a block other than the one it is drawn on.
+ * its left, its type switch on its right — and every writing aid lives in the
+ * band ABOVE the list (`SymbolBand`), out of the blocks, so no block ever has a
+ * footer whose appearance or disappearance shifts the text under the pointer.
  */
 export function BlockEditor({
   blocks,
@@ -341,23 +340,18 @@ export function BlockEditor({
   autoFocusField = false,
   hiddenFamilies = [],
 }: BlockEditorProps) {
-  // Which block owns the footer — and, for a formula, which palette is live.
-  // Kept in state rather than derived from DOM focus so the footer still shows
-  // the right tools while the user is clicking inside it (which takes focus
-  // away from the block's own field).
+  // Which block the band's insertion targets. Kept in state rather than derived
+  // from DOM focus: the band is permanent, so it must still name a target while
+  // the user is clicking inside the band itself (which takes focus away from the
+  // block's own field).
   const [activeIndex, setActiveIndex] = useState(0)
 
-  // The active math block's live handle, so the footer's palette can insert
-  // into it. Every math block registers itself here on mount regardless of
-  // whether it is active — cheap, and it means the palette is ready the
-  // instant a block becomes active rather than one render late.
+  // The active math block's live handle, so the band's keys can insert into it.
+  // Every math block registers itself here on mount regardless of whether it is
+  // active — cheap, and it means the keys are ready the instant a block becomes
+  // active rather than one render late.
   const [mathFields, setMathFields] = useState<Record<number, MathFieldHandle | null>>({})
   const activeField = mathFields[activeIndex] ?? null
-
-  // The special-character palette's language: which one is helping, and
-  // whether one has been chosen at all. Local to the editor on purpose — it is
-  // a writing aid for the description open right now, not a document setting.
-  const [language, setLanguage] = useState<LanguageId | null>(null)
 
   /**
    * Ce que le champ focalisé peut recevoir, et c'est ce qui décide quelles
@@ -543,12 +537,13 @@ export function BlockEditor({
   /**
    * Inserts a palette character at the caret of the block being written.
    *
-   * The palette lives in the footer of ONE block — the active one — so that
-   * block is where the character goes, and there is no "which text block did
-   * they mean?" left to guess.
+   * The band's keys target ONE block — the active one — so that block is where
+   * the character goes, and there is no "which text block did they mean?" left
+   * to guess. The band's language tabs feed this same path, paired signs and
+   * all: a `¿` key is a `SpecialCharacter` like any other.
    *
    * A field that is not the focused element has no caret to respect — that is
-   * the keyboard path, where focus is on the palette button — so the character
+   * the keyboard path, where focus is on the band's key — so the character
    * goes to the end of the text: degraded, never a lost click. What the
    * character writes (its closing partner, the padding, where the caret lands)
    * is the character set's business; see `insertCharacter`.
@@ -588,7 +583,12 @@ export function BlockEditor({
     if (block?.kind === 'text') {
       // Réutilise l'insertion au caret du bloc texte — paires et sélection
       // comprises : un signe du bandeau est un `SpecialCharacter` comme un autre.
-      insertText({ char: symbol.glyph, label: symbol.label })
+      insertText({
+        char: symbol.glyph,
+        label: symbol.label,
+        closesWith: symbol.closesWith,
+        spaced: symbol.spaced,
+      })
       return
     }
     if (block?.kind === 'math') {
@@ -638,7 +638,12 @@ export function BlockEditor({
     if (!(focused instanceof HTMLInputElement)) return false
     const start = focused.selectionStart ?? text.length
     const end = focused.selectionEnd ?? start
-    const insertion = insertCharacter(text, start, end, { char: symbol.glyph, label: symbol.label })
+    const insertion = insertCharacter(text, start, end, {
+      char: symbol.glyph,
+      label: symbol.label,
+      closesWith: symbol.closesWith,
+      spaced: symbol.spaced,
+    })
     replace(
       activeIndex,
       setTableCell(block, row, col, typeof cell === 'string' ? insertion.text : { latex: insertion.text })
@@ -905,20 +910,6 @@ ull quand l'utilisateur l'a refermé pour
                 </div>
               </div>
 
-              {/* Le pied ne porte plus que les caractères de LANGUE. Les signes
-                  et les actions de tableau sont passés dans le bandeau, qui vit
-                  hors des blocs : un bloc formule ou tableau n'a donc plus de
-                  pied du tout, et changer de bloc ne déplace plus rien de ce
-                  côté. Les accents restent ici parce qu'ils dépendent d'une
-                  langue choisie, ce que le bandeau unique ne peut pas porter
-                  sans redevenir un panneau. */}
-              {isActive && block.kind === 'text' && (
-                <BlockFooter
-                  language={language}
-                  onChooseLanguage={setLanguage}
-                  onInsertCharacter={insertText}
-                />
-              )}
             </motion.div>
           )
         })}
@@ -1173,71 +1164,6 @@ function BlockKindMenu({
   )
 }
 
-/**
- * What a block offers while it is the one being worked on.
- *
- * This is the side panel's replacement, and it is deliberately attached to the
- * block rather than parked in a column: the math symbols appear under the
- * formula they write into, the special characters under the sentence they
- * belong to, and switching blocks moves the footer with the work. Nothing on
- * screen acts on a block the user is not looking at.
- */
-/**
- * Ce qui reste attaché au bloc : les caractères d'une LANGUE.
- *
- * Les signes mathématiques et les actions de tableau sont partis dans le
- * bandeau, au-dessus de la zone qui défile. Les accents restent ici pour une
- * raison qui n'est pas un oubli : ils dépendent d'une langue qu'on choisit, donc
- * ils ne peuvent pas tenir dans une bande unique et permanente qui doit montrer
- * les mêmes touches à tout moment.
- */
-function BlockFooter({
-  language,
-  onChooseLanguage,
-  onInsertCharacter,
-}: {
-  language: LanguageId | null
-  onChooseLanguage: (id: LanguageId) => void
-  onInsertCharacter: (character: SpecialCharacter) => void
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 9,
-        padding: '10px 12px 12px 37px',
-        borderTop: '1px dashed color-mix(in oklch, currentColor, transparent 80%)',
-        background: 'color-mix(in oklch, var(--border), transparent 93%)',
-        borderRadius: '0 0 10px 10px',
-      }}
-    >
-      <FooterTitle>Caractères spéciaux</FooterTitle>
-      <LanguageCharacterPalette
-        language={language}
-        onChooseLanguage={onChooseLanguage}
-        onInsert={onInsertCharacter}
-      />
-    </div>
-  )
-}
-
-function FooterTitle({ children }: { children: ReactNode }) {
-  return (
-    <p
-      style={{
-        margin: 0,
-        fontSize: 10.5,
-        fontWeight: 700,
-        textTransform: 'uppercase',
-        letterSpacing: '0.06em',
-        opacity: 0.6,
-      }}
-    >
-      {children}
-    </p>
-  )
-}
 
 const FIELD_STYLE = {
   width: '100%',
@@ -1258,7 +1184,7 @@ interface BlockFieldProps {
   onChange: (block: CardBlock) => void
   /** Plain Enter anywhere in the block — inserts a new block right after this one. */
   onEnterBlock: () => void
-  /** Reports the block's live math handle, for the footer's palette. Called with `null` when the block is not a formula (or unmounts as one). */
+  /** Reports the block's live math handle, for the band's keys. Called with `null` when the block is not a formula (or unmounts as one). */
   onFieldChange: (handle: MathFieldHandle | null) => void
 }
 
@@ -1376,8 +1302,8 @@ function MathBlockField({
   // MathLive is there, the field IS the typeset formula, so a second identical
   // rendering underneath it was the same thing said twice — and the quieter of
   // the two was the one the user could not type into. The palette in the
-  // block's footer is what carries the "what will this look like" answer now,
-  // at the moment a symbol is chosen rather than after.
+  // band ABOVE the list is what carries the "what will this look like" answer
+  // now, at the moment a symbol is chosen rather than after.
   //
   // The raw-LaTeX path is the one case where the field and the result really
   // differ, so the preview stays — but only there, next to the source it

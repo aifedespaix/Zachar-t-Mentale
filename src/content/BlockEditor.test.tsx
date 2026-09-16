@@ -40,6 +40,12 @@ function renderEditor(initial: CardBlock[]) {
   return { onState, latest }
 }
 
+// L'onglet du bandeau vit dans `localStorage`, partagé par tous les tests du
+// fichier : un test qui ouvre un onglet de langue le laisserait sinon ouvert
+// pour les suivants, et « d'où viennent ces caractères ? » changerait de test en
+// test.
+beforeEach(() => localStorage.clear())
+
 describe('convertBlock', () => {
   it('round-trips text through math without losing the string', () => {
     const text: CardBlock = { kind: 'text', text: 'x^2' }
@@ -632,7 +638,7 @@ describe('the math field', () => {
   })
 })
 
-describe('the character palette, in the footer of the text block', () => {
+describe('the character palette, in the tabs of the symbol band', () => {
   it('writes a maths sign INTO the sentence, which is what had nowhere to go', async () => {
     // The dead end this palette exists for: `≤` could only be typed in a FORMULA
     // block, so « f est croissante si a ≤ b » had to be cut into three blocks
@@ -662,9 +668,13 @@ describe('the character palette, in the footer of the text block', () => {
   it('offers the languages straight away, and no character until one is chosen', () => {
     renderEditor([{ kind: 'text', text: '' }])
 
-    // No button to open first: the palette is the block's footer, so it is
-    // there the moment the block is.
-    expect(screen.getByRole('group', { name: /choix de la langue/i })).toBeInTheDocument()
+    // Les langues sont des ONGLETS du bandeau, présents dès le premier rendu :
+    // plus de bouton à ouvrir, plus de pied qui apparaît avec le bloc actif.
+    const tabs = screen.getByRole('group', { name: /onglets du bandeau/i })
+    expect(within(tabs).getByRole('button', { name: 'Anglais' })).toBeInTheDocument()
+    expect(within(tabs).getByRole('button', { name: 'Espagnol' })).toBeInTheDocument()
+    expect(within(tabs).getByRole('button', { name: 'Français' })).toBeInTheDocument()
+    // Aucun caractère d'une langue tant que son onglet n'est pas ouvert.
     expect(screen.queryByRole('button', { name: /point d’interrogation inversé/i })).not.toBeInTheDocument()
   })
 
@@ -672,7 +682,7 @@ describe('the character palette, in the footer of the text block', () => {
     const user = userEvent.setup()
     renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: 'Espagnol' }))
 
     expect(screen.getByRole('button', { name: /point d’interrogation inversé/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /point d’exclamation inversé/i })).toBeInTheDocument()
@@ -685,7 +695,7 @@ describe('the character palette, in the footer of the text block', () => {
     const user = userEvent.setup()
     renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /langue : anglais/i }))
+    await user.click(screen.getByRole('button', { name: 'Anglais' }))
 
     expect(screen.getByRole('button', { name: /apostrophe anglaise/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /point d’interrogation inversé/i })).not.toBeInTheDocument()
@@ -695,7 +705,7 @@ describe('the character palette, in the footer of the text block', () => {
     const user = userEvent.setup()
     renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /langue : français/i }))
+    await user.click(screen.getByRole('button', { name: 'Français' }))
 
     expect(screen.getByRole('button', { name: 'o et e liés (cœur)' })).toBeInTheDocument()
   })
@@ -704,7 +714,7 @@ describe('the character palette, in the footer of the text block', () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([{ kind: 'text', text: 'don' }])
 
-    await user.click(screen.getByRole('button', { name: /langue : anglais/i }))
+    await user.click(screen.getByRole('button', { name: 'Anglais' }))
     await user.click(screen.getByRole('button', { name: /apostrophe anglaise/i }))
 
     const written = (latest()![0] as { text: string }).text
@@ -712,18 +722,18 @@ describe('the character palette, in the footer of the text block', () => {
     expect(written.replace('’', '')).toBe('don')
   })
 
-  it('puts the palette under the block being written in, and nowhere else', async () => {
+  it('writes into the block that is active, not the first one', async () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([
       { kind: 'text', text: 'premier' },
       { kind: 'text', text: 'second' },
     ])
 
-    // Block 1 owns the footer while it is the active one.
-    expect(screen.getAllByRole('group', { name: /choix de la langue/i })).toHaveLength(1)
-
     await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
-    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    // Le bandeau NOMME la cible qu'il écrira — « Bloc 2 · Texte » — et c'est
+    // elle, pas le premier bloc, qui reçoit la touche.
+    expect(screen.getByText(/bloc 2/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Espagnol' }))
     await user.click(screen.getByRole('button', { name: /eñe$/i }))
 
     const blocks = latest()!
@@ -731,17 +741,23 @@ describe('the character palette, in the footer of the text block', () => {
     expect((blocks[1] as { text: string }).text).toContain('ñ')
   })
 
-  it('is not shown at all when the description has no text block to write in', () => {
+  it('greyed the language characters in a formula, where they cannot be written', async () => {
+    const user = userEvent.setup()
     renderEditor([{ kind: 'math', latex: 'x' }])
 
-    expect(screen.queryByRole('group', { name: /choix de la langue/i })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Espagnol' }))
+
+    // Le bandeau est PERMANENT : la famille de langue est GRISÉE là où elle ne
+    // vaut rien, jamais retirée — sinon les touches changeraient de place d'un
+    // bloc à l'autre et le geste ne se mémoriserait plus.
+    expect(screen.getByRole('button', { name: /point d’interrogation inversé/i })).toBeDisabled()
   })
 
   it('shows both signs on the button, and no longer offers the closing one alone', async () => {
     const user = userEvent.setup()
     renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: 'Espagnol' }))
 
     expect(screen.getByRole('button', { name: /point d’interrogation inversé/i })).toHaveTextContent('¿ ?')
     expect(screen.queryByRole('button', { name: /guillemet fermant/i })).not.toBeInTheDocument()
@@ -751,7 +767,7 @@ describe('the character palette, in the footer of the text block', () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: 'Espagnol' }))
     await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
 
     expect((latest()![0] as { text: string }).text).toBe('¿?')
@@ -767,7 +783,7 @@ describe('the character palette, in the footer of the text block', () => {
     field.focus()
     field.setSelectionRange(0, 10)
 
-    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: 'Espagnol' }))
     await user.click(screen.getByRole('button', { name: /point d’interrogation inversé/i }))
 
     expect((latest()![0] as { text: string }).text).toBe('¿Cómo estás?')
@@ -777,10 +793,34 @@ describe('the character palette, in the footer of the text block', () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([{ kind: 'text', text: '' }])
 
-    await user.click(screen.getByRole('button', { name: /langue : espagnol/i }))
+    await user.click(screen.getByRole('button', { name: 'Espagnol' }))
     await user.click(screen.getByRole('button', { name: /guillemet ouvrant/i }))
 
     expect((latest()![0] as { text: string }).text).toBe('«  »')
+  })
+
+  it('ne fait plus bouger le contenu au changement de bloc : plus aucun pied sous les blocs', async () => {
+    const user = userEvent.setup()
+    renderEditor([
+      { kind: 'text', text: 'premier' },
+      { kind: 'text', text: 'second' },
+    ])
+
+    // Le but du chantier : le pied qui n'existait que sur le bloc actif a
+    // disparu, donc activer un autre bloc n'a plus de hauteur qui apparaît d'un
+    // côté et disparaît de l'autre — c'était ça, le saut sous le curseur.
+    expect(screen.queryByText('Caractères spéciaux')).not.toBeInTheDocument()
+
+    const band = screen.getByRole('group', { name: /symboles à insérer/i })
+    const rowsBefore = screen.getAllByRole('textbox').map(row => row.closest('[data-block-kind]')?.childElementCount)
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
+
+    // Le bandeau est le MÊME nœud — il vit hors des blocs — et aucune ligne n'a
+    // gagné ni perdu d'enfant en devenant active.
+    expect(screen.getByRole('group', { name: /symboles à insérer/i })).toBe(band)
+    const rowsAfter = screen.getAllByRole('textbox').map(row => row.closest('[data-block-kind]')?.childElementCount)
+    expect(rowsAfter).toEqual(rowsBefore)
   })
 })
 
