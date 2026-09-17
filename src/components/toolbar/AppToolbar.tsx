@@ -62,7 +62,7 @@ import { duplicatePath, freeSiblingPath, renamePath } from '../../persistence/fi
 import { fileNameOf, mindMapBaseName, parentDirOf, separatorOf, withMindMapExtension } from '../../persistence/paths'
 import { quickExport } from '../../export/quickExport'
 import { describeExportError } from '../../export/describeExportError'
-import type { UpdateCheckStatus } from '../../hooks/useAppUpdater'
+import type { UpdateCheckHandle } from '../../hooks/useAppUpdater'
 
 interface AppToolbarProps {
   /** The map actually on screen — `null` when nothing is open. */
@@ -79,7 +79,7 @@ interface AppToolbarProps {
   onRequestFork: () => void
   /** Writes a pending autosave immediately — what « Enregistrer » actually does. */
   flush: () => Promise<void>
-  updateCheck: { status: UpdateCheckStatus; checkNow: () => Promise<void> }
+  updateCheck: Partial<UpdateCheckHandle> & { status: UpdateCheckHandle['status']; checkNow: () => Promise<void> }
 }
 
 /** A dialog that needs a name typed into it before it can act. */

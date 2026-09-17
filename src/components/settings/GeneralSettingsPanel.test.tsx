@@ -51,4 +51,23 @@ describe('GeneralSettingsPanel — update check', () => {
     expect(screen.queryByText('Vérification en cours…')).not.toBeInTheDocument()
     expect(screen.queryByText('Échec de la vérification')).not.toBeInTheDocument()
   })
+
+  it('offers a restart button instead of the check button once an update is ready', async () => {
+    const user = userEvent.setup()
+    const applyUpdate = vi.fn().mockResolvedValue(undefined)
+    render(
+      <GeneralSettingsPanel
+        settings={DEFAULT_APPEARANCE_SETTINGS}
+        onChange={() => {}}
+        updateCheck={{ status: 'idle', checkNow: vi.fn(), updateReady: true, applyUpdate }}
+      />
+    )
+
+    expect(screen.getByText('Mise à jour prête')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Rechercher les mises à jour' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Redémarrer' }))
+
+    expect(applyUpdate).toHaveBeenCalled()
+  })
 })
