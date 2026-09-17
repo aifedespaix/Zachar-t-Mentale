@@ -383,6 +383,33 @@ describe('FileTreeRow', () => {
     expect(renamePath).toHaveBeenCalledWith('/cours/chapitre1.json', '/cours/chapitre1-v2.json')
   })
 
+  it('renames a mind map file when F2 is pressed on the focused row', () => {
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'chapitre1' }), { key: 'F2' })
+
+    expect(screen.getByRole('textbox', { name: /renommer chapitre1.json/i })).toBeInTheDocument()
+  })
+
+  it('renames a non-root folder when F2 is pressed on the focused row', () => {
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    fireEvent.keyDown(screen.getByRole('button', { name: /chimie/i }), { key: 'F2' })
+
+    expect(screen.getByRole('textbox', { name: /renommer chimie/i })).toBeInTheDocument()
+  })
+
+  it('ignores F2 on a root folder — it has no rename action at all', () => {
+    const node: FileTreeNode = { type: 'folder', name: 'chimie', path: '/cours/chimie', children: [] }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} isRoot />)
+
+    fireEvent.keyDown(screen.getByRole('button', { name: /chimie/i }), { key: 'F2' })
+
+    expect(screen.queryByRole('textbox', { name: /renommer/i })).not.toBeInTheDocument()
+  })
+
   it('does not reopen the context menu on right-click while the rename input is active, and leaves it uncommitted', async () => {
     const user = userEvent.setup()
     const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
@@ -830,6 +857,32 @@ describe('FileTreeRow', () => {
     expect(screen.getByRole('heading', { name: /supprimer le fichier « chapitre1.json » ?/i })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Confirmer' }))
 
+    expect(deletePath).toHaveBeenCalledWith('/cours/chapitre1.json', false)
+  })
+
+  it('opens the delete confirmation when Suppr is pressed on the focused row', async () => {
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'chapitre1' }), { key: 'Delete' })
+
+    expect(await screen.findByRole('heading', { name: /supprimer le fichier « chapitre1.json » ?/i })).toBeInTheDocument()
+  })
+
+  it('focuses the destructive button of the delete confirmation, so Entrée deletes instead of cancelling', async () => {
+    const user = userEvent.setup()
+    vi.mocked(deletePath).mockResolvedValue(undefined)
+    vi.mocked(scanFolder).mockResolvedValue([])
+    const node: FileTreeNode = { type: 'mindmap', name: 'chapitre1.json', path: '/cours/chapitre1.json' }
+    render(<FileTreeRow node={node} depth={0} onOpenFile={() => {}} />)
+
+    openMenu('chapitre1')
+    await user.click(await screen.findByRole('menuitem', { name: 'Supprimer' }))
+
+    const confirmButton = screen.getByRole('button', { name: 'Confirmer' })
+    expect(confirmButton).toHaveFocus()
+
+    await user.keyboard('{Enter}')
     expect(deletePath).toHaveBeenCalledWith('/cours/chapitre1.json', false)
   })
 

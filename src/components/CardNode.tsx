@@ -1069,7 +1069,11 @@ export function CardNode({ data }: CardNodeProps) {
               <Button variant="outline" onClick={() => setConfirmDetachOpen(false)}>
                 Annuler
               </Button>
+              {/* Focused on open, visibly — not just Radix's default focus on
+                  « Annuler » — so the ring shows which action Entrée will
+                  trigger, and Entrée actually triggers it. */}
               <Button
+                autoFocus
                 onClick={() => {
                   detachCard(card.id)
                   setConfirmDetachOpen(false)

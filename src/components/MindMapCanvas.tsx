@@ -895,7 +895,11 @@ function MindMapCanvasInner() {
               <Button variant="outline" onClick={() => setPendingMove(null)}>
                 Annuler
               </Button>
+              {/* Focused on open, visibly — not just Radix's default focus on
+                  « Annuler » — so the ring shows which action Entrée will
+                  trigger, and Entrée actually triggers it. */}
               <Button
+                autoFocus
                 onClick={() => {
                   moveCard(pendingMove.cardId, pendingMove.parentId, pendingMove.index)
                   setPendingMove(null)

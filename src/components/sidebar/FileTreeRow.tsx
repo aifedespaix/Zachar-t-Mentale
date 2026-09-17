@@ -1,5 +1,5 @@
 // src/components/sidebar/FileTreeRow.tsx
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { Folder, FolderOpen, FolderInput, FolderSearch, FileJson, File, ChevronRight, ChevronDown, Pencil, Trash2, X, Download, Copy, ClipboardCopy, CloudUpload, CloudOff, Check, Tag, Info } from 'lucide-react'
 import type { FileTreeNode } from '../../types/workspace'
@@ -152,7 +152,10 @@ function ConfirmDeleteDialog({
           <Button variant="outline" onClick={onCancel}>
             Annuler
           </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={confirmDisabled}>
+          {/* Focused on open, visibly — not just Radix's default focus on the
+              first tabbable button (« Annuler ») — so the ring shows which
+              action Entrée will trigger, and Entrée actually triggers it. */}
+          <Button variant="destructive" autoFocus onClick={onConfirm} disabled={confirmDisabled}>
             Confirmer
           </Button>
         </DialogFooter>
@@ -259,6 +262,24 @@ export function FileTreeRow({
     if (pendingToggleRef.current === null) return
     window.clearTimeout(pendingToggleRef.current)
     pendingToggleRef.current = null
+  }
+
+  /**
+   * The file-explorer shortcuts, once the row itself has focus: F2 renames,
+   * Suppr opens the delete confirmation — same pair as Windows/macOS Finder.
+   * A root folder offers neither in its own context menu (see below), so the
+   * keyboard does not invent one either.
+   */
+  function handleRowKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (isRoot) return
+    if (event.key === 'F2') {
+      event.preventDefault()
+      cancelPendingToggle()
+      setRenaming(true)
+    } else if (event.key === 'Delete') {
+      event.preventDefault()
+      void openDeleteDialog()
+    }
   }
 
   /**
@@ -576,6 +597,7 @@ export function FileTreeRow({
                     cancelPendingToggle()
                     setRenaming(true)
                   }}
+                  onKeyDown={handleRowKeyDown}
                   aria-expanded={isExpanded}
                   style={{ ...indent }}
                 >
@@ -725,6 +747,7 @@ export function FileTreeRow({
           onOpenFile(node.path)
         }}
         onDoubleClick={() => setRenaming(true)}
+        onKeyDown={handleRowKeyDown}
         className={rowClassName([
           isActive && 'file-tree-row--active',
           isDropTarget && 'file-tree-row--drop-target',
