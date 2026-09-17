@@ -1,5 +1,5 @@
 import { FlaskConical, Sigma } from 'lucide-react'
-import type { SymbolFamily, SymbolTab } from '../types/symbolBand'
+import type { BandTabId, SymbolFamily, SymbolTab } from '../types/symbolBand'
 import { LANGUAGES, type LanguageHelp } from './languageHelp'
 import { SCIENCES_FAMILIES, SYMBOL_FAMILIES } from './symbolSets'
 
@@ -24,17 +24,35 @@ import { SCIENCES_FAMILIES, SYMBOL_FAMILIES } from './symbolSets'
  * en SVG par `LanguageFlag`. Pas d'emoji drapeau — il s'affiche « GB » sur
  * Windows, où vit cette app.
  */
+/**
+ * Une couleur par onglet, pour le liséré et le voile de l'onglet-dossier.
+ *
+ * Cinq teintes prises à la même famille que les `GROUP_TONES` (mélangées au fond,
+ * jamais posées dessus), donc lisibles en clair comme en sombre. Le mélange se
+ * fait avec `--popover` — le fond de la modale — ce qui leur évite d'exister en
+ * deux versions : elles valent dans les deux thèmes telles quelles.
+ */
+const TAB_ACCENTS: Record<BandTabId, string> = {
+  maths: 'oklch(0.6 0.17 250)',
+  sciences: 'oklch(0.62 0.15 155)',
+  en: 'oklch(0.55 0.18 275)',
+  es: 'oklch(0.66 0.16 75)',
+  fr: 'oklch(0.62 0.17 20)',
+}
+
 export const SYMBOL_TABS: SymbolTab[] = [
   {
     id: 'maths',
     label: 'Mathématiques',
     icon: Sigma,
+    accent: TAB_ACCENTS.maths,
     families: SYMBOL_FAMILIES,
   },
   {
     id: 'sciences',
     label: 'Sciences',
     icon: FlaskConical,
+    accent: TAB_ACCENTS.sciences,
     families: SCIENCES_FAMILIES,
   },
   // Les langues étaient les dernières à garder un pied de bloc, parce qu'elles
@@ -45,6 +63,7 @@ export const SYMBOL_TABS: SymbolTab[] = [
     id: language.id,
     label: language.label,
     icon: null,
+    accent: TAB_ACCENTS[language.id],
     families: familiesOf(language),
   })),
 ]

@@ -1519,3 +1519,128 @@
   .block-remove:focus-visible svg,
   .block-remove:active { transform: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Le bandeau de symboles, en onglets-dossiers.
+
+   Un rail (fond --muted) porte les onglets, et l'onglet ACTIF descend jusqu'au
+   panneau qu'il ouvre : sa bordure basse prend la couleur du panneau, ce qui
+   efface le trait de rail sous lui et fait des deux un seul objet.
+
+   Cette couture invisible tient à une seule chose : l'onglet actif et le panneau
+   mélangent le MÊME accent, publié par le composant dans --band-accent (l'accent
+   de l'onglet ouvert). Le mélange est donc écrit une fois ici et consommé deux
+   fois — deux valeurs « presque » égales laisseraient voir la couture.
+
+   L'onglet actif est aussi le seul à porter de la couleur : un onglet inactif
+   reste gris, donc la couleur veut toujours dire « c'est celui-ci ». Le liséré
+   pâle qui s'allume au survol d'un onglet inactif est l'aperçu de SA couleur, pas
+   un état actif déguisé.
+   --------------------------------------------------------------------------- */
+.symbol-band {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--foreground);
+}
+
+.symbol-band__head {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 12px 0;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+}
+
+/* Panneau fermé : rien sous le rail, donc le rail se referme sur lui-même. */
+.symbol-band[data-open='false'] .symbol-band__head {
+  border-radius: 12px;
+}
+
+.symbol-band__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.symbol-band__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 11px;
+  /* Le -1px fait passer la bordure basse de l'onglet PAR-DESSUS le trait de rail :
+     sans lui, les deux traits se cumulent en un trait de 2 px. */
+  margin-bottom: -1px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid transparent;
+  /* Le liséré haut mesure 3 px sur TOUS les onglets, transparents compris : sans
+     cette réserve, l'onglet actif grandirait de 2 px et ferait sauter la rangée au
+     moment du clic. */
+  border-top: 3px solid transparent;
+  border-bottom: 1px solid transparent;
+  border-radius: 10px 10px 0 0;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+/* L'aperçu : la couleur de l'onglet, pâle, avant qu'on l'ait choisi. */
+.symbol-band__tab:hover {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--foreground), transparent 94%);
+  border-top-color: color-mix(in oklab, var(--tab-accent), transparent 62%);
+}
+
+.symbol-band__tab[aria-pressed='true'] {
+  font-weight: 650;
+  border-color: var(--border);
+  border-top-color: var(--band-accent);
+  color: color-mix(in oklab, var(--foreground), var(--band-accent) 45%);
+  background: color-mix(in oklab, var(--band-accent), var(--popover) 96%);
+  border-bottom-color: color-mix(in oklab, var(--band-accent), var(--popover) 96%);
+}
+
+.symbol-band__hide {
+  margin-left: auto;
+  margin-bottom: 8px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.symbol-band__hide:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--foreground), transparent 92%);
+  color: var(--foreground);
+}
+.symbol-band__hide:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.symbol-band__panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 12px 12px 12px;
+  background: color-mix(in oklab, var(--band-accent), var(--popover) 96%);
+}

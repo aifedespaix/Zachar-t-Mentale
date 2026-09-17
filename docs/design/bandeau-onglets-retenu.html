@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bandeau à onglets — le retenu (dossier + couleur)</title>
+<style>
+  :root {
+    --background: oklch(1 0 0); --foreground: oklch(0.145 0 0); --card: oklch(1 0 0);
+    --popover: oklch(1 0 0); --muted: oklch(0.97 0 0); --muted-foreground: oklch(0.556 0 0);
+    --border: oklch(0.922 0 0); --ring: oklch(0.708 0 0);
+    --raised: oklch(1 0 0); --modal-shadow: 0 16px 48px oklch(0 0 0 / 0.16);
+    color-scheme: light;
+  }
+  .dark {
+    --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0); --card: oklch(0.205 0 0);
+    --popover: oklch(0.205 0 0); --muted: oklch(0.269 0 0); --muted-foreground: oklch(0.708 0 0);
+    --border: oklch(1 0 0 / 10%); --ring: oklch(0.556 0 0);
+    --raised: oklch(0.315 0 0); --modal-shadow: 0 16px 48px oklch(0 0 0 / 0.55);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 20px 60px; background: var(--background); color: var(--foreground);
+    font-family: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+  .page-head, main { max-width: 1040px; margin-left: auto; margin-right: auto; }
+  .page-head { margin-bottom: 22px; }
+  h1 { font-size: 20px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .lede { margin: 0 0 12px; color: var(--muted-foreground); max-width: 84ch; }
+  .lede strong { color: var(--foreground); }
+  .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .ctl { font: inherit; font-size: 12.5px; font-weight: 600; height: 30px; padding: 0 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--foreground); cursor: pointer; }
+  .ctl:hover { background: var(--muted); }
+  .ctl-hint { font-size: 12px; color: var(--muted-foreground); }
+  main { display: flex; flex-direction: column; gap: 22px; }
+  .vhead { display: flex; flex-direction: column; gap: 2px; margin-bottom: 7px; }
+  .vtitle { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .vbadge { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--muted);
+    color: var(--muted-foreground); }
+  .vbadge.rec { border-color: oklch(0.62 0.15 155); background: color-mix(in oklab, oklch(0.62 0.15 155), transparent 88%);
+    color: color-mix(in oklab, var(--foreground), oklch(0.62 0.15 155) 55%); }
+  .vtitle h3 { font-size: 15px; margin: 0; }
+  .vmech { color: var(--muted-foreground); font-size: 12.5px; max-width: 88ch; }
+  .vmech code, .vnote code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  .vnote { font-size: 12px; margin: 7px 0 0; color: var(--muted-foreground); max-width: 88ch; }
+  .vnote b { color: var(--foreground); }
+
+  .modal { width: 100%; border: 1px solid var(--border); border-radius: 12px; background: var(--popover);
+    box-shadow: var(--modal-shadow); }
+  .chrome { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 11px 58px 10px 16px;
+    border-bottom: 1px solid var(--border); }
+  .crumbs { font-size: 11px; color: var(--muted-foreground); }
+  .titlechip { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 9px;
+    border: 2px solid var(--tc-border); background: var(--tc-bg); color: var(--tc-fg); font-size: 15px; font-weight: 650; }
+  .titlechip .dot { width: 10px; height: 10px; border-radius: 999px; background: currentColor; flex: 0 0 auto; }
+  .corner { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; }
+  .corner span { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px;
+    color: var(--muted-foreground); font-size: 13px; }
+  .body { padding: 12px 16px 14px; }
+  .body p { margin: 0 0 8px; max-width: 72ch; }
+  .formula { display: inline-block; padding: 5px 11px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--muted); font-family: ui-serif, Georgia, "Times New Roman", serif; font-size: 15px; }
+
+  /* ============ base du bandeau, portee par la piste 2 (dossier) ============ */
+  .zone { margin: 11px 16px; }
+  .zone-head { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; padding: 9px 12px 0;
+    background: var(--muted); border: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    border-radius: 12px 12px 0 0; }
+  .target { flex: 0 0 auto; margin-bottom: 8px; font-size: 11.5px; font-weight: 650; padding: 3px 10px;
+    border-radius: 999px; border: 1px solid var(--ring); white-space: nowrap; }
+  .tabs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .rail-hide { margin-left: auto; margin-bottom: 8px; width: 26px; height: 26px; display: grid; place-items: center;
+    border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--muted-foreground);
+    cursor: pointer; }
+  .rail-hide:hover { background: color-mix(in oklab, var(--foreground), transparent 92%); color: var(--foreground); }
+  .tab { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 11px; margin-bottom: -1px;
+    font: inherit; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer;
+    border: 1px solid transparent; border-top: 3px solid transparent; border-bottom: 1px solid transparent;
+    border-radius: 10px 10px 0 0; background: transparent; color: var(--muted-foreground); }
+  .tab .ic { display: grid; place-items: center; width: 16px; height: 12px; flex: 0 0 auto; }
+  /* Survol d'un onglet inactif : un lisere pâle de SA couleur, pour apprendre la couleur avant de cliquer. */
+  .tab:hover { color: var(--foreground); background: color-mix(in oklab, var(--foreground), transparent 94%);
+    border-top-color: color-mix(in oklab, var(--tab-accent), transparent 62%); }
+  .tab[aria-selected="true"] { font-weight: 650; border-color: var(--border); border-top-color: var(--tab-accent);
+    color: color-mix(in oklab, var(--foreground), var(--tab-accent) 45%); }
+  .families { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 0; padding: 11px 12px;
+    border: 1px solid var(--border); border-top: none; border-radius: 0 12px 12px 12px; }
+  .f { display: flex; align-items: center; gap: 6px; padding: 4px 9px 4px 8px; border-radius: 12px;
+    background: color-mix(in oklab, var(--hue), transparent 92%);
+    border: 1px solid color-mix(in oklab, var(--hue), transparent 76%); }
+  .f.h0 { --hue: oklch(0.6 0.17 250); } .f.h1 { --hue: oklch(0.66 0.16 75); }
+  .f.h2 { --hue: oklch(0.62 0.15 155); } .f.h3 { --hue: oklch(0.62 0.17 20); }
+  .f.muted { opacity: 0.55; }
+  .fname { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
+    color: color-mix(in oklab, var(--foreground), var(--hue) 55%); }
+  .keys { display: flex; align-items: center; gap: 5px; }
+  .key { min-width: 32px; height: 32px; padding: 0 6px; font: inherit; font-size: 15px; line-height: 1;
+    border-radius: 9px; color: var(--foreground); cursor: pointer;
+    background: color-mix(in oklab, var(--hue), transparent 80%);
+    border: 1px solid color-mix(in oklab, var(--hue), transparent 66%); }
+  .key:hover { filter: brightness(0.97); }
+
+  /* ---- A : dossier PUR, la couleur ne vit que dans le lisere et le texte ---- */
+  .hA .tab[aria-selected="true"] { background: var(--popover); border-bottom-color: var(--popover); }
+  .hA .families { background: var(--popover); }
+
+  /* ---- B : dossier + voile clair (4 %) sur l'onglet ET le panneau (meme teinte = fusion) ---- */
+  .hB .tab[aria-selected="true"] { background: color-mix(in oklab, var(--active-accent), var(--popover) 96%);
+    border-bottom-color: color-mix(in oklab, var(--active-accent), var(--popover) 96%); }
+  .hB .families { background: color-mix(in oklab, var(--active-accent), var(--popover) 96%); }
+
+  /* ---- C : dossier + voile marque (10 %) ---- */
+  .hC .tab[aria-selected="true"] { background: color-mix(in oklab, var(--active-accent), var(--popover) 90%);
+    border-bottom-color: color-mix(in oklab, var(--active-accent), var(--popover) 90%); }
+  .hC .families { background: color-mix(in oklab, var(--active-accent), var(--popover) 90%); }
+
+  /* ---- D : onglet teinte, panneau clair — la couture reste (plus de fusion) ---- */
+  .hD .tab[aria-selected="true"] { background: color-mix(in oklab, var(--active-accent), var(--popover) 84%);
+    border-bottom-color: var(--border); }
+  .hD .families { background: var(--popover); }
+
+  .page-foot { max-width: 1040px; margin: 30px auto 0; padding: 16px 18px; border: 1px solid var(--border);
+    border-radius: 12px; background: var(--muted); }
+  .page-foot h2 { font-size: 14px; margin: 0 0 8px; }
+  .page-foot p { margin: 0 0 8px; font-size: 12.5px; max-width: 92ch; }
+  .page-foot p:last-child { margin-bottom: 0; }
+  .page-foot code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+</style>
+</head>
+<body>
+<header class="page-head">
+  <h1>Le retenu : le dossier de la piste 2 + la couleur de la piste 5</h1>
+  <p class="lede">
+    Les quatre blocs partagent <strong>le m&ecirc;me m&eacute;canisme</strong> (rail, onglet-dossier qui descend
+    jusqu&rsquo;au panneau des familles, lis&eacute;r&eacute; de couleur par onglet) et ne diff&egrave;rent que sur
+    <strong>une seule variable</strong> : la quantit&eacute; de couleur admise dans le fond. C&rsquo;est le seul point
+    o&ugrave; les deux pistes se disputent, parce que la fusion du dossier exige que l&rsquo;onglet et le panneau aient
+    <em>exactement</em> le m&ecirc;me fond.
+  </p>
+  <div class="controls">
+    <button id="theme" class="ctl" type="button">Passer en sombre</button>
+    <span class="ctl-hint">Survolez un onglet inactif : son lis&eacute;r&eacute; s&rsquo;allume en p&acirc;le, il annonce sa couleur.</span>
+  </div>
+</header>
+<main id="root"></main>
+<footer class="page-foot">
+  <h2>Ce que j&rsquo;en pense</h2>
+  <p>
+    <b>B (le voile &agrave; 4 %) est le bon compromis</b>, et c&rsquo;est celui que je recommande. Le dossier survit
+    (onglet et panneau partagent la m&ecirc;me teinte, la couture est donc invisible), la couleur reste l&rsquo;apanage
+    de l&rsquo;onglet actif &mdash; un onglet inactif demeure gris, donc la couleur veut toujours dire &laquo;&nbsp;c&rsquo;est
+    celui-ci&nbsp;&raquo; &mdash; et le voile de 4 % ajoute une information juste&nbsp;: <em>ce contenu est celui de cet onglet</em>.
+  </p>
+  <p>
+    <b>A</b> est le dossier le plus pur mais la couleur n&rsquo;y sert qu&rsquo;&agrave; souligner&nbsp;; 
+    <b>C &agrave; 10 %</b> commence &agrave; se battre avec les quatre teintes d&eacute;j&agrave; pr&eacute;sentes
+    dans les familles (bleu, ambre, vert, rouge) &mdash; trop de couleur pour un seul bandeau. 
+    <b>D</b> n&rsquo;est plus vraiment un hybride&nbsp;: garder la couture tue la fusion, c&rsquo;est la piste 5 avec
+    la g&eacute;om&eacute;trie de la 2.
+  </p>
+  <p><b>Le point sur lequel les deux pistes se disputaient, réglé par la mesure.</b> Le fond de l’onglet actif et celui du panneau des familles sont calculés séparément par le navigateur ; dans A, B et C, les deux valeurs sont <em>identiques au caractère près</em>. La couture du dossier est donc invisible par construction, et non « presque ». L’écart entre le panneau teinté et le fond de la modale vaut <b>9/255 en clair et 7/255 en sombre pour B</b>, contre 21/255 et 17/255 pour C : le voile à 4 % reste donc lisible dans les deux thèmes, et il n’y a pas lieu de prévoir une valeur plus forte en sombre.</p>
+  <p>
+    <b>Il reste la question d&rsquo;interaction</b> (le bouton &oelig;il est montr&eacute; sur le rail pour juger
+    l&rsquo;encombrement, facile &agrave; retirer)&nbsp;: <b>(a)</b> garder le clic-qui-referme, <b>(b)</b> un onglet
+    <code>Aucun</code>, <b>(c)</b> cette commande explicite. Avec un vrai onglet-dossier, je recommande <b>(c)</b>&nbsp;:
+    voir dispara&icirc;tre le panneau auquel l&rsquo;onglet vient d&rsquo;&ecirc;tre rattach&eacute; est le geste le plus surprenant des trois.
+  </p>
+</footer>
+<script>
+  var FLAGS = {
+    en: '<svg width="16" height="11" viewBox="0 0 60 40" style="border-radius:2px;display:block"><rect width="60" height="40" fill="#012169"/><path d="M0,0 L60,40 M60,0 L0,40" stroke="#fff" stroke-width="8"/><path d="M0,0 L60,40 M60,0 L0,40" stroke="#C8102E" stroke-width="4"/><path d="M30,0 v40 M0,20 h60" stroke="#fff" stroke-width="13"/><path d="M30,0 v40 M0,20 h60" stroke="#C8102E" stroke-width="8"/></svg>',
+    es: '<svg width="16" height="11" viewBox="0 0 60 40" style="border-radius:2px;display:block"><rect width="60" height="40" fill="#AA151B"/><rect y="10" width="60" height="20" fill="#F1BF00"/></svg>',
+    fr: '<svg width="16" height="11" viewBox="0 0 60 40" style="border-radius:2px;display:block"><rect width="20" height="40" fill="#002395"/><rect x="20" width="20" height="40" fill="#FDFDFD"/><rect x="40" width="20" height="40" fill="#ED2939"/></svg>'
+  };
+  var ICON_SIGMA = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 7V4H6l6 8-6 8h12v-3"/></svg>';
+  var ICON_FLASK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.3"/><path d="M14 9.3V2"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/><path d="M5.5 16h13"/></svg>';
+  var ICON_EYE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var FAMILIES = {
+    maths: [
+      { name: "Structures", hue: 3, symbols: ["⅟", "x²", "xₙ", "√", "ⁿ√", "( )"] },
+      { name: "Comparaisons", hue: 0, symbols: ["≤", "≥", "≠", "≈"] },
+      { name: "Opérations", hue: 1, symbols: ["×", "÷", "±", "·"] },
+      { name: "Divers", hue: 2, symbols: ["→", "π", "∞", "°"] },
+      { name: "Ensembles", hue: 3, symbols: ["∈", "∉", "∪", "∩", "∅"] },
+      { name: "Logique", hue: 0, symbols: ["⇒", "⇔"] },
+      { name: "Grec", hue: 1, symbols: ["α", "β", "θ", "Δ", "Σ"] },
+      { name: "Unités", hue: 2, symbols: ["⚗", "m/s"] }
+    ],
+    sciences: [
+      { name: "Réactions", hue: 1, symbols: ["⇌", "⚗", "m/s"] },
+      { name: "Grandeurs", hue: 3, symbols: ["°C", "µ", "Ω", "λ", "ν", "ρ"] },
+      { name: "Mesures", hue: 2, symbols: ["≈", "Δ"] }
+    ],
+    en: [
+      { name: "Apostrophe et guillemets", hue: 0, symbols: ["’", "‘ ’", "“ ”"] },
+      { name: "Tirets et signes", hue: 1, symbols: ["–", "—", "…", "°"] },
+      { name: "Monnaie", hue: 2, symbols: ["£", "$", "€"] }
+    ],
+    es: [
+      { name: "Ponctuation inversée", hue: 0, symbols: ["¿ ?", "¡ !", "« »"] },
+      { name: "Accents et tréma", hue: 1, symbols: ["á", "é", "í", "ó", "ú", "ü", "ñ", "Ñ"] }
+    ],
+    fr: [
+      { name: "Typographie française", hue: 0, symbols: ["« »", "’", "…", "–", "—", "°"] },
+      { name: "Ligatures", hue: 1, symbols: ["œ", "Œ", "æ", "Æ"] }
+    ]
+  };
+  var TABS = [
+    { id: "maths", label: "Mathématiques", icon: ICON_SIGMA, accent: "oklch(0.6 0.17 250)" },
+    { id: "sciences", label: "Sciences", icon: ICON_FLASK, accent: "oklch(0.62 0.15 155)" },
+    { id: "en", label: "Anglais", flag: "en", accent: "oklch(0.55 0.18 275)" },
+    { id: "es", label: "Espagnol", flag: "es", accent: "oklch(0.66 0.16 75)" },
+    { id: "fr", label: "Français", flag: "fr", accent: "oklch(0.62 0.17 20)" }
+  ];
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function tabButton(tab, active) {
+    var ic = "";
+    if (tab.flag) ic = '<span class="ic">' + FLAGS[tab.flag] + "</span>";
+    else if (tab.icon) ic = '<span class="ic">' + tab.icon + "</span>";
+    return '<button type="button" class="tab" role="tab" data-tab="' + tab.id + '"'
+      + ' aria-selected="' + (active ? "true" : "false") + '"'
+      + ' style="--tab-accent:' + tab.accent + '">'
+      + ic + "<span>" + esc(tab.label) + "</span></button>";
+  }
+  function familyHtml(f, lang) {
+    var keys = f.symbols.map(function (s) {
+      return '<button type="button" class="key">' + esc(s) + "</button>";
+    }).join("");
+    return '<div class="f h' + f.hue + (lang ? " muted" : "") + '">'
+      + '<span class="fname">' + esc(f.name) + '</span>'
+      + '<span class="keys">' + keys + "</span></div>";
+  }
+  function renderZone(zone, tabId) {
+    var tab = TABS.filter(function (t) { return t.id === tabId; })[0];
+    /* La couleur de l'onglet actif vit sur la ZONE : c'est elle que le fond de l'onglet
+       et celui du panneau melangent, et ils doivent melanger EXACTEMENT la meme. */
+    zone.style.setProperty("--active-accent", tab.accent);
+    zone.querySelector(".tabs").innerHTML = TABS.map(function (t) {
+      return tabButton(t, t.id === tabId);
+    }).join("");
+    zone.querySelector(".families").innerHTML = FAMILIES[tabId].map(function (f) {
+      return familyHtml(f, tab.flag != null);
+    }).join("");
+    zone.querySelectorAll(".tab").forEach(function (btn) {
+      btn.addEventListener("click", function () { renderZone(zone, btn.dataset.tab); });
+    });
+  }
+    var VARIANTS = [
+    {
+      n: "A", badge: "A", title: "Dossier pur — la couleur au liséré et au texte",
+      mech: "État du dossier sans aucune teinte&nbsp;: l’onglet actif a exactement le fond du panneau. La couleur n’apparaît qu’en haut de l’onglet et dans son texte.",
+      note: "<b>Force&nbsp;:</b> la fusion est parfaite et rien ne vient concurrencer les teintes des familles. <b>Limite&nbsp;:</b> le fond ne dit pas encore à quel onglet appartient ce qu’on lit."
+    },
+    {
+      n: "B", badge: "B", title: "Dossier + voile à 4 %",
+      mech: "Même chose, mais l’onglet actif <em>et</em> le panneau mélangent 4&nbsp;% de la couleur de l’onglet&nbsp;: la teinte est identique des deux côtés de la couture, donc la fusion tient toujours.",
+      note: "<b>Force&nbsp;:</b> le fond confirme l’appartenance sans crier. <b>Limite&nbsp;:</b> elle tient mieux que prévu — mesuré à l’écran : 9/255 d’écart de teinte en clair, 7/255 en sombre. Aucune valeur plus forte n’est nécessaire en thème sombre."
+    },
+    {
+      n: "C", badge: "C", title: "Dossier + voile à 10 %",
+      mech: "Le même, en plus appuyé. La couleur devient une vraie zone, pas seulement un signal.",
+      note: "<b>Force&nbsp;:</b> l’appartenance est évidente (21/255 d’écart en clair, 17/255 en sombre). <b>Limite&nbsp;:</b> quatre teintes de familles (bleu, ambre, vert, rouge) vivent déjà dans le panneau&nbsp;; une cinquième couche commence à faire beaucoup."
+    },
+    {
+      n: "D", badge: "D", title: "Onglet teinté, panneau clair — la couture reste",
+      mech: "L’onglet prend 16&nbsp;% de couleur et le panneau reste sur <code>--popover</code>&nbsp;: le trait de rail n’est plus effacé, l’onglet ne fait plus corps avec son contenu.",
+      note: "<b>Force&nbsp;:</b> l’onglet actif est le plus coloré des quatre. <b>Limite&nbsp;:</b> ce n’est plus un hybride — c’est la piste 5 avec la géométrie de la 2."
+    }
+  ];
+  function modalHtml(v) {
+    return '<div class="modal">'
+      + '<div class="chrome">'
+      +   '<div class="crumbs">Chapitre 5 › Exercices</div>'
+      +   '<div class="titlechip" style="--tc-border:oklch(0.62 0.17 20);--tc-bg:color-mix(in oklab, oklch(0.62 0.17 20), transparent 90%);--tc-fg:color-mix(in oklab, var(--foreground), oklch(0.62 0.17 20) 55%)">'
+      +     '<span class="dot"></span>Signes contraires'
+      +   '</div>'
+      +   '<div class="corner"><span>⛶</span><span>✕</span></div>'
+      + '</div>'
+      + '<div class="zone h' + v.n + '" data-variant="' + v.n + '">'
+      +   '<div class="zone-head">'
+      +     '<span class="target">Bloc 1 · Formule</span>'
+      +     '<div class="tabs" role="tablist" aria-label="Onglets du bandeau"></div>'
+      +     '<button type="button" class="rail-hide" title="Masquer le bandeau">' + ICON_EYE + '</button>'
+      +   '</div>'
+      +   '<div class="families"></div>'
+      + '</div>'
+      + '<div class="body">'
+      +   '<p><strong>Définition.</strong> Deux nombres sont dits <em>opposés</em> lorsque leur somme est nulle.</p>'
+      +   '<span class="formula">a + (−a) = 0</span>'
+      + '</div>'
+      + '</div>';
+  }
+  var only = (location.search.match(/[?&]only=([A-D])/) || [])[1] || null;
+  var shown = only ? VARIANTS.filter(function (v) { return v.n === only; }) : VARIANTS;
+  document.getElementById("root").innerHTML = shown.map(function (v) {
+    return '<section class="variant">'
+      + '<div class="vhead">'
+      +   '<div class="vtitle"><span class="vbadge' + (v.n === "B" ? " rec" : "") + '">' + esc(v.badge) + '</span><h3>' + esc(v.title) + '</h3></div>'
+      +   '<div class="vmech">' + v.mech + '</div>'
+      + '</div>'
+      + modalHtml(v)
+      + '<p class="vnote">' + v.note + '</p>'
+      + '</section>';
+  }).join("");
+  document.querySelectorAll(".zone[data-variant]").forEach(function (zone) { renderZone(zone, "maths"); });
+  var dark = /[?&]theme=dark/.test(location.search);
+  function applyTheme() {
+    document.documentElement.classList.toggle("dark", dark);
+    document.getElementById("theme").textContent = dark ? "Passer en clair" : "Passer en sombre";
+  }
+  document.getElementById("theme").addEventListener("click", function () { dark = !dark; applyTheme(); });
+  applyTheme();
+</script>
+</body>
+</html>

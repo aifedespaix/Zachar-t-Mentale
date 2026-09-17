@@ -12,6 +12,7 @@ import {
   mergeMathZone,
 } from './BlockEditor'
 import { SYMBOL_FAMILIES } from './symbolSets'
+import { SYMBOL_TABS } from './symbolTabs'
 import type { CardBlock } from '../types/cardBlock'
 
 // The WYSIWYG field is MathLive's concern, covered in MathFieldEditor.test.tsx.
@@ -840,7 +841,7 @@ describe('le bandeau de symboles', () => {
   // pour les suivants.
   beforeEach(() => localStorage.clear())
 
-  it('n’affiche que les familles de l’onglet ouvert, et le même bouton le referme', async () => {
+  it('n’affiche que les familles de l’onglet ouvert', async () => {
     const user = userEvent.setup()
     renderEditor([{ kind: 'math', latex: 'x' }])
 
@@ -854,15 +855,70 @@ describe('le bandeau de symboles', () => {
 
     expect(screen.queryByRole('group', { name: 'Comparaisons' })).not.toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Grandeurs' })).toBeInTheDocument()
+  })
 
-    // Le MÊME bouton referme : « ne rien afficher » n'est pas une commande à
-    // chercher ailleurs.
+  it('ne se referme plus quand on reclique l’onglet actif', async () => {
+    // Le contrat a changé avec l'onglet-dossier. Voir disparaître le panneau
+    // auquel l'onglet vient d'être rattaché était le geste le plus surprenant des
+    // trois : l'onglet se comporte maintenant comme un onglet, et la fermeture a
+    // sa propre commande (juste après).
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'math', latex: 'x' }])
+
+    await user.click(screen.getByRole('button', { name: 'Sciences' }))
     await user.click(screen.getByRole('button', { name: 'Sciences' }))
 
-    expect(screen.queryByRole('group', { name: 'Grandeurs' })).not.toBeInTheDocument()
-    // Et l'onglet FERMÉ est retenu : c'est un choix, pas l'absence de réglage —
+    expect(screen.getByRole('group', { name: 'Grandeurs' })).toBeInTheDocument()
+    // Et l'onglet reste retenu : re-cliquer n'a rien fermé.
+    expect(localStorage.getItem('zachart-mentale:band-tab')).toBe(JSON.stringify('sciences'))
+  })
+
+  it('se referme par sa commande dédiée, et retient la fermeture', async () => {
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'math', latex: 'x' }])
+
+    await user.click(screen.getByRole('button', { name: /masquer le panneau de symboles/i }))
+
+    expect(screen.queryByRole('group', { name: 'Comparaisons' })).not.toBeInTheDocument()
+    // L'onglet FERMÉ est retenu : c'est un choix, pas l'absence de réglage —
     // sinon rouvrir la modale le rouvrirait tout seul.
     expect(localStorage.getItem('zachart-mentale:band-tab')).toBe('null')
+  })
+
+  it('désactive la commande de fermeture quand le panneau est déjà fermé', () => {
+    localStorage.setItem('zachart-mentale:band-tab', 'null')
+
+    renderEditor([{ kind: 'math', latex: 'x' }])
+
+    expect(screen.getByRole('button', { name: /masquer le panneau de symboles/i })).toBeDisabled()
+    expect(screen.queryByRole('group', { name: 'Comparaisons' })).not.toBeInTheDocument()
+  })
+
+  it('teinte l’onglet actif et son panneau de la MÊME couleur', async () => {
+    // Le point où les deux pistes se disputaient : l'onglet actif et le panneau
+    // qu'il ouvre doivent porter exactement la même teinte, sans quoi la couture
+    // du dossier se voit. Le composant publie l'accent de l'onglet ouvert, et
+    // l'onglet comme le panneau le portent — c'est ce que la feuille de style
+    // mélange des deux côtés.
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'math', latex: 'x' }])
+
+    const band = screen.getByRole('group', { name: /symboles à insérer/i })
+    const accentOf = (id: string) => SYMBOL_TABS.find(tab => tab.id === id)?.accent
+
+    const panel = () => within(band).getByRole('group', { name: /familles de l’onglet/i })
+    const active = () => within(band).getByRole('button', { name: 'Mathématiques' })
+
+    expect(band).toHaveAttribute('data-accent', accentOf('maths'))
+    expect(active()).toHaveAttribute('data-accent', accentOf('maths'))
+    expect(panel()).toHaveAttribute('data-accent', accentOf('maths'))
+
+    await user.click(within(band).getByRole('button', { name: 'Sciences' }))
+
+    // Les DEUX ont changé ensemble : ils ne peuvent pas diverger.
+    expect(band).toHaveAttribute('data-accent', accentOf('sciences'))
+    expect(within(band).getByRole('button', { name: 'Sciences' })).toHaveAttribute('data-accent', accentOf('sciences'))
+    expect(panel()).toHaveAttribute('data-accent', accentOf('sciences'))
   })
 
   it('rouvre au premier rendu l’onglet resté ouvert', () => {

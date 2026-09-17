@@ -1,4 +1,5 @@
 import { memo, type CSSProperties } from 'react'
+import { EyeOff } from 'lucide-react'
 import type { CardBlockKind } from '../types/cardBlock'
 import type { BandTabId, PaletteSymbol } from '../types/symbolBand'
 import { Hint } from '../components/ui/hint'
@@ -64,19 +65,30 @@ export const SymbolBand = memo(function SymbolBand({
   onInsert,
 }: SymbolBandProps) {
   const openTab = SYMBOL_TABS.find(tab => tab.id === activeTab) ?? null
+  /** L'accent de l'onglet ouvert, publié une fois et consommé par l'onglet ET par le panneau. */
+  const accent = openTab?.accent
   const families = (openTab?.families ?? []).filter(family => !hiddenFamilies.includes(family.name))
 
   return (
     <div
       role="group"
       aria-label="Symboles à insérer"
-      style={{ display: 'flex', flexDirection: 'column', gap: 7, color: 'var(--foreground)', minWidth: 0 }}
+      className="symbol-band"
+      // L'accent de l'onglet OUVERT, publié une fois pour ses deux usages : le
+      // liséré de l'onglet et le fond du panneau. La feuille de style mélange
+      // cette seule variable des deux côtés — c'est ce qui rend la couture du
+      // dossier invisible, et non une coïncidence réglée à l'œil.
+      data-accent={accent}
+      // Ouvert ou fermé : c'est ce que la feuille de style regarde pour refermer
+      // les coins du rail quand il n'y a rien dessous.
+      data-open={families.length > 0}
+      style={{ '--band-accent': accent } as CSSProperties}
     >
-      {/* Ligne 1 : le bloc visé, puis les onglets. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      {/* Ligne 1 : le bloc visé, les onglets, et la commande qui referme. */}
+      <div className="symbol-band__head">
         <span style={TARGET_CHIP}>{targetLabel}</span>
 
-        <div role="group" aria-label="Onglets du bandeau" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div role="group" aria-label="Onglets du bandeau" className="symbol-band__tabs">
           {SYMBOL_TABS.map(tab => {
             const Icon = tab.icon
             const open = tab.id === activeTab
@@ -85,25 +97,25 @@ export const SymbolBand = memo(function SymbolBand({
             // « GB » sur Windows.
             const flag = tab.id === 'en' || tab.id === 'es' || tab.id === 'fr' ? tab.id : null
             return (
-              <Hint key={tab.id} label={open ? `${tab.label} — cliquer pour fermer` : tab.label}>
+              <Hint key={tab.id} label={tab.label}>
                 <button
                   type="button"
-                  // `aria-pressed` et non `role="tab"` : le contenu n'est pas un
-                  // vrai panneau d'onglets, et le prétendre serait un mensonge
-                  // pour un lecteur d'écran. Ce sont des boutons bascules, ce que
-                  // l'utilisateur voit exactement.
+                  className="symbol-band__tab"
+                  // `aria-pressed` et non `role="tab"` : il n'y a pas de
+                  // `tabpanel` associé ni de flèches pour passer d'un onglet à
+                  // l'autre, et le prétendre serait un mensonge pour un lecteur
+                  // d'écran. Le bouton reste un bouton, simplement « pressé »
+                  // tant que son panneau est ouvert.
                   aria-pressed={open}
                   aria-label={tab.label}
+                  data-accent={tab.accent}
+                  style={{ '--tab-accent': tab.accent } as CSSProperties}
                   onMouseDown={event => event.preventDefault()}
-                  // Cliquer l'onglet DÉJÀ ouvert le referme : un seul geste pour
-                  // « ouvre » et pour « ne rien afficher ».
-                  onClick={() => onChooseTab(open ? null : tab.id)}
-                  style={{
-                    ...TAB_BUTTON,
-                    borderColor: open ? 'var(--ring)' : 'var(--border)',
-                    background: open ? 'color-mix(in oklch, var(--ring), transparent 84%)' : 'transparent',
-                    fontWeight: open ? 650 : 500,
-                  }}
+                  // Re-cliquer l'onglet DÉJÀ ouvert ne le ferme plus : voir
+                  // disparaître le panneau auquel l'onglet vient d'être rattaché
+                  // était le geste le plus surprenant. La fermeture a désormais sa
+                  // propre commande, juste après.
+                  onClick={() => onChooseTab(tab.id)}
                 >
                   {flag !== null ? <LanguageFlag id={flag} /> : Icon !== null && <Icon size={14} />}
                   {tab.label}
@@ -112,12 +124,33 @@ export const SymbolBand = memo(function SymbolBand({
             )
           })}
         </div>
+
+        {/* « Ne rien afficher » a un bouton — à droite du rail, là où le regard
+            cherche la fermeture. Désactivé quand il n'y a déjà rien à fermer,
+            plutôt qu'un clic qui ne ferait rien. */}
+        <Hint label="Masquer le panneau de symboles">
+          <button
+            type="button"
+            className="symbol-band__hide"
+            aria-label="Masquer le panneau de symboles"
+            disabled={activeTab === null}
+            onClick={() => onChooseTab(null)}
+          >
+            <EyeOff size={15} />
+          </button>
+        </Hint>
       </div>
 
-      {/* Ligne 2 et suivantes : les familles de l'onglet ouvert. Rien du tout
-          quand aucun onglet ne l'est — c'est un état voulu, pas un vide. */}
+      {/* Ligne 2 et suivantes : les familles de l'onglet ouvert, dans le panneau
+          que l'onglet actif rejoint. Rien du tout quand aucun onglet ne l'est —
+          c'est un état voulu, pas un vide. */}
       {families.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 14px', minWidth: 0 }}>
+        <div
+          role="group"
+          aria-label="Familles de l’onglet ouvert"
+          className="symbol-band__panel"
+          data-accent={accent}
+        >
           {families.map(family => {
             const hue = GROUP_TONES[family.hue] ?? GROUP_TONES[0]
             // Une famille « formule seulement » dans un texte, ou « texte
@@ -233,26 +266,13 @@ function familyLabel(hue: string): CSSProperties {
 }
 
 const TARGET_CHIP: CSSProperties = {
+  marginBottom: 8,
   fontSize: 11.5,
   fontWeight: 650,
   padding: '3px 10px',
   borderRadius: 999,
   border: '1px solid var(--ring)',
   whiteSpace: 'nowrap',
-}
-
-const TAB_BUTTON: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 5,
-  height: 26,
-  padding: '0 10px',
-  fontFamily: 'inherit',
-  fontSize: 12,
-  borderRadius: 999,
-  border: '1px solid var(--border)',
-  color: 'inherit',
-  cursor: 'pointer',
 }
 
 const BAND_KEY: CSSProperties = {

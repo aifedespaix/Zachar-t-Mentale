@@ -1193,14 +1193,9 @@ ull quand l'utilisateur l'a refermé pour
           hauteur : c'est ce qui fait qu'aucun changement de bloc ne déplace le
           contenu. Un `position: sticky` n'aurait rien corrigé — un élément
           collant garde sa place dans le flux. */}
-      <div
-        style={{
-          flex: '0 0 auto',
-          paddingBottom: 12,
-          marginBottom: 12,
-          borderBottom: '1px solid var(--border)',
-        }}
-      >
+      {/* Plus de trait ici : le bandeau dessine son propre cadre — rail et
+          panneau — et deux traits collés en feraient un de 2 px. */}
+      <div style={{ flex: '0 0 auto', paddingBottom: 12, marginBottom: 12 }}>
         <SymbolBand
           targetLabel={`Bloc ${activeIndex + 1} · ${KIND_LABEL[activeKind]}`}
           kind={activeKind}

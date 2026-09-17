@@ -77,5 +77,18 @@ export interface SymbolTab {
   label: string
   /** Une icône, ou `null` quand l'onglet porte un drapeau — les langues. */
   icon: ComponentType<{ size?: number }> | null
+  /**
+   * La couleur de l'onglet.
+   *
+   * Elle sert DEUX fois, et c'est tout le dessin : l'onglet actif la porte en
+   * liséré haut et dans la teinte de son texte, et le panneau qu'il ouvre reprend
+   * la même pour son fond. C'est ce mélange identique des deux côtés qui rend la
+   * couture du dossier invisible — deux valeurs « presque » égales la feraient
+   * réapparaître.
+   *
+   * Elle est distincte des `GROUP_TONES` (qui disent la FAMILLE de signes) et
+   * des palettes de niveau (qui disent la CARTE) : ici, elle dit l'ONGLET.
+   */
+  accent: string
   families: SymbolFamily[]
 }

@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bandeau à onglets — modale de description</title>
+<style>
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --popover: oklch(1 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --border: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --raised: oklch(1 0 0);
+    --shadow: 0 1px 2px oklch(0 0 0 / 0.10);
+    --modal-shadow: 0 16px 48px oklch(0 0 0 / 0.16);
+    color-scheme: light;
+  }
+  .dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --popover: oklch(0.205 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --border: oklch(1 0 0 / 10%);
+    --ring: oklch(0.556 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --raised: oklch(0.315 0 0);
+    --shadow: 0 1px 2px oklch(0 0 0 / 0.45);
+    --modal-shadow: 0 16px 48px oklch(0 0 0 / 0.55);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 28px 20px 90px;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: 'Geist Variable', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page-head { max-width: 1000px; margin: 0 auto 26px; }
+  h1 { font-size: 21px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .lede { margin: 0 0 14px; color: var(--muted-foreground); max-width: 78ch; }
+  .lede strong { color: var(--foreground); }
+  .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .ctl {
+    font: inherit; font-size: 12.5px; font-weight: 600;
+    height: 30px; padding: 0 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--foreground);
+    cursor: pointer;
+  }
+  .ctl:hover { background: var(--muted); }
+  .ctl-hint { font-size: 12px; color: var(--muted-foreground); }
+  main { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; }
+  .vhead { display: flex; flex-direction: column; gap: 3px; margin-bottom: 9px; }
+  .vtitle { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .vbadge {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--muted); color: var(--muted-foreground);
+  }
+  .vtitle h3 { font-size: 15px; margin: 0; }
+  .vmech { color: var(--muted-foreground); font-size: 12.5px; max-width: 88ch; }
+  .vmech code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  .vnote { font-size: 12px; margin: 8px 0 0; color: var(--muted-foreground); max-width: 88ch; }
+  .vnote b { color: var(--foreground); }
+
+  .modal {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--popover);
+    box-shadow: var(--modal-shadow);
+  }
+  .chrome { position: relative; display: flex; flex-direction: column; gap: 7px; padding: 12px 58px 11px 16px; border-bottom: 1px solid var(--border); }
+  .crumbs { font-size: 11px; color: var(--muted-foreground); }
+  .titlechip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-radius: 9px;
+    border: 2px solid var(--tc-border);
+    background: var(--tc-bg); color: var(--tc-fg);
+    font-size: 15px; font-weight: 650;
+  }
+  .titlechip .dot { width: 10px; height: 10px; border-radius: 999px; background: currentColor; flex: 0 0 auto; }
+  .corner { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; }
+  .corner span {
+    width: 26px; height: 26px; display: grid; place-items: center;
+    border-radius: 7px; color: var(--muted-foreground); font-size: 13px;
+  }
+  .body { padding: 14px 16px 18px; }
+  .body p { margin: 0 0 10px; max-width: 72ch; }
+  .formula {
+    display: inline-block; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--muted);
+    font-family: ui-serif, Georgia, 'Times New Roman', serif; font-size: 16px;
+  }
+
+  /* ---- base du bandeau ---- */
+  .zone { margin: 12px 16px; }
+  .zone-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .target {
+    font-size: 11.5px; font-weight: 650; padding: 3px 10px;
+    border-radius: 999px; border: 1px solid var(--ring); white-space: nowrap;
+  }
+  .tabs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 28px; padding: 0 11px;
+    font: inherit; font-size: 12px; font-weight: 500;
+    border: 1px solid transparent; border-radius: 999px;
+    background: transparent; color: var(--muted-foreground); cursor: pointer;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--foreground); background: color-mix(in oklab, var(--foreground), transparent 93%); }
+  .tab .ic { display: grid; place-items: center; width: 16px; height: 12px; flex: 0 0 auto; }
+  .families { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; }
+  .f {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 9px 4px 8px; border-radius: 12px;
+    background: color-mix(in oklab, var(--hue), transparent 92%);
+    border: 1px solid color-mix(in oklab, var(--hue), transparent 76%);
+  }
+  .f.h0 { --hue: oklch(0.6 0.17 250); }
+  .f.h1 { --hue: oklch(0.66 0.16 75); }
+  .f.h2 { --hue: oklch(0.62 0.15 155); }
+  .f.h3 { --hue: oklch(0.62 0.17 20); }
+  .f.muted { opacity: 0.55; }
+  .fname {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    white-space: nowrap;
+    color: color-mix(in oklab, var(--foreground), var(--hue) 55%);
+  }
+  .keys { display: flex; align-items: center; gap: 5px; }
+  .key {
+    min-width: 32px; height: 32px; padding: 0 6px;
+    font: inherit; font-size: 15px; line-height: 1; border-radius: 9px;
+    color: var(--foreground); cursor: pointer;
+    background: color-mix(in oklab, var(--hue), transparent 80%);
+    border: 1px solid color-mix(in oklab, var(--hue), transparent 66%);
+  }
+  .key:hover { filter: brightness(0.97); }
+
+  /* ---- Piste 0 : aujourd'hui, sans cadre ---- */
+  .v0 { padding: 2px 0; }
+  .v0 .tab { border-color: var(--border); }
+  .v0 .tab[aria-selected="true"] {
+    border-color: var(--ring);
+    background: color-mix(in oklab, var(--ring), transparent 84%);
+    color: var(--foreground); font-weight: 650;
+  }
+
+  /* ---- Piste 1 : panneau encadré, actif en aplat inversé ---- */
+  .v1 {
+    border: 1px solid var(--border); border-radius: 12px;
+    background: var(--muted); padding: 10px 12px;
+  }
+  .v1 .tab[aria-selected="true"] {
+    background: var(--primary); color: var(--primary-foreground);
+    font-weight: 650; box-shadow: var(--shadow);
+  }
+  .v1 .families { border-top: 1px solid var(--border); padding-top: 10px; }
+
+  /* ---- Piste 2 : onglet-dossier collé au contenu ---- */
+  .v2 .zone-head {
+    align-items: flex-end; padding: 8px 12px 0;
+    background: var(--muted);
+    border: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    border-radius: 12px 12px 0 0;
+  }
+  .v2 .target { margin-bottom: 7px; }
+  .v2 .tab {
+    height: 32px; border-radius: 10px 10px 0 0;
+    border-bottom: 1px solid transparent; margin-bottom: -1px;
+  }
+  .v2 .tab:hover { background: color-mix(in oklab, var(--foreground), transparent 94%); }
+  .v2 .tab[aria-selected="true"] {
+    background: var(--popover);
+    border-color: var(--border); border-bottom-color: var(--popover);
+    color: var(--foreground); font-weight: 650;
+  }
+  .v2 .families {
+    margin-top: 0; padding: 10px 12px;
+    background: var(--popover);
+    border: 1px solid var(--border); border-top: none;
+    border-radius: 0 12px 12px 12px;
+  }
+
+  /* ---- Piste 3 : actif souligné ---- */
+  .v3 {
+    border: 1px solid var(--border); border-radius: 12px;
+    background: color-mix(in oklab, var(--muted), var(--popover) 42%);
+    padding: 7px 12px 10px;
+  }
+  .v3 .tab { border-radius: 8px 8px 0 0; border-bottom: 2px solid transparent; }
+  .v3 .tab[aria-selected="true"] {
+    color: var(--foreground); font-weight: 650;
+    border-bottom-color: var(--foreground);
+  }
+
+  /* ---- Piste 4 : contrôle segmenté ---- */
+  .v4 {
+    border: 1px solid var(--border); border-radius: 14px;
+    background: color-mix(in oklab, var(--foreground), transparent 97%);
+    padding: 10px 12px;
+  }
+  .v4 .tabs {
+    background: var(--muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px; gap: 2px;
+  }
+  .v4 .tab { height: 26px; border-radius: 999px; }
+  .v4 .tab[aria-selected="true"] {
+    background: var(--raised); border-color: var(--border);
+    color: var(--foreground); font-weight: 650; box-shadow: var(--shadow);
+  }
+  .v4 .families { border-top: 1px solid var(--border); padding-top: 10px; }
+
+  /* ---- Piste 5 : liseré de couleur par onglet ---- */
+  .v5 {
+    border: 1px solid var(--border); border-radius: 12px;
+    background: var(--popover); padding: 10px 12px 11px;
+  }
+  .v5 .tab { position: relative; border-radius: 9px; height: 30px; }
+  .v5 .tab::before {
+    content: ''; position: absolute; top: 0; left: 12px; right: 12px; height: 3px;
+    border-radius: 0 0 3px 3px; background: transparent;
+  }
+  .v5 .tab[aria-selected="true"] {
+    font-weight: 650;
+    background: color-mix(in oklab, var(--tab-accent), transparent 89%);
+    border-color: color-mix(in oklab, var(--tab-accent), transparent 72%);
+    color: color-mix(in oklab, var(--foreground), var(--tab-accent) 42%);
+  }
+  .v5 .tab[aria-selected="true"]::before { background: var(--tab-accent); }
+  .v5 .families { border-top: 1px solid var(--border); padding-top: 10px; }
+
+  /* ---- Piste 6 : en-tête teinté, actif élevé ---- */
+  .v6 {
+    border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+  }
+  .v6 .zone-head { background: var(--muted); padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  .v6 .tab[aria-selected="true"] {
+    background: var(--raised); border-color: var(--border);
+    color: var(--foreground); font-weight: 650;
+    box-shadow: 0 2px 7px oklch(0 0 0 / 0.18); transform: translateY(-1px);
+  }
+  .v6 .families { margin-top: 0; padding: 11px 12px; background: var(--popover); }
+
+  .page-foot {
+    max-width: 1000px; margin: 34px auto 0;
+    padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--muted);
+  }
+  .page-foot h2 { font-size: 14px; margin: 0 0 8px; }
+  .page-foot p { margin: 0 0 8px; font-size: 12.5px; max-width: 88ch; }
+  .page-foot p:last-child { margin-bottom: 0; }
+  .page-foot code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+</style>
+</head>
+<body>
+<header class="page-head">
+  <h1>Le bandeau à onglets de la modale de description</h1>
+  <p class="lede">
+    Six pistes pour <strong>encadrer la zone</strong>, rendre l'onglet actif <strong>visiblement actif</strong>
+    comme dans un vrai système d'onglets, et <strong>détacher ce bandeau du reste de la fiche</strong>
+    (fond ou teinte légèrement différents). La piste 0 montre l'état actuel, pour référence.
+  </p>
+  <div class="controls">
+    <button id="theme" class="ctl" type="button">Passer en sombre</button>
+    <span class="ctl-hint">Cliquez un onglet dans n'importe quelle piste : toutes les pistes réagissent.</span>
+  </div>
+</header>
+<main id="root"></main>
+<footer class="page-foot">
+  <h2>Une conséquence à trancher avant d'implémenter</h2>
+  <p>
+    Aujourd'hui, l'onglet est un <b>bouton bascule</b> : cliquer l'onglet déjà ouvert <b>referme le bandeau</b>
+    (il n'y a plus rien). C'est cohérent tant que ça ressemble à une rangée de pilules, mais si l'onglet
+    ressemble à un <i>vrai</i> onglet, ce geste surprend. Trois sorties possibles :
+  </p>
+  <p>
+    <b>(a)</b> on garde la bascule et on l'assume ; &nbsp;
+    <b>(b)</b> un onglet <code>Aucun</code> explicite en fin de rail ; &nbsp;
+    <b>(c)</b> une petite commande <code>Masquer le bandeau</code> (œil) à droite du rail &mdash;
+    les pistes 4 et 6 s'y prêtent le mieux, leur rail étant déjà un objet à part.
+  </p>
+  <p>
+    Les six pistes conservent <code>role="tablist"</code> / <code>aria-selected</code>, et aucun état actif
+    ne repose sur la couleur seule : la graisse et la forme changent toujours en même temps.
+  </p>
+</footer>
+<script>
+  var FLAGS = {
+    en: '<svg width="16" height="11" viewBox="0 0 60 40" style="border-radius:2px;display:block"><rect width="60" height="40" fill="#012169"/><path d="M0,0 L60,40 M60,0 L0,40" stroke="#fff" stroke-width="8"/><path d="M0,0 L60,40 M60,0 L0,40" stroke="#C8102E" stroke-width="4"/><path d="M30,0 v40 M0,20 h60" stroke="#fff" stroke-width="13"/><path d="M30,0 v40 M0,20 h60" stroke="#C8102E" stroke-width="8"/></svg>',
+    es: '<svg width="16" height="11" viewBox="0 0 60 40" style="border-radius:2px;display:block"><rect width="60" height="40" fill="#AA151B"/><rect y="10" width="60" height="20" fill="#F1BF00"/></svg>',
+    fr: '<svg width="16" height="11" viewBox="0 0 60 40" style="border-radius:2px;display:block"><rect width="20" height="40" fill="#002395"/><rect x="20" width="20" height="40" fill="#FDFDFD"/><rect x="40" width="20" height="40" fill="#ED2939"/></svg>'
+  };
+  var ICON_SIGMA = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 7V4H6l6 8-6 8h12v-3"/></svg>';
+  var ICON_FLASK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.3"/><path d="M14 9.3V2"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/><path d="M5.5 16h13"/></svg>';
+
+  var FAMILIES = {
+    maths: [
+      { name: 'Structures', hue: 3, symbols: ['⅟', 'x²', 'xₙ', '√', 'ⁿ√', '( )'] },
+      { name: 'Comparaisons', hue: 0, symbols: ['≤', '≥', '≠', '≈'] },
+      { name: 'Opérations', hue: 1, symbols: ['×', '÷', '±', '·'] },
+      { name: 'Divers', hue: 2, symbols: ['→', 'π', '∞', '°'] },
+      { name: 'Ensembles', hue: 3, symbols: ['∈', '∉', '∪', '∩', '∅'] },
+      { name: 'Logique', hue: 0, symbols: ['⇒', '⇔'] },
+      { name: 'Grec', hue: 1, symbols: ['α', 'β', 'θ', 'Δ', 'Σ'] },
+      { name: 'Unités', hue: 2, symbols: ['⚗', 'm/s'] }
+    ],
+    sciences: [
+      { name: 'Réactions', hue: 1, symbols: ['⇌', '⚗', 'm/s'] },
+      { name: 'Grandeurs', hue: 3, symbols: ['°C', 'µ', 'Ω', 'λ', 'ν', 'ρ'] },
+      { name: 'Mesures', hue: 2, symbols: ['≈', 'Δ'] }
+    ],
+    en: [
+      { name: 'Apostrophe et guillemets', hue: 0, symbols: ['’', '‘ ’', '“ ”'] },
+      { name: 'Tirets et signes', hue: 1, symbols: ['–', '—', '…', '°'] },
+      { name: 'Monnaie', hue: 2, symbols: ['£', '$', '€'] }
+    ],
+    es: [
+      { name: 'Ponctuation inversée', hue: 0, symbols: ['¿ ?', '¡ !', '« »'] },
+      { name: 'Accents et tréma', hue: 1, symbols: ['á', 'é', 'í', 'ó', 'ú', 'ü', 'ñ', 'Ñ'] }
+    ],
+    fr: [
+      { name: 'Typographie française', hue: 0, symbols: ['« »', '’', '…', '–', '—', '°'] },
+      { name: 'Ligatures', hue: 1, symbols: ['œ', 'Œ', 'æ', 'Æ'] }
+    ]
+  };
+
+  var TABS = [
+    { id: 'maths', label: 'Mathématiques', icon: ICON_SIGMA, accent: 'oklch(0.6 0.17 250)' },
+    { id: 'sciences', label: 'Sciences', icon: ICON_FLASK, accent: 'oklch(0.62 0.15 155)' },
+    { id: 'en', label: 'Anglais', flag: 'en', accent: 'oklch(0.55 0.18 275)' },
+    { id: 'es', label: 'Espagnol', flag: 'es', accent: 'oklch(0.66 0.16 75)' },
+    { id: 'fr', label: 'Français', flag: 'fr', accent: 'oklch(0.62 0.17 20)' }
+  ];
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function tabButton(tab, active) {
+    var ic = '';
+    if (tab.flag) ic = '<span class="ic">' + FLAGS[tab.flag] + '</span>';
+    else if (tab.icon) ic = '<span class="ic">' + tab.icon + '</span>';
+    return '<button type="button" class="tab" role="tab" data-tab="' + tab.id + '"'
+      + ' aria-selected="' + (active ? 'true' : 'false') + '"'
+      + ' style="--tab-accent:' + tab.accent + '">'
+      + ic + '<span>' + esc(tab.label) + '</span></button>';
+  }
+
+  function familyHtml(f, lang) {
+    var keys = f.symbols.map(function (s) {
+      return '<button type="button" class="key">' + esc(s) + '</button>';
+    }).join('');
+    return '<div class="f h' + f.hue + (lang ? ' muted' : '') + '">'
+      + '<span class="fname">' + esc(f.name) + '</span>'
+      + '<span class="keys">' + keys + '</span></div>';
+  }
+
+  function renderZone(zone, tabId) {
+    var tab = TABS.filter(function (t) { return t.id === tabId; })[0];
+    zone.querySelector('.tabs').innerHTML = TABS.map(function (t) {
+      return tabButton(t, t.id === tabId);
+    }).join('');
+    zone.querySelector('.families').innerHTML = FAMILIES[tabId].map(function (f) {
+      return familyHtml(f, tab.flag != null);
+    }).join('');
+    zone.querySelectorAll('.tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        renderZone(zone, btn.dataset.tab);
+      });
+    });
+  }
+
+  var VARIANTS = [
+    {
+      n: 0, badge: "Aujourd'hui", title: "L'existant : des pilules sans cadre",
+      mech: "Aucun cadre. Les onglets sont des pilules bordées et l'actif ne se signale que par un fond <code>--ring</code> très dilué et une graisse plus forte.",
+      note: "<b>Limite :</b> l'actif est pâle, et rien ne dit où commence ni où finit la zone d'onglets."
+    },
+    {
+      n: 1, badge: 'Piste 1', title: 'Panneau encadré, onglet actif en aplat inversé',
+      mech: "La zone devient un panneau bordé sur fond <code>--muted</code>. L'onglet actif est un aplat plein (<code>--primary</code>) à texte inversé : le langage d'un bouton pressé. Un filet sépare les onglets des familles.",
+      note: "<b>Force :</b> impossible de rater l'actif, même en vision périphérique. <b>Limite :</b> beaucoup d'encre pour une simple sélection."
+    },
+    {
+      n: 2, badge: 'Piste 2', title: 'Onglet-dossier collé au contenu',
+      mech: "La métaphore du navigateur : un rail horizontal, et l'onglet actif qui descend jusqu'au panneau des familles en effaçant le trait sous lui. Les onglets inactifs reculent (texte atténué, pas de fond).",
+      note: "<b>Force :</b> c'est le vrai système d'onglets au sens strict — l'onglet et son contenu ne font qu'un objet. <b>Limite :</b> coûte un peu de hauteur, et les raccords demandent du soin en thème sombre."
+    },
+    {
+      n: 3, badge: 'Piste 3', title: 'Zone encadrée, actif souligné',
+      mech: "Un seul cadre autour du tout, sur un fond à peine démarqué du <code>--popover</code>. L'onglet actif reste transparent mais reçoit une barre de soulignement de 2 px et passe en 650.",
+      note: "<b>Force :</b> sobre, tient avec beaucoup d'onglets, n'ajoute aucune couleur. <b>Limite :</b> marqueur plus discret ; à vérifier en thème sombre."
+    },
+    {
+      n: 4, badge: 'Piste 4', title: 'Contrôle segmenté',
+      mech: "Les onglets forment eux-mêmes un objet : une piste arrondie encadrée, où l'actif est un curseur qui se soulève (fond <code>--raised</code> + ombre douce). Le tout dans une zone encadrée et légèrement teintée.",
+      note: "<b>Force :</b> très lisible, et le rail montre d'un coup combien d'onglets existent. <b>Limite :</b> peut se lire comme un filtre plutôt qu'un jeu d'onglets."
+    },
+    {
+      n: 5, badge: 'Piste 5', title: 'Liseré de couleur par onglet',
+      mech: "Chaque onglet porte sa propre couleur, prise dans la même famille de teintes que les familles de signes. L'actif est celui dont la couleur remonte en liseré et diffuse dans son fond.",
+      note: "<b>Force :</b> relie l'onglet à ce qu'il contient et apporte de la couleur à un endroit qui n'en avait pas. <b>Limite :</b> cinq teintes à tenir en clair ET en sombre, sans les confondre avec le code couleur des niveaux de cartes."
+    },
+    {
+      n: 6, badge: 'Piste 6', title: 'En-tête teinté, actif élevé',
+      mech: "Deux tons francs : la bande des onglets prend <code>--muted</code>, le corps des familles reste sur <code>--popover</code>, et une bordure commune les réunit. L'actif est une pilule surélevée (fond <code>--raised</code> + ombre) plutôt qu'un aplat.",
+      note: "<b>Force :</b> la séparation en-tête / contenu est la plus nette des six ; la zone se lit comme un widget autonome. <b>Limite :</b> deux tons + un cadre = la piste la plus chargée."
+    }
+  ];
+
+  function modalHtml(v) {
+    return '<div class="modal">'
+      + '<div class="chrome">'
+      +   '<div class="crumbs">Chapitre 5 › Exercices</div>'
+      +   '<div class="titlechip" style="--tc-border:oklch(0.62 0.17 20);--tc-bg:color-mix(in oklab, oklch(0.62 0.17 20), transparent 90%);--tc-fg:color-mix(in oklab, var(--foreground), oklch(0.62 0.17 20) 55%)">'
+      +     '<span class="dot"></span>Signes contraires'
+      +   '</div>'
+      +   '<div class="corner"><span>⤢</span><span>✕</span></div>'
+      + '</div>'
+      + '<div class="zone v' + v.n + '" data-variant="' + v.n + '">'
+      +   '<div class="zone-head">'
+      +     '<span class="target">Bloc 1 · Formule</span>'
+      +     '<div class="tabs" role="tablist" aria-label="Onglets du bandeau"></div>'
+      +   '</div>'
+      +   '<div class="families"></div>'
+      + '</div>'
+      + '<div class="body">'
+      +   '<p><strong>Définition.</strong> Deux nombres sont dits <em>opposés</em> lorsque leur somme est nulle.</p>'
+      +   '<span class="formula">a + (−a) = 0</span>'
+      + '</div>'
+      + '</div>';
+  }
+
+  document.getElementById('root').innerHTML = VARIANTS.map(function (v) {
+    return '<section class="variant">'
+      + '<div class="vhead">'
+      +   '<div class="vtitle"><span class="vbadge">' + esc(v.badge) + '</span><h3>' + esc(v.title) + '</h3></div>'
+      +   '<div class="vmech">' + v.mech + '</div>'
+      + '</div>'
+      + modalHtml(v)
+      + '<p class="vnote">' + v.note + '</p>'
+      + '</section>';
+  }).join('');
+
+  document.querySelectorAll('.zone[data-variant]').forEach(function (zone) {
+    renderZone(zone, 'maths');
+  });
+
+  var dark = false;
+  function applyTheme() {
+    document.documentElement.classList.toggle('dark', dark);
+    document.getElementById('theme').textContent = dark ? 'Passer en clair' : 'Passer en sombre';
+  }
+  document.getElementById('theme').addEventListener('click', function () {
+    dark = !dark;
+    applyTheme();
+  });
+  applyTheme();
+</script>
+</body>
+</html>
