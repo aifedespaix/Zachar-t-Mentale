@@ -16,6 +16,18 @@ export interface MathFieldHandle {
    * would be typed out verbatim as text.
    */
   insert: (rich: string, plain?: string) => void
+  /**
+   * Focuses the field with the caret at its very end.
+   *
+   * The merge gesture backspace on an empty formula line uses: the line above
+   * disappears, and the caret has to land where writing would continue, the
+   * same "end of the previous field" a text block already lands on. A live
+   * MathLive field has no DOM "end" a caller could set like a textarea's
+   * `selectionRange` — `executeCommand('moveToMathfieldEnd')` is MathLive's own
+   * way of asking for it. On the raw-LaTeX fallback there is no live element to
+   * ask, so this falls back to the plain field the `fallback` prop rendered.
+   */
+  focusEnd: () => void
 }
 
 export interface MathFieldEditorProps {
@@ -26,20 +38,16 @@ export interface MathFieldEditorProps {
   fallback: React.ReactNode
   /**
    * Plain Enter — never Shift+Enter, which MathLive's own field keeps for
-   * moving between rows of a multi-line construct. A formula is one block, so
-   * Enter is the same "new block below" gesture every other field offers, not
-   * a character this field needs to insert.
+   * moving between rows of a multi-line construct — and Ctrl/Cmd+Enter alike.
+   * A formula field has no "new line" of its own to write (there is no
+   * paragraph to break inside one expression), so both land on the same
+   * gesture every other field offers for "the next one of these": a table
+   * cell reads it as "add a row", a formula BLOCK reads it as "add a formula
+   * line" (see `onEnterBlock` in `BlockEditor`, which inserts a new `math`
+   * block right after this one — the same simulated line the user's own
+   * Retour arrière merges back on an empty one).
    */
   onEnter?: () => void
-  /**
-   * Which Entrée this field answers.
-   *
-   * `plain` (défaut) est le sens d'origine — celui d'une cellule de tableau, où
-   * Entrée ajoute une ligne. `modified` est celui d'un BLOC : Entrée seule écrit
-   * dans la formule, et Ctrl+Entrée demande le bloc suivant, comme dans les
-   * champs de texte.
-   */
-  enter?: 'plain' | 'modified'
   /** Retour arrière sur un champ vide : le bloc demande à être supprimé. */
   onEmptyBackspace?: () => void
   ref?: React.Ref<MathFieldHandle>
@@ -55,6 +63,8 @@ export interface MathFieldEditorProps {
 export type MathfieldElement = HTMLElement & {
   value: string
   insert?: (fragment: string, options?: { focus?: boolean }) => void
+  /** MathLive's generic command runner — used here only for `moveToMathfieldEnd` (see `MathFieldHandle.focusEnd`). */
+  executeCommand?: (command: string) => boolean
 }
 
 /** Module-level: the import is shared by every math block and resolves once. */
@@ -124,7 +134,6 @@ export function MathFieldEditor({
   ariaLabel,
   fallback,
   onEnter,
-  enter = 'plain',
   onEmptyBackspace,
   ref,
 }: MathFieldEditorProps) {
@@ -152,8 +161,6 @@ export function MathFieldEditor({
   onChangeRef.current = onChange
   const onEnterRef = useRef(onEnter)
   onEnterRef.current = onEnter
-  const enterRef = useRef(enter)
-  enterRef.current = enter
   const onEmptyBackspaceRef = useRef(onEmptyBackspace)
   onEmptyBackspaceRef.current = onEmptyBackspace
   // Same reason as `onChangeRef`: the handle below is built once, so it must
@@ -178,6 +185,19 @@ export function MathFieldEditor({
         // MathLive's `insert()` mutates the field without necessarily emitting
         // `input`, so the change is pushed out here rather than waited for.
         onChangeRef.current(field.value)
+      },
+      focusEnd() {
+        const field = fieldRef.current
+        if (field !== null) {
+          field.focus()
+          field.executeCommand?.('moveToMathfieldEnd')
+          return
+        }
+        // No live element — the raw-LaTeX fallback owns its own textarea, which
+        // this component does not create, only wrap (see `rootRef` below).
+        const raw = rootRef.current?.querySelector<HTMLTextAreaElement | HTMLInputElement>('textarea, input')
+        raw?.focus()
+        raw?.setSelectionRange(raw.value.length, raw.value.length)
       },
     }),
     []
@@ -245,9 +265,6 @@ export function MathFieldEditor({
         return
       }
       if (event.key !== 'Enter' || event.shiftKey) return
-      // Sur un bloc, Entrée seule écrit : c'est Ctrl+Entrée qui demande le bloc
-      // suivant. Sur une cellule (défaut), Entrée garde son sens d'origine.
-      if (enterRef.current === 'modified' && !(event.ctrlKey || event.metaKey)) return
       event.preventDefault()
       onEnterRef.current?.()
     })
