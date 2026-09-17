@@ -326,6 +326,67 @@ describe('the table editor', () => {
     const otherTrash = screen.getByRole('button', { name: /supprimer la colonne 2/i }).parentElement as HTMLElement
     expect(otherTrash.style.opacity).toBe('0')
   })
+
+  it('straddles the line it inserts at instead of hugging it from one side', () => {
+    // Chaque poignée `+` de frontière est packée FLEX-END dans une case de la
+    // largeur d'une colonne (ou d'une ligne) : au repos, son propre bord (droit
+    // ou bas) tombe déjà exactement sur la frontière, avec tout son gabarit du
+    // même côté. Le décalage de la moitié de son gabarit — plus la moitié du
+    // `gap` de la grille — est ce qui la centre SUR cette frontière au lieu de
+    // se contenter de la border.
+    renderEditor([{ kind: 'table', header: [], rows: [['a', 'b']] }])
+
+    const colInsert = screen.getByRole('button', { name: /insérer une colonne après la colonne 1/i })
+    expect(colInsert.style.transform).toBe('translateX(13px)')
+
+    const rowInsert = screen.getByRole('button', { name: /insérer une ligne après la ligne 1/i })
+    expect(rowInsert.style.transform).toBe('translateY(13px)')
+
+    // La poubelle, elle, ne straddle rien : elle marque la ligne/colonne
+    // qu'elle supprime, pas une frontière entre deux.
+    const trash = screen.getByRole('button', { name: /supprimer la colonne 1/i })
+    expect(trash.style.transform).toBe('')
+  })
+
+  it('keeps the row trash reachable across the blur its own mousedown causes', async () => {
+    // Le bug que ce test verrouille : cliquer sur la poubelle déplace le focus
+    // depuis la cellule qui l'avait, donc déclenche un `blur` — et si ce `blur`
+    // efface le MÊME état que celui qui révèle la poubelle, elle disparaît (et
+    // perd son `pointer-events`) entre le `mousedown` et le `click` censé la
+    // déclencher, et rien ne se supprime.
+    const user = userEvent.setup()
+    const twoRows: CardBlock[] = [{ kind: 'table', header: [], rows: [['a', 'b'], ['c', 'd']] }]
+    const { latest } = renderEditor(twoRows)
+
+    // Le focus, pas le survol, révèle la poubelle ici — exactement le cas qui
+    // cassait : rien ne survole plus la ligne au moment du clic.
+    await user.click(screen.getByRole('textbox', { name: /ligne 1 colonne 1/i }))
+    await user.click(screen.getByRole('button', { name: /supprimer la ligne 1/i }))
+
+    expect(latest()).toEqual([{ kind: 'table', header: [], rows: [['c', 'd']] }])
+  })
+
+  it('lets a hover elsewhere take over, then falls back to the focused cell once the mouse leaves', async () => {
+    // Le modèle demandé : le survol mène tant que la souris reste dans le
+    // tableau ; le focus, lui, garde une case « sélectionnée » même quand la
+    // souris est repartie ailleurs, et reprend la main dès que la souris sort.
+    const user = userEvent.setup()
+    renderEditor([{ kind: 'table', header: [], rows: [['a', 'b'], ['c', 'd']] }])
+
+    await user.click(screen.getByRole('textbox', { name: /ligne 1 colonne 1/i }))
+    const col1Trash = screen.getByRole('button', { name: /supprimer la colonne 1/i }).parentElement as HTMLElement
+    const col2Trash = screen.getByRole('button', { name: /supprimer la colonne 2/i }).parentElement as HTMLElement
+    expect(col1Trash.style.opacity).toBe('1')
+
+    await user.hover(screen.getByRole('textbox', { name: /ligne 1 colonne 2/i }))
+    expect(col2Trash.style.opacity).toBe('1')
+    expect(col1Trash.style.opacity).toBe('0')
+
+    fireEvent.mouseLeave(screen.getByTestId('table-grid-0'))
+    expect(col2Trash.style.opacity).toBe('0')
+    expect(col1Trash.style.opacity).toBe('1')
+  })
+
   const table: CardBlock[] = [{ kind: 'table', header: ['Français', 'Anglais'], rows: [['chien', 'dog']] }]
 
   it('edits a body cell without disturbing its neighbours', async () => {
@@ -1322,6 +1383,33 @@ describe('the block right-click menu', () => {
 
     expect(await screen.findByRole('menuitem', { name: /dupliquer le bloc/i })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /supprimer la description/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('the scrolling block list', () => {
+  it('restores the scroll position a block change would otherwise disturb', async () => {
+    // The bug this guards against: deleting, adding or moving a block can
+    // shrink or reshuffle the list above the fold, and the browser (a
+    // `scrollHeight` clamp, a remounted subtree, scroll anchoring losing its
+    // anchor) can reset `scrollTop` on its own, behind React's back — which
+    // reads as the list snapping toward the top on every edit. Rather than
+    // depend on jsdom to reproduce that (it does not lay anything out, so it
+    // never clamps `scrollTop` on its own), this reproduces the SYMPTOM
+    // directly — something resets `scrollTop` without going through the
+    // `onScroll` handler that tracks it — and checks the list's own
+    // `useLayoutEffect` puts it back.
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'a' }, { kind: 'text', text: 'b' }, { kind: 'text', text: 'c' }])
+    const list = screen.getByTestId('block-list')
+
+    fireEvent.scroll(list, { target: { scrollTop: 240 } })
+    list.scrollTop = 0
+
+    fireEvent.contextMenu(screen.getByRole('textbox', { name: /texte du bloc 2/i }).closest('[data-row-index]')!)
+    await user.click(await screen.findByRole('menuitem', { name: /supprimer le bloc/i }))
+
+    expect(latest()).toEqual([{ kind: 'text', text: 'a' }, { kind: 'text', text: 'c' }])
+    expect(list.scrollTop).toBe(240)
   })
 })
 
