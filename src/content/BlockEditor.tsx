@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import {
   Check,
@@ -529,6 +529,33 @@ export function BlockEditor({
 
 
   const editorRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * The scrolling list's own position, restored on every render this list
+   * causes — adding, deleting, moving or editing a block, a table row, a
+   * table column, anything that makes `blocks` a new array.
+   *
+   * Without this, that list can visibly snap to the top: a block removed
+   * above the fold shrinks `scrollHeight` and the browser clamps `scrollTop`
+   * down to fit, a group's wrapper can be dropped and recreated (React
+   * unmounting a subtree the user was scrolled past), and CSS scroll
+   * anchoring — meant to absorb exactly this — does not reliably survive a
+   * `motion.div` reparenting itself mid-`layout` animation. Rather than
+   * chase each cause, this restores the one thing the user actually cares
+   * about: where they were. `useLayoutEffect`, not `useEffect` — it must run
+   * BEFORE the browser paints the new layout, or the jump still flashes on
+   * screen for a frame. It runs strictly before the caret/focus effect further
+   * down (declared later, so it commits later), which is what lets a
+   * genuinely-intended scroll — the browser's own `.focus()` bringing a new
+   * field into view — still happen afterwards instead of being fought.
+   */
+  const blockListRef = useRef<HTMLDivElement>(null)
+  const lastScrollTop = useRef(0)
+  useLayoutEffect(() => {
+    const el = blockListRef.current
+    if (el) el.scrollTop = lastScrollTop.current
+  }, [blocks])
+
   // Set by an insert or a new block, consumed by the effect below once the
   // change has been committed and re-rendered: a caret placed before that
   // commit is thrown away with the old value.
@@ -1143,6 +1170,10 @@ ull quand l'utilisateur l'a refermé pour
 
       <EmptyAreaContextMenu actions={emptyAreaActions}>
       <div
+        ref={blockListRef}
+        onScroll={() => {
+          lastScrollTop.current = blockListRef.current?.scrollTop ?? 0
+        }}
         data-testid="block-list"
         style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}
       >
@@ -2171,31 +2202,58 @@ function TableField({
   // poubelle sait quelle ligne et quelle colonne on survole.
 
   /**
-   * La ligne et la colonne survolées — ou dont une cellule a le focus.
+   * La ligne et la colonne survolées, et — séparément — celles dont une
+   * cellule a le focus.
    *
-   * Trouvées depuis `data-cell` : un seul gestionnaire sur la grille couvre donc
-   * toutes les cellules, sans câbler un rappel par ligne et par colonne. Le
-   * focus passe par le MÊME chemin, ce qui rend la poubelle atteignable au
-   * clavier pour rien — elle est invisible, pas absente.
+   * Les garder séparés est ce qui répare le clic sur la poubelle : cliquer
+   * dessus déplace le focus depuis la cellule qui l'avait, donc déclenche un
+   * `blur` — et un SEUL état partagé entre survol et focus se faisait remettre
+   * à `null` par ce `blur`, cachant la poubelle (et coupant son
+   * `pointer-events`) entre le `mousedown` et le `click` qui devait la
+   * déclencher. Avec deux états, le `blur` ne touche plus que `focused`, et
+   * seulement quand le focus quitte le tableau (`relatedTarget` hors de la
+   * grille) — jamais quand il se pose sur la poubelle elle-même, qui est
+   * dedans.
+   *
+   * `active` est celle qu'on affiche : la survolée tant que la souris est
+   * dans le tableau, sinon celle qui a le focus — exactement le modèle
+   * demandé : le survol mène tant qu'on reste dans le tableau, et ne cède la
+   * place qu'à la sortie ; le focus, lui, garde une cellule "sélectionnée"
+   * même quand la souris est repartie ailleurs.
    */
   const [hovered, setHovered] = useState<{ row: number; col: number } | null>(null)
+  const [focused, setFocused] = useState<{ row: number; col: number } | null>(null)
+  const active = hovered ?? focused
+  const gridRef = useRef<HTMLDivElement>(null)
 
-  function markHovered(target: EventTarget | null) {
-    if (!(target instanceof HTMLElement)) return
+  function cellOf(target: EventTarget | null): { row: number; col: number } | null {
+    if (!(target instanceof HTMLElement)) return null
     const key = target.closest<HTMLElement>('[data-cell]')?.dataset.cell
-    if (key === undefined) return
+    if (key === undefined) return null
     const [rowText, colText] = key.split(',')
     const row = Number(rowText)
     const col = Number(colText)
-    if (Number.isInteger(row) && Number.isInteger(col)) setHovered({ row, col })
+    return Number.isInteger(row) && Number.isInteger(col) ? { row, col } : null
   }
 
   return (
     <div
-      onMouseOver={event => markHovered(event.target)}
+      ref={gridRef}
+      data-testid={`table-grid-${index}`}
+      onMouseOver={event => {
+        const cell = cellOf(event.target)
+        if (cell) setHovered(cell)
+      }}
       onMouseLeave={() => setHovered(null)}
-      onFocus={event => markHovered(event.target)}
-      onBlur={() => setHovered(null)}
+      onFocus={event => {
+        const cell = cellOf(event.target)
+        if (cell) setFocused(cell)
+      }}
+      onBlur={event => {
+        const next = event.relatedTarget
+        if (next instanceof Node && gridRef.current?.contains(next) === true) return
+        setFocused(null)
+      }}
       style={{
         display: 'grid',
         // 52px de gouttière : la largeur qu'il faut au `+` de frontière ET à la
@@ -2203,7 +2261,7 @@ function TableField({
         // collé au bord droit et l'autre au bord gauche. La poubelle d'une
         // COLONNE, elle, est centrée sur sa colonne, donc hors de ce calcul.
         gridTemplateColumns: `52px repeat(${columnCount}, minmax(84px, 1fr))`,
-        gap: 4,
+        gap: TABLE_GRID_GAP,
         alignItems: 'stretch',
       }}
     >
@@ -2215,6 +2273,7 @@ function TableField({
           label={`Insérer une colonne avant la colonne 1 du tableau ${index + 1}`}
           onActivate={() => onChange(addTableColumn(block, -1))}
           icon={<Plus size={13} />}
+          straddle="col"
         />
       </div>
       {headerCells.map((_, columnIndex) => (
@@ -2223,13 +2282,14 @@ function TableField({
             label={`Insérer une colonne après la colonne ${columnIndex + 1} du tableau ${index + 1}`}
             onActivate={() => onChange(addTableColumn(block, columnIndex))}
             icon={<Plus size={12} />}
+            straddle="col"
           />
           {canRemoveColumn && (
             // Centrée SUR la colonne, parce que c'est la colonne qu'elle
             // supprime — alors que le `+` reste sur la frontière, au bord droit.
             <span
               style={{
-                ...revealedTrash(hovered?.col === columnIndex),
+                ...revealedTrash(active?.col === columnIndex),
                 left: '50%',
                 top: '50%',
                 transform: 'translate(-50%, -50%)',
@@ -2257,11 +2317,18 @@ function TableField({
           label={`Insérer une ligne avant la ligne 1 du tableau ${index + 1}`}
           onActivate={() => onChange(addTableRow(block, -1))}
           icon={<Plus size={13} />}
+          straddle="row"
         />
       </div>
       {headerCells.map((cell, columnIndex) => (
         <input
           key={`head${columnIndex}`}
+          // La ligne d'en-tête est une "case" comme les autres pour la
+          // sélection de colonne : sans ce `data-cell`, focaliser ou survoler
+          // l'en-tête ne révélait jamais la poubelle de sa colonne. `-1` comme
+          // ligne : ce n'est celle d'aucune ligne du corps, donc ne déclenche
+          // jamais de poubelle de LIGNE par erreur.
+          data-cell={`-1,${columnIndex}`}
           aria-label={`En-tête ${columnIndex + 1} du tableau ${index + 1}`}
           placeholder={`En-tête ${columnIndex + 1}`}
           value={cell}
@@ -2280,7 +2347,7 @@ function TableField({
             rowIndex={rowIndex}
             cells={cells}
             canRemoveRow={block.rows.length > 1}
-            revealTrash={hovered?.row === rowIndex}
+            revealTrash={active?.row === rowIndex}
             onChange={onChange}
           />
         )
@@ -2311,14 +2378,33 @@ const HANDLE_ROW: CSSProperties = {
   opacity: 0.72,
 }
 
+/** The grid's own `gap` (see `TableField`) — the boundary handles straddle it. */
+const TABLE_GRID_GAP = 4
+
+const HANDLE_SIZE = 22
+
+/**
+ * How far a boundary `+` must shift to sit ON the line it inserts at, instead
+ * of hugging it from one side.
+ *
+ * `HANDLE_ROW` packs each `+` flush against the trailing edge of its own grid
+ * cell — the same edge the neighbouring cell's border starts at — so at rest
+ * the button's own right (or bottom) edge already sits exactly on the
+ * boundary, with the whole 22px of it on the near side. Moving it by half its
+ * OWN size is what centres it on that edge instead of hugging it; the extra
+ * half of the grid's `gap` centres it on the thin seam between the two cells'
+ * borders rather than on the inner one of the two.
+ */
+const HANDLE_STRADDLE = HANDLE_SIZE / 2 + TABLE_GRID_GAP / 2
+
 const HANDLE_BUTTON: CSSProperties = {
   display: 'grid',
   placeItems: 'center',
   // Plus petits qu'avant (28 → 22) : la demande était explicite, et ils n'ont
   // plus besoin de porter deux boutons côte à côte puisque la poubelle est
   // maintenant révélée au survol de sa ligne ou de sa colonne.
-  width: 22,
-  height: 22,
+  width: HANDLE_SIZE,
+  height: HANDLE_SIZE,
   padding: 0,
   borderRadius: 6,
   border: '1px solid var(--border)',
@@ -2368,8 +2454,8 @@ function revealedTrash(revealed: boolean): CSSProperties {
 const BARE_HANDLE: CSSProperties = {
   display: 'grid',
   placeItems: 'center',
-  width: 22,
-  height: 22,
+  width: HANDLE_SIZE,
+  height: HANDLE_SIZE,
   padding: 0,
   borderRadius: 6,
   cursor: 'pointer',
@@ -2384,12 +2470,26 @@ function TableHandle({
   onActivate,
   destructive = false,
   icon,
+  straddle,
 }: {
   label: string
   onActivate: () => void
   destructive?: boolean
   icon: ReactNode
+  /**
+   * For a boundary `+` only: which line it straddles — `"col"` shifts it
+   * right onto the vertical line after its column, `"row"` shifts it down
+   * onto the horizontal line after its row. See `HANDLE_STRADDLE`.
+   */
+  straddle?: 'col' | 'row'
 }) {
+  const straddleStyle: CSSProperties | undefined =
+    straddle === 'col'
+      ? { transform: `translateX(${HANDLE_STRADDLE}px)` }
+      : straddle === 'row'
+        ? { transform: `translateY(${HANDLE_STRADDLE}px)` }
+        : undefined
+
   return (
     <Hint label={label}>
     <button
@@ -2400,7 +2500,10 @@ function TableHandle({
       // poignée par frontière, et un `useState` par poignée coûterait un rendu à
       // chaque déplacement de souris au-dessus d'un tableau.
       className={destructive ? undefined : 'table-handle'}
-      style={destructive ? { ...HANDLE_BUTTON, color: 'var(--destructive)' } : BARE_HANDLE}
+      style={{
+        ...(destructive ? { ...HANDLE_BUTTON, color: 'var(--destructive)' } : BARE_HANDLE),
+        ...straddleStyle,
+      }}
     >
       {icon}
     </button>
@@ -2433,6 +2536,7 @@ function TableRow({
           label={`Insérer une ligne après la ligne ${rowIndex + 1} du tableau ${tableIndex + 1}`}
           onActivate={() => onChange(addTableRow(block, rowIndex))}
           icon={<Plus size={12} />}
+          straddle="row"
         />
         {canRemoveRow && (
           // Centrée SUR la ligne (verticalement) et collée au bord GAUCHE : c'est
