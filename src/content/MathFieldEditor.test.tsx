@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, act } from '@testing-library/react'
-import { MathFieldEditor } from './MathFieldEditor'
+import { MathFieldEditor, type MathFieldHandle } from './MathFieldEditor'
 
 // MathLive registers a custom element as an import side effect; the real
 // package is heavy and needs APIs jsdom lacks, so the seam under test is
@@ -160,6 +160,58 @@ describe('MathFieldEditor', () => {
     expect(host.style.width).toBe('100%')
     expect(host.parentElement?.style.flexGrow).toBe('1')
     expect(host.parentElement?.style.minWidth).toBe('0px')
+  })
+
+  it('focusEnd() focuses the live field and asks it to move the caret to its end', async () => {
+    const handleRef: { current: MathFieldHandle | null } = { current: null }
+    render(
+      <MathFieldEditor
+        ref={h => {
+          handleRef.current = h
+        }}
+        latex="x^2"
+        onChange={() => {}}
+        ariaLabel="Formule"
+        fallback={<textarea />}
+      />
+    )
+
+    await waitFor(() => expect(screen.getByTestId('math-field')).toBeInTheDocument())
+    const field = screen.getByTestId('math-field').firstElementChild as HTMLElement & {
+      focus: () => void
+      executeCommand: (command: string) => boolean
+    }
+    field.focus = vi.fn()
+    field.executeCommand = vi.fn()
+
+    handleRef.current?.focusEnd()
+
+    expect(field.focus).toHaveBeenCalledTimes(1)
+    expect(field.executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
+  })
+
+  it('focusEnd() falls back to the caller’s own field before the editor has loaded', async () => {
+    vi.resetModules()
+    const { MathFieldEditor: Fresh } = await import('./MathFieldEditor')
+    const handleRef: { current: MathFieldHandle | null } = { current: null }
+
+    render(
+      <Fresh
+        ref={h => {
+          handleRef.current = h
+        }}
+        latex="x"
+        onChange={() => {}}
+        ariaLabel="Formule"
+        fallback={<textarea aria-label="Brut" defaultValue="x" />}
+      />
+    )
+
+    const raw = screen.getByRole('textbox', { name: /brut/i }) as HTMLTextAreaElement
+    handleRef.current?.focusEnd()
+
+    expect(raw).toHaveFocus()
+    expect(raw.selectionStart).toBe(raw.value.length)
   })
 
   it('pushes an external change in without rebuilding the element', async () => {

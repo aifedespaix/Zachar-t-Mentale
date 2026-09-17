@@ -23,7 +23,6 @@ vi.mock('mathlive', () => {
 })
 
 async function mountField(props: {
-  enter?: 'plain' | 'modified'
   onEnter?: () => void
   onEmptyBackspace?: () => void
 }) {
@@ -45,23 +44,26 @@ async function mountField(props: {
 }
 
 describe('les touches du champ formule', () => {
-  it('avec enter="modified", Entrée seule n’ajoute pas de bloc, Ctrl+Entrée si', async () => {
-    const onEnter = vi.fn()
-    const field = await mountField({ enter: 'modified', onEnter })
-
-    fireEvent.keyDown(field, { key: 'Enter' })
-    expect(onEnter).not.toHaveBeenCalled()
-
-    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true })
-    expect(onEnter).toHaveBeenCalledTimes(1)
-  })
-
-  it('par défaut, Entrée seule garde son sens de cellule de tableau', async () => {
+  it('Entrée seule ajoute une ligne de formule, Ctrl+Entrée aussi', async () => {
+    // Un champ formule n'a pas de « ligne » à écrire : Entrée seule y fait donc
+    // directement ce que Ctrl/Cmd+Entrée fait ailleurs, sans qu'il faille tenir
+    // une touche de modification pour l'obtenir.
     const onEnter = vi.fn()
     const field = await mountField({ onEnter })
 
     fireEvent.keyDown(field, { key: 'Enter' })
     expect(onEnter).toHaveBeenCalledTimes(1)
+
+    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true })
+    expect(onEnter).toHaveBeenCalledTimes(2)
+  })
+
+  it('Maj+Entrée ne déclenche rien — MathLive garde la touche pour ses propres lignes', async () => {
+    const onEnter = vi.fn()
+    const field = await mountField({ onEnter })
+
+    fireEvent.keyDown(field, { key: 'Enter', shiftKey: true })
+    expect(onEnter).not.toHaveBeenCalled()
   })
 
   it('Retour arrière sur un champ vide demande la suppression du bloc', async () => {

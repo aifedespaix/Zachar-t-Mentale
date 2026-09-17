@@ -2,7 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { BlockEditor, convertBlock, duplicateBlock, isFormulaTrigger } from './BlockEditor'
+import {
+  BlockEditor,
+  convertBlock,
+  duplicateBlock,
+  isFormulaTrigger,
+  mathZoneAround,
+  mergeMathZone,
+  splitTextToMathZone,
+} from './BlockEditor'
 import { SYMBOL_FAMILIES } from './symbolSets'
 import type { CardBlock } from '../types/cardBlock'
 
@@ -88,6 +96,80 @@ describe('convertBlock', () => {
     const asQuestion = convertBlock(text, 'question')
     expect(asQuestion).toEqual({ kind: 'question', text: 'Quel est le coefficient directeur ?' })
     expect(convertBlock(asQuestion, 'text')).toEqual(text)
+  })
+})
+
+describe('la « zone formule » (texte ↔ formule multi-ligne)', () => {
+  it('splitTextToMathZone : une ligne de texte donne un seul bloc formule', () => {
+    expect(splitTextToMathZone({ kind: 'text', text: 'x^2' })).toEqual([{ kind: 'math', latex: 'x^2' }])
+  })
+
+  it('splitTextToMathZone : plusieurs lignes donnent autant de blocs formule empilés', () => {
+    const text: CardBlock = { kind: 'text', text: 'x^2\ny = mx + b\n\\pi' }
+    expect(splitTextToMathZone(text)).toEqual([
+      { kind: 'math', latex: 'x^2' },
+      { kind: 'math', latex: 'y = mx + b' },
+      { kind: 'math', latex: '\\pi' },
+    ])
+  })
+
+  it('splitTextToMathZone : le marqueur `standalone` suit seulement le premier bloc', () => {
+    const text: CardBlock = { kind: 'text', text: 'a\nb', standalone: true }
+    expect(splitTextToMathZone(text)).toEqual([
+      { kind: 'math', latex: 'a', standalone: true },
+      { kind: 'math', latex: 'b' },
+    ])
+  })
+
+  it('mathZoneAround : un bloc formule isolé est sa propre zone', () => {
+    const blocks: CardBlock[] = [{ kind: 'text', text: 't' }, { kind: 'math', latex: 'x' }, { kind: 'text', text: 't2' }]
+    expect(mathZoneAround(blocks, 1)).toEqual({ start: 1, end: 1 })
+  })
+
+  it('mathZoneAround : s’étend à toute la série de formules qui se touchent', () => {
+    const blocks: CardBlock[] = [
+      { kind: 'text', text: 't' },
+      { kind: 'math', latex: 'a' },
+      { kind: 'math', latex: 'b' },
+      { kind: 'math', latex: 'c' },
+      { kind: 'text', text: 't2' },
+    ]
+    expect(mathZoneAround(blocks, 2)).toEqual({ start: 1, end: 3 })
+  })
+
+  it('mathZoneAround : ne franchit jamais la frontière d’un groupe de question', () => {
+    const blocks: CardBlock[] = [
+      { kind: 'math', latex: 'a' },
+      { kind: 'question', text: 'Combien ?' },
+      { kind: 'math', latex: 'b' },
+    ]
+    // Le bloc 0 (formule) et le bloc 2 (formule, sous la question) ne sont
+    // JAMAIS la même zone : `blockGroups` les sépare déjà.
+    expect(mathZoneAround(blocks, 0)).toEqual({ start: 0, end: 0 })
+    expect(mathZoneAround(blocks, 2)).toEqual({ start: 2, end: 2 })
+  })
+
+  it('mergeMathZone : replie toute la série en un seul bloc texte, une ligne par formule', () => {
+    const blocks: CardBlock[] = [
+      { kind: 'text', text: 'avant' },
+      { kind: 'math', latex: 'a' },
+      { kind: 'math', latex: 'b' },
+      { kind: 'text', text: 'après' },
+    ]
+    const { blocks: next, index } = mergeMathZone(blocks, 2)
+    expect(index).toBe(1)
+    expect(next).toEqual([
+      { kind: 'text', text: 'avant' },
+      { kind: 'text', text: 'a\nb' },
+      { kind: 'text', text: 'après' },
+    ])
+  })
+
+  it('mergeMathZone : round-trip exact avec splitTextToMathZone', () => {
+    const original: CardBlock = { kind: 'text', text: 'a\nb\nc' }
+    const split = splitTextToMathZone(original)
+    const { blocks: merged } = mergeMathZone(split, 1)
+    expect(merged).toEqual([original])
   })
 })
 
@@ -361,6 +443,35 @@ describe('the type switch, carried by each block', () => {
       { kind: 'text', text: 'premier' },
       { kind: 'math', latex: 'second' },
     ])
+  })
+
+  it('splits a multi-line text block into one formula block per line, via the type menu', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'x^2\ny = mx + b' }])
+
+    await user.click(screen.getByRole('button', { name: /type du bloc 1/i }))
+    await user.click(screen.getByRole('menuitem', { name: /formule/i }))
+
+    expect(latest()).toEqual([
+      { kind: 'math', latex: 'x^2' },
+      { kind: 'math', latex: 'y = mx + b' },
+    ])
+  })
+
+  it('folds a whole run of formula blocks back into one multi-line text block', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([
+      { kind: 'math', latex: 'a' },
+      { kind: 'math', latex: 'b' },
+      { kind: 'math', latex: 'c' },
+    ])
+
+    // Le bouton du bloc DU MILIEU : la fusion doit prendre toute la série qui
+    // le touche, pas seulement lui.
+    await user.click(screen.getByRole('button', { name: /type du bloc 2/i }))
+    await user.click(screen.getByRole('menuitem', { name: /texte/i }))
+
+    expect(latest()).toEqual([{ kind: 'text', text: 'a\nb\nc' }])
   })
 
   it('shows the block’s CURRENT type on its own button, so the list can be read at a glance', () => {

@@ -139,6 +139,50 @@ export function convertBlock(block: CardBlock, kind: CardBlockKind): CardBlock {
 }
 
 /**
+ * The contiguous run of `math` blocks around `index` — the "formula zone"
+ * `Entrée` builds one line at a time (see `MathFieldEditor`'s `onEnter`).
+ * Bounded by the group `index` sits in (see `blockGroups`), so a merge into
+ * text can never reach into a different question's formulas. `index` itself
+ * must already be a `math` block; anything else is its own one-block "run".
+ */
+export function mathZoneAround(blocks: CardBlock[], index: number): { start: number; end: number } {
+  if (blocks[index]?.kind !== 'math') return { start: index, end: index }
+  const bounds = blockGroups(blocks).find(group => group.indexes.includes(index))?.indexes ?? [index]
+  let start = index
+  while (start > bounds[0] && blocks[start - 1]?.kind === 'math') start -= 1
+  let end = index
+  const last = bounds[bounds.length - 1]
+  while (end < last && blocks[end + 1]?.kind === 'math') end += 1
+  return { start, end }
+}
+
+/**
+ * Folds the formula zone around `index` into ONE text block, one line per
+ * formula — the reverse of `splitTextToMathZone` below, and what lets the
+ * stacked lines `Entrée` built become the single multi-line field a text
+ * block already is, instead of leaving one text block behind per line.
+ */
+export function mergeMathZone(blocks: CardBlock[], index: number): { blocks: CardBlock[]; index: number } {
+  const { start, end } = mathZoneAround(blocks, index)
+  const run = blocks.slice(start, end + 1)
+  const standalone = run[0]?.standalone === true ? { standalone: true } : {}
+  const merged: CardBlock = { kind: 'text', text: run.map(sourceOf).join('\n'), ...standalone }
+  return { blocks: [...blocks.slice(0, start), merged, ...blocks.slice(end + 1)], index: start }
+}
+
+/**
+ * Splits a (possibly multi-line) text block into one `math` block per line —
+ * the formula zone system arrived at directly, instead of cramming several
+ * lines of prose into one formula's LaTeX source as a literal `\n`.
+ */
+export function splitTextToMathZone(block: CardBlock): CardBlock[] {
+  const standalone = block.standalone === true ? { standalone: true } : {}
+  return sourceOf(block)
+    .split('\n')
+    .map((latex, i): CardBlock => ({ kind: 'math', latex, ...(i === 0 ? standalone : {}) }))
+}
+
+/**
  * The block as the 1×1 table it always already was.
  *
  * The user's model, and now the app's: any block of content IS a one-cell
@@ -490,6 +534,14 @@ export function BlockEditor({
   // commit is thrown away with the old value.
   const pendingCaret = useRef<{ index: number; position: number } | null>(null)
   const pendingFocusSelector = useRef<string | null>(null)
+  /**
+   * Which formula block's field to focus AT ITS END once a pending removal's
+   * render has committed — the merge gesture backspace on an empty formula
+   * LINE uses (see `deleteEmptyAt`). A math field has no DOM position a
+   * `pendingCaret` could set, so it is asked through its own handle instead
+   * (see `MathFieldHandle.focusEnd`).
+   */
+  const pendingMathFocusEnd = useRef<number | null>(null)
 
   /** The text field of block `index`, looked up in the DOM it is rendered in. */
   function textFieldAt(index: number): HTMLTextAreaElement | null {
@@ -522,6 +574,12 @@ export function BlockEditor({
       editorRef.current
         ?.querySelector<HTMLInputElement>(`[data-cell="${cellCaret.key}"] input`)
         ?.setSelectionRange(cellCaret.position, cellCaret.position)
+    }
+
+    const mathFocusIndex = pendingMathFocusEnd.current
+    if (mathFocusIndex !== null) {
+      pendingMathFocusEnd.current = null
+      mathFields[mathFocusIndex]?.focusEnd()
     }
   })
 
@@ -803,6 +861,11 @@ export function BlockEditor({
     setActiveIndex(Math.max(0, index - 1))
     if (previous !== undefined && (previous.kind === 'text' || previous.kind === 'question')) {
       pendingCaret.current = { index: index - 1, position: previous.text.length }
+    } else if (previous !== undefined && previous.kind === 'math') {
+      // Une formule n'a pas de position DOM à poser comme un texte : c'est le
+      // champ lui-même (ou son repli LaTeX brut) qui sait se placer à la fin
+      // de ce qu'il contient déjà — voir `MathFieldHandle.focusEnd`.
+      pendingMathFocusEnd.current = index - 1
     } else if (index > 0) {
       // Une image ou un tableau n'a pas de « fin » où poser un caret : on se
       // contente de ramener le focus sur son premier champ.
@@ -823,9 +886,28 @@ export function BlockEditor({
     if (block === undefined) return
     if (kind === 'table') {
       if (block.kind !== 'image') replace(index, addTableColumn(blockAsTable(block)))
-    } else {
-      replace(index, convertBlock(block, kind))
+      focusBlockAfterMenu(index)
+      return
     }
+    // Texte ↔ formule est la seule paire qui a une ZONE à respecter : plusieurs
+    // lignes de texte deviennent autant de blocs formule empilés, et la formule
+    // empilée qui en résulte refond en un seul bloc texte multi-ligne au retour
+    // — voir `splitTextToMathZone`/`mergeMathZone`. Toute autre conversion (vers
+    // ou depuis « question », par exemple) reste le geste un-bloc d'origine.
+    if (kind === 'math' && block.kind === 'text') {
+      onChange([...blocks.slice(0, index), ...splitTextToMathZone(block), ...blocks.slice(index + 1)])
+      setActiveIndex(index)
+      focusBlockAfterMenu(index)
+      return
+    }
+    if (kind === 'text' && block.kind === 'math') {
+      const { blocks: next, index: mergedIndex } = mergeMathZone(blocks, index)
+      onChange(next)
+      setActiveIndex(mergedIndex)
+      focusBlockAfterMenu(mergedIndex)
+      return
+    }
+    replace(index, convertBlock(block, kind))
     focusBlockAfterMenu(index)
   }
 
@@ -1901,7 +1983,6 @@ function MathBlockField({
       latex={block.latex}
       onChange={latex => onChange({ ...block, latex })}
       onEnter={onEnterBlock}
-      enter="modified"
       onEmptyBackspace={onDeleteEmpty}
       ariaLabel={`Formule du bloc ${index + 1}`}
       fallback={
@@ -1914,13 +1995,14 @@ function MathBlockField({
             value={block.latex}
             onChange={event => onChange({ ...block, latex: event.target.value })}
             onKeyDown={event => {
-              // Le repli est un <textarea> : Entrée y écrit une ligne, et c'est
-              // Ctrl+Entrée qui demande le bloc suivant, comme dans un texte.
-              if (event.key === 'Enter') {
-                if (event.ctrlKey || event.metaKey) {
-                  event.preventDefault()
-                  onEnterBlock()
-                }
+              // Le repli est un <textarea>, mais une formule n'a pas de
+              // « ligne » à elle : Entrée (seule ou avec Ctrl/Cmd) demande
+              // directement le bloc formule suivant, la même façon de simuler
+              // le retour à la ligne que le vrai champ MathLive (voir
+              // `MathFieldEditor`) — jamais un `\n` littéral dans le LaTeX.
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                onEnterBlock()
                 return
               }
               if (event.key === 'Backspace' && block.latex === '') {
