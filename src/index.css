@@ -372,12 +372,21 @@
  * stacked directly over the minimap. They are one flex column, so the buttons
  * always sit exactly above the map whatever its height, rather than two
  * independently placed panels that can drift apart or overlap.
+ *
+ * React Flow's `.react-flow__panel` has no `pointer-events` rule of its own,
+ * so it defaults to `auto` — the whole flex container's bounding box (the
+ * gaps between the three widgets, and the space beside the ones narrower
+ * than the 200px-wide minimap, since they're right-aligned) would otherwise
+ * swallow clicks meant for the canvas underneath, even though nothing is
+ * drawn there. `pointer-events: none` here hands the empty space back to
+ * the canvas; each widget below re-enables it for itself.
  */
 .viewport-dock {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
+  pointer-events: none;
 }
 
 /* The button group is a single object — one border, one shadow, one radius —
@@ -392,6 +401,7 @@
   border-radius: 10px;
   background: var(--card);
   box-shadow: 0 6px 16px -8px oklch(0 0 0 / 45%);
+  pointer-events: auto;
 }
 
 /*
@@ -412,6 +422,7 @@
   border-radius: 10px;
   background: var(--card);
   box-shadow: 0 6px 16px -8px oklch(0 0 0 / 45%);
+  pointer-events: auto;
 }
 .viewport-dock__navpad-up {
   grid-column: 2;
@@ -444,6 +455,7 @@
   --xy-minimap-background-color: var(--card);
   --xy-minimap-mask-background-color: color-mix(in oklch, var(--background), transparent 35%);
   --xy-minimap-node-stroke-color: transparent;
+  pointer-events: auto;
 }
 
 /* The selected card's ring, drawn via `nodeStrokeWidth` in SVG user units,
