@@ -585,6 +585,24 @@ describe('DescriptionDialog', () => {
     expect(title.selectionEnd).toBe('Nouveau titre'.length)
   })
 
+  it('selects the whole title when it is focused later, same as clicking a card title directly', async () => {
+    // Only the "just created" card gets `autoFocusTitle` — every other click
+    // on the title chip (the normal way to rename an existing card from the
+    // dialog) must select the text too, exactly like `CardNode`'s own title
+    // field does on the canvas, so typing overwrites rather than inserting.
+    const user = userEvent.setup()
+    renderDialog({ onRenameTitle: vi.fn(), cardTitle: 'Signes contraires' })
+
+    const title = screen.getByRole('textbox', { name: /titre de la carte/i }) as HTMLInputElement
+    expect(title).not.toHaveFocus()
+
+    await user.click(title)
+
+    expect(title).toHaveFocus()
+    expect(title.selectionStart).toBe(0)
+    expect(title.selectionEnd).toBe('Signes contraires'.length)
+  })
+
   describe('la largeur de la modale', () => {
     // The dialog is recognised the same way useGlobalShortcuts recognises an
     // open modal — by its data-slot attribute, which this component sets itself
