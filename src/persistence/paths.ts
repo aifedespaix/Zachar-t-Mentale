@@ -5,6 +5,8 @@
  * path keeps its backslashes, a POSIX one its slashes.
  */
 
+import { kebabCase } from '../utils/kebabCase'
+
 /**
  * The extension the app WRITES. `.zmap` is registered with Windows by the
  * installer, so a mind map opens on a double-click; `.json` could not be,
@@ -149,4 +151,31 @@ export function isSameFilePath(left: string, right: string): boolean {
 export function sanitizeFileName(name: string): string {
   const cleaned = name.replace(ILLEGAL_FILENAME_CHARS, ' ').replace(/\s+/g, ' ').trim()
   return cleaned === '' ? 'Sans titre' : cleaned
+}
+
+/**
+ * `rawName`, sanitized and with any known mind-map extension it carries
+ * stripped back off — e.g. « Chapitre 3.json » → « Chapitre 3 ». What both
+ * the file name and the root card's title are derived from, so neither
+ * drifts from what the other calls "the name".
+ */
+export function sanitizedMindMapBase(rawName: string): string {
+  const safeName = sanitizeFileName(rawName)
+  const suffix = mindMapExtensionSuffix(safeName)
+  return suffix === '' ? safeName : safeName.slice(0, safeName.length - suffix.length)
+}
+
+/**
+ * The kebab-case file name a brand-new mind map named `rawName` gets written
+ * to — whatever the user typed, e.g. « Chapitre 1 : Les nombres relatifs » →
+ * `chapitre-1-les-nombres-relatifs.zmap`.
+ *
+ * A name already carrying a known extension (typed with one, or carried over
+ * from a legacy `.json` file name) keeps that exact extension instead of
+ * getting `.zmap` appended after it.
+ */
+export function mindMapFileNameFor(rawName: string): string {
+  const safeName = sanitizeFileName(rawName)
+  const suffix = mindMapExtensionSuffix(safeName)
+  return `${kebabCase(sanitizedMindMapBase(rawName))}${suffix === '' ? MIND_MAP_EXTENSION : suffix}`
 }

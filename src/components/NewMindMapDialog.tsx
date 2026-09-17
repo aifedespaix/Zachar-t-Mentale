@@ -3,7 +3,7 @@ import type { FileTreeNode, RootFolder } from '../types/workspace'
 import { useWorkspaceStore, describeError } from '../state/useWorkspaceStore'
 import { createMindMapFile } from '../persistence/fileOps'
 import { mindMapExists } from '../persistence/fileStore'
-import { sanitizeFileName, separatorOf, parentDirOf, withMindMapExtension } from '../persistence/paths'
+import { sanitizeFileName, separatorOf, parentDirOf, mindMapFileNameFor } from '../persistence/paths'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Button } from './ui/button'
 
@@ -85,8 +85,7 @@ export function NewMindMapDialog({ onClose, onCreated }: NewMindMapDialogProps) 
 
   async function handleCreate() {
     if (!canCreate) return
-    const safeName = sanitizeFileName(trimmed)
-    const fileName = withMindMapExtension(safeName)
+    const fileName = mindMapFileNameFor(trimmed)
     setCreating(true)
     setError(null)
     try {
@@ -98,7 +97,7 @@ export function NewMindMapDialog({ onClose, onCreated }: NewMindMapDialogProps) 
         setError(`« ${fileName} » existe déjà dans ce dossier. Choisissez un autre nom.`)
         return
       }
-      const path = await createMindMapFile(folder, safeName)
+      const path = await createMindMapFile(folder, trimmed)
       await refreshFolder(folder)
       // So the new map is visible in the tree, not just on the canvas: it may
       // well have landed inside folders the user has never expanded.
@@ -108,7 +107,7 @@ export function NewMindMapDialog({ onClose, onCreated }: NewMindMapDialogProps) 
     } catch (caught) {
       // Kept open on failure: a read-only folder or an illegal name is
       // something the user can still fix from this same dialog.
-      setError(`Impossible de créer la carte mentale « ${safeName} » : ${describeError(caught)}`)
+      setError(`Impossible de créer la carte mentale « ${sanitizeFileName(trimmed)} » : ${describeError(caught)}`)
     } finally {
       setCreating(false)
     }

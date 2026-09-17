@@ -5,8 +5,10 @@ import {
   isMindMapPath,
   isSameFilePath,
   mindMapBaseName,
+  mindMapFileNameFor,
   parentDirOf,
   repairedCopyPath,
+  sanitizedMindMapBase,
   sanitizeFileName,
   separatorOf,
   withMindMapExtension,
@@ -144,5 +146,26 @@ describe('sanitizeFileName', () => {
 
   it('leaves an already-safe name untouched', () => {
     expect(sanitizeFileName('Chimie organique')).toBe('Chimie organique')
+  })
+})
+
+describe('sanitizedMindMapBase', () => {
+  it('sanitizes and leaves a name with no extension as-is', () => {
+    expect(sanitizedMindMapBase('Chapitre 3: Vecteurs/Forces')).toBe('Chapitre 3 Vecteurs Forces')
+  })
+
+  it('strips a known mind-map extension off the end', () => {
+    expect(sanitizedMindMapBase('Chapitre 3.json')).toBe('Chapitre 3')
+    expect(sanitizedMindMapBase('Chapitre 3.zmap')).toBe('Chapitre 3')
+  })
+})
+
+describe('mindMapFileNameFor', () => {
+  it('kebab-cases whatever was typed and appends .zmap', () => {
+    expect(mindMapFileNameFor('Chapitre 1 : Les nombres relatifs')).toBe('chapitre-1-les-nombres-relatifs.zmap')
+  })
+
+  it('keeps a known extension the typed name already carries, instead of appending .zmap after it', () => {
+    expect(mindMapFileNameFor('Chapitre 3.json')).toBe('chapitre-3.json')
   })
 })
