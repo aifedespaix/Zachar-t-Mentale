@@ -87,6 +87,46 @@ describe('la « zone formule »', () => {
     expect(second.executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
   })
 
+  it('les flèches montent/descendent d’une ligne DANS le bloc', async () => {
+    render(<Harness initial={[{ kind: 'math', latex: 'a\nb\nc' }]} />)
+    const fields = await mathFields()
+    expect(fields).toHaveLength(3)
+
+    fireEvent.keyDown(fields[1], { key: 'ArrowDown' })
+    expect(fields[2].focus).toHaveBeenCalled()
+    expect(fields[2].executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
+
+    fireEvent.keyDown(fields[1], { key: 'ArrowUp' })
+    expect(fields[0].focus).toHaveBeenCalled()
+    expect(fields[0].executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
+
+    // Toujours UN seul bloc : on ne sort jamais de la formule.
+    expect(document.querySelectorAll('[data-row-index]')).toHaveLength(1)
+  })
+
+  it('les flèches ne sortent pas de la formule : rien aux extrémités', async () => {
+    render(<Harness initial={[{ kind: 'math', latex: 'a\nb' }]} />)
+    const fields = await mathFields()
+
+    fireEvent.keyDown(fields[0], { key: 'ArrowUp' })
+    fireEvent.keyDown(fields[1], { key: 'ArrowDown' })
+
+    // Aucun déplacement : la touche est avalée plutôt que d'aller voir ailleurs.
+    expect(fields[0].focus).not.toHaveBeenCalled()
+    expect(fields[1].focus).not.toHaveBeenCalled()
+  })
+
+  it('une formule mono-ligne laisse les flèches à MathLive', async () => {
+    render(<Harness initial={[{ kind: 'math', latex: 'x' }]} />)
+    const [only] = await mathFields()
+
+    fireEvent.keyDown(only, { key: 'ArrowUp' })
+    fireEvent.keyDown(only, { key: 'ArrowDown' })
+
+    // Pas de handler de ligne : on n'a rien à faire, MathLive garde la touche.
+    expect(only.focus).not.toHaveBeenCalled()
+  })
+
   it('Retour arrière sur la ligne vide la supprime et rend la main à la fin de la précédente', async () => {
     render(<Harness initial={[{ kind: 'math', latex: 'x' }]} />)
     const [first] = await mathFields()

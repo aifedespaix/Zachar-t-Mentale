@@ -63,6 +63,14 @@ export interface MathFieldEditorProps {
   onEmptyBackspace?: () => void
   /** Suppr sur un champ vide : la ligne (ou le bloc) demande à disparaître vers le suivant. */
   onEmptyDelete?: () => void
+  /**
+   * Flèche haut : la ligne de formule PRÉCÉDENTE, dans le même champ. Absent
+   * quand il n'y a qu'une ligne — la touche reste alors à MathLive, qui s'en
+   * sert pour circuler dans une fraction.
+   */
+  onArrowUp?: () => void
+  /** Flèche bas : la ligne de formule SUIVANTE, dans le même champ. Voir `onArrowUp`. */
+  onArrowDown?: () => void
   ref?: React.Ref<MathFieldHandle>
 }
 
@@ -150,6 +158,8 @@ export function MathFieldEditor({
   onEnterBlock,
   onEmptyBackspace,
   onEmptyDelete,
+  onArrowUp,
+  onArrowDown,
   ref,
 }: MathFieldEditorProps) {
   // Which editor this block shows. It starts on the caller's field whenever
@@ -182,6 +192,10 @@ export function MathFieldEditor({
   onEmptyBackspaceRef.current = onEmptyBackspace
   const onEmptyDeleteRef = useRef(onEmptyDelete)
   onEmptyDeleteRef.current = onEmptyDelete
+  const onArrowUpRef = useRef(onArrowUp)
+  onArrowUpRef.current = onArrowUp
+  const onArrowDownRef = useRef(onArrowDown)
+  onArrowDownRef.current = onArrowDown
   // Same reason as `onChangeRef`: the handle below is built once, so it must
   // not close over the formula as it was at mount.
   const latexRef = useRef(latex)
@@ -290,6 +304,19 @@ export function MathFieldEditor({
     field.value = latex
     field.addEventListener('input', () => onChangeRef.current(field.value))
     field.addEventListener('keydown', event => {
+      // ↑/↓ ne changent de ligne que si le bloc en a PLUSIEURS : une formule
+      // mono-ligne laisse la touche à MathLive, qui s'en sert dans une fraction.
+      // Voir `MathLinesField`.
+      if (event.key === 'ArrowUp' && onArrowUpRef.current !== undefined) {
+        event.preventDefault()
+        onArrowUpRef.current()
+        return
+      }
+      if (event.key === 'ArrowDown' && onArrowDownRef.current !== undefined) {
+        event.preventDefault()
+        onArrowDownRef.current()
+        return
+      }
       if (event.key === 'Backspace' && field.value === '' && onEmptyBackspaceRef.current !== undefined) {
         event.preventDefault()
         onEmptyBackspaceRef.current()

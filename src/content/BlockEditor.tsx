@@ -2060,6 +2060,10 @@ interface MathLineActions {
   backspace: () => void
   /** Suppr sur une ligne vide. */
   remove: () => void
+  /** Flèche haut : la ligne de formule PRÉCÉDENTE, dans le même bloc. Absent quand il n'y a qu'une ligne. */
+  arrowUp?: () => void
+  /** Flèche bas : la ligne de formule SUIVANTE, dans le même bloc. Absent quand il n'y a qu'une ligne. */
+  arrowDown?: () => void
   /** Tab / Maj+Tab : le type du bloc. Absent dans une cellule de tableau. */
   switchKind?: (direction: 1 | -1) => void
 }
@@ -2082,6 +2086,16 @@ function mathLineKeyDown(actions: MathLineActions, value: string) {
     if (event.key === 'Delete' && value === '') {
       event.preventDefault()
       actions.remove()
+      return
+    }
+    if (event.key === 'ArrowUp' && actions.arrowUp !== undefined) {
+      event.preventDefault()
+      actions.arrowUp()
+      return
+    }
+    if (event.key === 'ArrowDown' && actions.arrowDown !== undefined) {
+      event.preventDefault()
+      actions.arrowDown()
       return
     }
     if (event.key === 'Tab' && actions.switchKind !== undefined) {
@@ -2146,6 +2160,19 @@ function MathLinesField({
     onChange(joinLatexLines(next))
   }
 
+  /**
+   * Donne le focus à une ligne DÉJÀ montée. Pas de `pending` ici : un simple
+   * déplacement de focus ne change pas le contenu, donc il ne provoque aucun
+   * rendu — et `pending` n'est consommé qu'après un rendu.
+   */
+  function focusLine(target: number, at: 'start' | 'end') {
+    if (target < 0 || target >= lines.length) return
+    const handle = handles.current[target]
+    if (handle === null || handle === undefined) return
+    if (at === 'end') handle.focusEnd()
+    else handle.focusStart()
+  }
+
   function actionsFor(line: number): MathLineActions {
     return {
       setValue: next => write(lines.map((current, i) => (i === line ? next : current))),
@@ -2172,34 +2199,45 @@ function MathLinesField({
         }
         onEmptyDelete?.()
       },
+      // Les flèches ne passent d'une ligne à l'autre que s'il y en a
+      // PLUSIEURS : une formule mono-ligne les laisse à MathLive, qui s'en sert
+      // dans une fraction. Aux extrémités, la touche est avalée — jamais un
+      // autre bloc.
+      arrowUp: lines.length > 1 ? () => focusLine(line - 1, 'end') : undefined,
+      arrowDown: lines.length > 1 ? () => focusLine(line + 1, 'start') : undefined,
     }
   }
 
   return (
     <>
-      {lines.map((line, i) => (
-        <div
-          key={i}
-          {...(lineAttribute?.(i) ?? {})}
-          // Le focus REMONTE depuis le champ : un seul point d'écoute suffit à
-          // dire au bandeau quelle ligne est vivante.
-          onFocus={() => onFocusHandle?.(handles.current[i] ?? null)}
-        >
-          <MathFieldEditor
-            ref={handle => {
-              handles.current[i] = handle
-            }}
-            latex={line}
-            onChange={next => actionsFor(i).setValue(next)}
-            onEnter={() => actionsFor(i).addLine()}
-            onEnterBlock={onEnterBlock}
-            onEmptyBackspace={() => actionsFor(i).backspace()}
-            onEmptyDelete={() => actionsFor(i).remove()}
-            ariaLabel={label(i, lines.length)}
-            fallback={renderFallback(i, lines.length, actionsFor(i))}
-          />
-        </div>
-      ))}
+      {lines.map((line, i) => {
+        const actions = actionsFor(i)
+        return (
+          <div
+            key={i}
+            {...(lineAttribute?.(i) ?? {})}
+            // Le focus REMONTE depuis le champ : un seul point d'écoute suffit à
+            // dire au bandeau quelle ligne est vivante.
+            onFocus={() => onFocusHandle?.(handles.current[i] ?? null)}
+          >
+            <MathFieldEditor
+              ref={handle => {
+                handles.current[i] = handle
+              }}
+              latex={line}
+              onChange={next => actions.setValue(next)}
+              onEnter={() => actions.addLine()}
+              onEnterBlock={onEnterBlock}
+              onEmptyBackspace={() => actions.backspace()}
+              onEmptyDelete={() => actions.remove()}
+              onArrowUp={actions.arrowUp}
+              onArrowDown={actions.arrowDown}
+              ariaLabel={label(i, lines.length)}
+              fallback={renderFallback(i, lines.length, actions)}
+            />
+          </div>
+        )
+      })}
     </>
   )
 }
