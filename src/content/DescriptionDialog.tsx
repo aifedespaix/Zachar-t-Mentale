@@ -211,6 +211,12 @@ export function DescriptionDialog({
   // simpler: this dialog is mounted fresh on every open (see the note above),
   // so there is no external re-render to re-seed against mid-edit.
   const [titleDraft, setTitleDraft] = useState(cardTitle)
+  // Whether the title field is the one currently focused — separate from
+  // `autoFocusTitle` (which only ever fires once, on mount): this is what
+  // makes a later click on the title, same as a click on the card's own
+  // title in `CardNode`, select the whole text for overwrite instead of
+  // just dropping a caret.
+  const [titleFocused, setTitleFocused] = useState(false)
 
   // Where the caret is, so the shortcuts panel can say what `Entrée` does THERE
   // rather than reciting one hard-coded line that is already false in two of the
@@ -241,6 +247,15 @@ export function DescriptionDialog({
     },
     [autoFocusTitle]
   )
+
+  // Chrome collapses an input's selection when React re-commits its `value`
+  // right after — which happens here, since focusing the title queues the
+  // `titleFocused` state update below. Selecting in an effect (after that
+  // commit has landed) avoids the race, same fix as the card's own title
+  // field in `CardNode`.
+  useEffect(() => {
+    if (titleFocused) titleRef.current?.select()
+  }, [titleFocused])
 
   /**
    * Remembers which editable surface a focus landed on.
@@ -327,6 +342,7 @@ export function DescriptionDialog({
     const next = titleDraft.trim()
     if (next !== '' && next !== cardTitle) onRenameTitle?.(next)
     else setTitleDraft(cardTitle)
+    setTitleFocused(false)
   }
 
   function close() {
@@ -544,6 +560,7 @@ export function DescriptionDialog({
                   value={titleDraft}
                   readOnly={!onRenameTitle}
                   onChange={event => setTitleDraft(event.target.value)}
+                  onFocus={() => setTitleFocused(true)}
                   onBlur={commitTitle}
                   onKeyDown={event => {
                     if (event.key === 'Enter') {
