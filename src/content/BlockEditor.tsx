@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import type { CardBlock, CardBlockKind, TableCell } from '../types/cardBlock'
 import { blockGroups, questionLabels } from './blocks'
+import { canMoveBlock, movePlan } from './blockMove'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle, type MathfieldElement } from './MathFieldEditor'
 import { SymbolBand } from './SymbolBand'
@@ -242,19 +243,6 @@ export function isFormulaTrigger(text: string): boolean {
   // block is empty when there is no line at all, which `''` answers too.
   const lineSoFar = text.slice(0, -2).split('\n').pop() ?? ''
   return lineSoFar.trim() === ''
-}
-
-/**
- * Moves one block, returning a new list. Out-of-range targets return the list
- * unchanged rather than wrapping around: the first block's "up" is a no-op, not
- * a jump to the bottom.
- */
-export function moveBlock(blocks: CardBlock[], from: number, to: number): CardBlock[] {
-  if (to < 0 || to >= blocks.length || from === to) return blocks
-  const next = [...blocks]
-  const [moved] = next.splice(from, 1)
-  next.splice(to, 0, moved)
-  return next
 }
 
 /** A copy of block `index`, inserted right after it. A shallow copy is enough: every block mutation in this file returns a new object rather than editing one in place, so the two can safely share a table's rows or an image's dimensions until one of them is next edited. */
@@ -1012,19 +1000,26 @@ export function BlockEditor({
     )
   }
 
-  /** Keeps the moved block selected, so a run of clicks walks it up the list. */
+  /**
+   * Déplace un bloc, questions comprises — la règle vit dans `blockMove`.
+   *
+   * Le plan est suivi pour de vrai, identités comprises : sauter une question
+   * décale PLUSIEURS index d'un coup, donc rejouer le `splice(from, to)` d'un
+   * échange voisin ferait glisser les clés et `motion` animerait les mauvais
+   * nœuds. `plan.order` est la permutation exacte, et `indexOf(from)` l'endroit où
+   * le bloc déplacé a atterri — c'est lui qui reste actif.
+   */
   function move(from: number, to: number) {
-    const next = moveBlock(blocks, from, to)
-    if (next === blocks) return
-    // Les identités suivent le bloc déplacé — c'est CE suivi, et lui seul, qui
-    // fait déplacer le nœud au lieu de réécrire son contenu, donc qui donne à
-    // l'animation quelque chose à animer.
-    const ids = [...blockIds.current]
-    const [moved] = ids.splice(from, 1)
-    ids.splice(to, 0, moved)
-    blockIds.current = ids
-    onChange(next)
-    setActiveIndex(to)
+    const plan = movePlan(blocks, from, to)
+    if (plan === null) return
+    blockIds.current = plan.order.map(origin => blockIds.current[origin])
+    onChange(plan.blocks)
+    setActiveIndex(plan.order.indexOf(from))
+  }
+
+  /** Une flèche ne s'active que si le geste aboutit vraiment (voir `movePlan`). */
+  function canMove(index: number, direction: 1 | -1): boolean {
+    return canMoveBlock(blocks, index, direction)
   }
 
   function setActiveMathField(index: number, handle: MathFieldHandle | null) {
@@ -1261,6 +1256,8 @@ ull quand l'utilisateur l'a refermé pour
                   index={index}
                   kind={block.kind}
                   blockCount={blocks.length}
+                  canMoveUp={canMove(index, -1)}
+                  canMoveDown={canMove(index, 1)}
                   onMove={move}
                   onDuplicate={() => {
                     onChange(duplicateBlock(blocks, index))
@@ -1339,7 +1336,12 @@ ull quand l'utilisateur l'a refermé pour
                         onCommit={label => setQuestionLabel(index, label)}
                       />
                     ) : (
-                      <BlockGutter index={index} count={blocks.length} onMove={move} />
+                      <BlockGutter
+                        index={index}
+                        canMoveUp={canMove(index, -1)}
+                        canMoveDown={canMove(index, 1)}
+                        onMove={move}
+                      />
                     )}
     
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -1365,7 +1367,15 @@ ull quand l'utilisateur l'a refermé pour
                         flex: '0 0 auto',
                       }}
                     >
-                      {isHeader && <BlockGutter index={index} count={blocks.length} onMove={move} horizontal />}
+                      {isHeader && (
+                        <BlockGutter
+                          index={index}
+                          canMoveUp={canMove(index, -1)}
+                          canMoveDown={canMove(index, 1)}
+                          onMove={move}
+                          horizontal
+                        />
+                      )}
                       <BlockKindMenu
                         index={index}
                         kind={block.kind}
@@ -1671,12 +1681,21 @@ function QuestionBadge({
 
 function BlockGutter({
   index,
-  count,
+  canMoveUp,
+  canMoveDown,
   onMove,
   horizontal = false,
 }: {
   index: number
-  count: number
+  /**
+   * Une flèche grisée quand le geste n'a pas de destination — et pas seulement
+   * en bout de liste : le premier bloc d'une question ne peut pas monter
+   * au-dessus de son en-tête, et l'en-tête lui-même n'a rien à qui se comparer
+   * dans sa propre question. Le calcul vit dans `canMove` (voir `movePlan`),
+   * pour que le bouton et l'action ne puissent jamais se contredire.
+   */
+  canMoveUp: boolean
+  canMoveDown: boolean
   onMove: (from: number, to: number) => void
   /** En bandeau, les deux flèches s'alignent à droite plutôt que de tenir une colonne. */
   horizontal?: boolean
@@ -1695,13 +1714,13 @@ function BlockGutter({
     >
       <GutterIcon
         label={`Monter le bloc ${index + 1}`}
-        disabled={index === 0}
+        disabled={!canMoveUp}
         onClick={() => onMove(index, index - 1)}
         icon={<ChevronUp size={14} />}
       />
       <GutterIcon
         label={`Descendre le bloc ${index + 1}`}
-        disabled={index === count - 1}
+        disabled={!canMoveDown}
         onClick={() => onMove(index, index + 1)}
         icon={<ChevronDown size={14} />}
       />

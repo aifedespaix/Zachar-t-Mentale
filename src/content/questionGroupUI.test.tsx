@@ -153,3 +153,52 @@ describe('le bouton « Nouvelle question »', () => {
     expect(screen.getByRole('button', { name: /pastille de la question 3/i })).toHaveTextContent('3')
   })
 })
+
+describe('les flèches Monter/Descendre autour d’une question', () => {
+  it('fait passer un bloc extérieur au-dessus de la question qu’il suit', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([q('Q1'), t('a'), t('b', true)])
+
+    await user.click(screen.getByRole('button', { name: 'Monter le bloc 3' }))
+
+    expect(latest()).toEqual([t('b', true), q('Q1'), t('a')])
+  })
+
+  it('fait passer un bloc extérieur sous la question qu’il précède', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([t('b', true), q('Q1'), t('a')])
+
+    await user.click(screen.getByRole('button', { name: 'Descendre le bloc 1' }))
+
+    expect(latest()).toEqual([q('Q1'), t('a'), t('b', true)])
+  })
+
+  it('emmène toute la question quand on déplace son en-tête', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([q('Q1'), t('a'), q('Q2'), t('b')])
+
+    await user.click(screen.getByRole('button', { name: 'Monter le bloc 3' }))
+
+    expect(latest()).toEqual([q('Q2'), t('b'), q('Q1'), t('a')])
+  })
+
+  it('grise la montée d’un bloc que son en-tête retient', () => {
+    renderEditor([q('Q1'), t('a')])
+
+    expect(screen.getByRole('button', { name: 'Monter le bloc 2' })).toBeDisabled()
+  })
+
+  it('grise les flèches de l’en-tête quand rien ne l’entoure', () => {
+    renderEditor([q('Q1'), t('a')])
+
+    expect(screen.getByRole('button', { name: 'Monter le bloc 1' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Descendre le bloc 1' })).toBeDisabled()
+  })
+
+  it('laisse la descente active quand une question suit', () => {
+    renderEditor([q('Q1'), t('a'), q('Q2'), t('b')])
+
+    expect(screen.getByRole('button', { name: 'Descendre le bloc 1' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Monter le bloc 4' })).toBeDisabled()
+  })
+})

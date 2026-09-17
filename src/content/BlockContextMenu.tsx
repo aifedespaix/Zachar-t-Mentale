@@ -28,6 +28,15 @@ export interface BlockContextMenuProps {
   kind: CardBlockKind
   /** How many blocks the description has — the last one can never be deleted (mirrors the gutter's own trash icon). */
   blockCount: number
+  /**
+   * Les deux directions qui aboutissent VRAIMENT pour ce bloc, calculées par
+   * l'appelant (voir « blockMove »). Un bloc au premier rang d'une question ne
+   * peut pas remonter au-dessus de son en-tête, et l'en-tête lui-même ne peut
+   * pas se faufiler dans sa propre question : « index === 0 » ne suffit donc
+   * plus à savoir si « Monter » a un sens.
+   */
+  canMoveUp: boolean
+  canMoveDown: boolean
   onMove: (from: number, to: number) => void
   onDuplicate: () => void
   onDelete: () => void
@@ -54,6 +63,8 @@ export function BlockContextMenu({
   index,
   kind,
   blockCount,
+  canMoveUp,
+  canMoveDown,
   onMove,
   onDuplicate,
   onDelete,
@@ -69,12 +80,12 @@ export function BlockContextMenu({
         {children}
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem disabled={index === 0} onSelect={() => onMove(index, index - 1)}>
+        <ContextMenuItem disabled={!canMoveUp} onSelect={() => onMove(index, index - 1)}>
           <ArrowUp size={14} />
           <span style={{ flex: 1 }}>Monter le bloc</span>
           <MenuShortcut keys="Alt + ↑" />
         </ContextMenuItem>
-        <ContextMenuItem disabled={index === blockCount - 1} onSelect={() => onMove(index, index + 1)}>
+        <ContextMenuItem disabled={!canMoveDown} onSelect={() => onMove(index, index + 1)}>
           <ArrowDown size={14} />
           <span style={{ flex: 1 }}>Descendre le bloc</span>
           <MenuShortcut keys="Alt + ↓" />
