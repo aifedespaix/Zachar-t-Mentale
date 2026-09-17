@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { BlockEditor, convertBlock, isFormulaTrigger } from './BlockEditor'
+import { BlockEditor, convertBlock, duplicateBlock, isFormulaTrigger } from './BlockEditor'
 import { SYMBOL_FAMILIES } from './symbolSets'
 import type { CardBlock } from '../types/cardBlock'
 
@@ -88,6 +88,23 @@ describe('convertBlock', () => {
     const asQuestion = convertBlock(text, 'question')
     expect(asQuestion).toEqual({ kind: 'question', text: 'Quel est le coefficient directeur ?' })
     expect(convertBlock(asQuestion, 'text')).toEqual(text)
+  })
+})
+
+describe('duplicateBlock', () => {
+  it('inserts a copy right after the original, leaving the rest untouched', () => {
+    const blocks: CardBlock[] = [{ kind: 'text', text: 'a' }, { kind: 'math', latex: 'x^2' }, { kind: 'text', text: 'c' }]
+    expect(duplicateBlock(blocks, 1)).toEqual([
+      { kind: 'text', text: 'a' },
+      { kind: 'math', latex: 'x^2' },
+      { kind: 'math', latex: 'x^2' },
+      { kind: 'text', text: 'c' },
+    ])
+  })
+
+  it('is a no-op past the end of the list', () => {
+    const blocks: CardBlock[] = [{ kind: 'text', text: 'a' }]
+    expect(duplicateBlock(blocks, 5)).toBe(blocks)
   })
 })
 
@@ -1070,5 +1087,230 @@ describe('inserting an image', () => {
 
     const calls = onState.mock.calls
     expect((calls[calls.length - 1][0] as CardBlock[])[0]).toMatchObject({ alt: 'Cycle de l’eau' })
+  })
+})
+
+/** Same idea as `Harness`, but exposes the dialog-scoped actions a real `DescriptionDialog` would supply. */
+function DialogHarness({
+  initial,
+  onClose,
+  onDeleteDescription,
+}: {
+  initial: CardBlock[]
+  onClose: () => void
+  onDeleteDescription: () => void
+}) {
+  const [blocks, setBlocks] = useState(initial)
+  return (
+    <BlockEditor
+      blocks={blocks}
+      onChange={setBlocks}
+      resolveAsset={asset => `/a/${asset}`}
+      dialogMenuActions={{
+        onDeleteDescription,
+        onOpenBandOptions: vi.fn(),
+        narrow: false,
+        onToggleNarrow: vi.fn(),
+        shortcutsOpen: false,
+        onToggleShortcuts: vi.fn(),
+        canUndo: false,
+        canRedo: false,
+        onUndo: vi.fn(),
+        onRedo: vi.fn(),
+        onClose,
+      }}
+    />
+  )
+}
+
+describe('the empty-area right-click menu', () => {
+  it('stays out of the way when the host gives it nowhere to route its actions', () => {
+    renderEditor([{ kind: 'text', text: 'a' }])
+    fireEvent.contextMenu(screen.getByTestId('block-list'))
+    expect(screen.queryByRole('menuitem', { name: /ajouter un bloc/i })).not.toBeInTheDocument()
+  })
+
+  it('adds a block and can close the dialog, once the host supplies its actions', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    render(<DialogHarness initial={[{ kind: 'text', text: 'a' }]} onClose={onClose} onDeleteDescription={vi.fn()} />)
+
+    fireEvent.contextMenu(screen.getByTestId('block-list'))
+    await user.click(await screen.findByRole('menuitem', { name: /ajouter un bloc/i }))
+    expect(screen.getAllByRole('textbox', { name: /texte du bloc/i })).toHaveLength(2)
+
+    fireEvent.contextMenu(screen.getByTestId('block-list'))
+    await user.click(await screen.findByRole('menuitem', { name: /fermer/i }))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('asks the host to confirm before deleting the whole description', async () => {
+    const user = userEvent.setup()
+    const onDeleteDescription = vi.fn()
+    render(<DialogHarness initial={[{ kind: 'text', text: 'a' }]} onClose={vi.fn()} onDeleteDescription={onDeleteDescription} />)
+
+    fireEvent.contextMenu(screen.getByTestId('block-list'))
+    await user.click(await screen.findByRole('menuitem', { name: /supprimer la description/i }))
+    expect(onDeleteDescription).toHaveBeenCalled()
+  })
+
+  it('switches the band’s open tab from its « changer de mode » submenu', async () => {
+    // Keyboard, not a click on the submenu item: Radix opens/positions a
+    // `ContextMenuSub` from real pointer coordinates, which jsdom cannot
+    // supply, so a simulated click on its content is unreliable there. Arrow
+    // keys are how the submenu is actually meant to be reached anyway.
+    const user = userEvent.setup()
+    render(<DialogHarness initial={[{ kind: 'text', text: 'a' }]} onClose={vi.fn()} onDeleteDescription={vi.fn()} />)
+
+    fireEvent.contextMenu(screen.getByTestId('block-list'))
+    const subTrigger = await screen.findByText(/changer de mode/i)
+    subTrigger.focus()
+    await user.keyboard('{ArrowRight}')
+    await screen.findByRole('menuitem', { name: /sciences/i })
+    await user.keyboard('{ArrowDown}{Enter}')
+
+    expect(screen.getByRole('button', { name: /^sciences$/i, pressed: true })).toBeInTheDocument()
+  })
+})
+
+describe('the block right-click menu', () => {
+  it('duplicates the block right after itself', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'a' }, { kind: 'text', text: 'b' }])
+
+    fireEvent.contextMenu(screen.getByRole('textbox', { name: /texte du bloc 1/i }).closest('[data-row-index]')!)
+    await user.click(await screen.findByRole('menuitem', { name: /dupliquer le bloc/i }))
+
+    expect(latest()).toEqual([{ kind: 'text', text: 'a' }, { kind: 'text', text: 'a' }, { kind: 'text', text: 'b' }])
+  })
+
+  it('deletes the block it was opened on', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'a' }, { kind: 'text', text: 'b' }])
+
+    fireEvent.contextMenu(screen.getByRole('textbox', { name: /texte du bloc 2/i }).closest('[data-row-index]')!)
+    await user.click(await screen.findByRole('menuitem', { name: /supprimer le bloc/i }))
+
+    expect(latest()).toEqual([{ kind: 'text', text: 'a' }])
+  })
+
+  it('marks the block as a question, set apart from the type submenu', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'Quel est le résultat ?' }])
+
+    fireEvent.contextMenu(screen.getByRole('textbox', { name: /texte du bloc 1/i }).closest('[data-row-index]')!)
+    await user.click(await screen.findByRole('menuitem', { name: /marquer comme question/i }))
+
+    expect(latest()).toEqual([{ kind: 'question', text: 'Quel est le résultat ?' }])
+  })
+
+  it('does not bubble the click up to the empty-area menu underneath it', async () => {
+    render(<DialogHarness initial={[{ kind: 'text', text: 'a' }]} onClose={vi.fn()} onDeleteDescription={vi.fn()} />)
+
+    fireEvent.contextMenu(screen.getByRole('textbox', { name: /texte du bloc 1/i }).closest('[data-row-index]')!)
+
+    expect(await screen.findByRole('menuitem', { name: /dupliquer le bloc/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /supprimer la description/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('the block keyboard shortcuts (Alt + …)', () => {
+  it('moves the block up and down with Alt + arrows', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'a' }, { kind: 'text', text: 'b' }])
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}')
+    expect(latest()).toEqual([{ kind: 'text', text: 'b' }, { kind: 'text', text: 'a' }])
+
+    await user.keyboard('{Alt>}{ArrowDown}{/Alt}')
+    expect(latest()).toEqual([{ kind: 'text', text: 'a' }, { kind: 'text', text: 'b' }])
+  })
+
+  it('duplicates the focused block with Alt + D', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'a' }])
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 1/i }))
+    await user.keyboard('{Alt>}d{/Alt}')
+
+    expect(latest()).toEqual([{ kind: 'text', text: 'a' }, { kind: 'text', text: 'a' }])
+  })
+
+  it('marks the focused block as a question with Alt + Q', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'a' }])
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 1/i }))
+    await user.keyboard('{Alt>}q{/Alt}')
+
+    expect(latest()).toEqual([{ kind: 'question', text: 'a' }])
+  })
+
+  it('never intercepts AltGr — a diacritic must still reach the field', async () => {
+    // On Windows, AltGr is reported as Ctrl+Alt held together, and it is what
+    // an AZERTY user presses to type `€` or `@`. Treating that as this app's
+    // own Alt+<letter> would silently eat every such character instead of
+    // writing it.
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'a' }])
+
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
+    await user.click(field)
+    fireEvent.keyDown(field, { key: 'q', altKey: true, ctrlKey: true })
+
+    expect(latest()).toBeUndefined()
+  })
+
+  it('switches the band’s open tab with Alt + a digit, by physical key rather than typed character', async () => {
+    renderEditor([{ kind: 'text', text: 'a' }])
+    const field = screen.getByRole('textbox', { name: /texte du bloc 1/i })
+    field.focus()
+
+    fireEvent.keyDown(field, { key: '&', code: 'Digit1', altKey: true })
+    expect(screen.getByRole('button', { name: /^mathématiques$/i, pressed: true })).toBeInTheDocument()
+
+    fireEvent.keyDown(field, { key: 'é', code: 'Digit2', altKey: true })
+    expect(screen.getByRole('button', { name: /^sciences$/i, pressed: true })).toBeInTheDocument()
+  })
+
+  it('adds a block outside the last question with Ctrl/Cmd + Maj + Entrée', async () => {
+    const { latest } = renderEditor([
+      { kind: 'question', text: 'Q' },
+      { kind: 'text', text: 'a' },
+    ])
+    const field = screen.getByRole('textbox', { name: /texte du bloc 2/i })
+    field.focus()
+
+    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true, shiftKey: true })
+
+    expect(latest()).toMatchObject([
+      { kind: 'question', text: 'Q' },
+      { kind: 'text', text: 'a' },
+      { kind: 'text', text: '', standalone: true },
+    ])
+  })
+})
+
+describe('the field right-click menu', () => {
+  it('offers the clipboard trio on a text block, without reaching the block menu underneath it', async () => {
+    renderEditor([{ kind: 'text', text: 'a' }])
+
+    fireEvent.contextMenu(screen.getByRole('textbox', { name: /texte du bloc 1/i }))
+
+    expect(await screen.findByRole('menuitem', { name: /couper/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /copier/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /coller/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /vérifier l.orthographe/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /dupliquer le bloc/i })).not.toBeInTheDocument()
+  })
+
+  it('offers the clipboard trio on a formula block, without the text-only spellcheck toggle', async () => {
+    renderEditor([{ kind: 'math', latex: 'x' }])
+
+    fireEvent.contextMenu(screen.getByRole('textbox', { name: /formule du bloc 1 \(latex\)/i }))
+
+    expect(await screen.findByRole('menuitem', { name: /copier/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /vérifier l.orthographe/i })).not.toBeInTheDocument()
   })
 })
