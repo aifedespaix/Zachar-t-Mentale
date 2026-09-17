@@ -31,6 +31,32 @@ fn launch_mind_map() -> Option<String> {
     mind_map_arg(&std::env::args().collect::<Vec<_>>())
 }
 
+/// Sizes and shows the main window against the screen it actually opens on.
+///
+/// `tauri.conf.json` ships a fixed 1200×900 as a design target, but a
+/// student's laptop is just as likely to be a 1366×768 screen, where a fixed
+/// 900px height overflows the usable desktop. The window is created hidden
+/// (`"visible": false` in the config) so this can size and center it before
+/// the first paint instead of flashing the oversized default first.
+fn size_main_window_to_screen(app: &tauri::App) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    if let Ok(Some(monitor)) = window.primary_monitor() {
+        let screen = monitor.size().to_logical::<f64>(monitor.scale_factor());
+        // 85% of the available screen, floored so the UI stays usable and
+        // capped at the app's own 1200×900 design size so a huge monitor
+        // doesn't get a needlessly stretched window.
+        let width = (screen.width * 0.85).clamp(1000.0, 1200.0);
+        let height = (screen.height * 0.85).clamp(700.0, 900.0);
+        let _ = window.set_size(tauri::LogicalSize::new(width, height));
+    }
+
+    let _ = window.center();
+    let _ = window.show();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -59,6 +85,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![launch_mind_map])
+        .setup(|app| {
+            size_main_window_to_screen(app);
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
