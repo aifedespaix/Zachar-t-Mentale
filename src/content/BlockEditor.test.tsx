@@ -4,12 +4,12 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import {
   BlockEditor,
+  blockAsTable,
   convertBlock,
   duplicateBlock,
   isFormulaTrigger,
   mathZoneAround,
   mergeMathZone,
-  splitTextToMathZone,
 } from './BlockEditor'
 import { SYMBOL_FAMILIES } from './symbolSets'
 import type { CardBlock } from '../types/cardBlock'
@@ -100,25 +100,27 @@ describe('convertBlock', () => {
 })
 
 describe('la « zone formule » (texte ↔ formule multi-ligne)', () => {
-  it('splitTextToMathZone : une ligne de texte donne un seul bloc formule', () => {
-    expect(splitTextToMathZone({ kind: 'text', text: 'x^2' })).toEqual([{ kind: 'math', latex: 'x^2' }])
+  it('convertBlock : un texte multi-ligne devient UN bloc formule multi-ligne', () => {
+    const text: CardBlock = { kind: 'text', text: 'x^2\ny = mx + b' }
+    expect(convertBlock(text, 'math')).toEqual({ kind: 'math', latex: 'x^2\ny = mx + b' })
   })
 
-  it('splitTextToMathZone : plusieurs lignes donnent autant de blocs formule empilés', () => {
-    const text: CardBlock = { kind: 'text', text: 'x^2\ny = mx + b\n\\pi' }
-    expect(splitTextToMathZone(text)).toEqual([
-      { kind: 'math', latex: 'x^2' },
-      { kind: 'math', latex: 'y = mx + b' },
-      { kind: 'math', latex: '\\pi' },
-    ])
+  it('convertBlock : round-trip exact, lignes comprises', () => {
+    const text: CardBlock = { kind: 'text', text: 'a\nb\nc' }
+    expect(convertBlock(convertBlock(text, 'math'), 'text')).toEqual(text)
   })
 
-  it('splitTextToMathZone : le marqueur `standalone` suit seulement le premier bloc', () => {
-    const text: CardBlock = { kind: 'text', text: 'a\nb', standalone: true }
-    expect(splitTextToMathZone(text)).toEqual([
-      { kind: 'math', latex: 'a', standalone: true },
-      { kind: 'math', latex: 'b' },
-    ])
+  it('blockAsTable : une ligne de contenu donne une ligne de tableau', () => {
+    expect(blockAsTable({ kind: 'text', text: 'a\nb' })).toEqual({
+      kind: 'table',
+      header: [],
+      rows: [['a'], ['b']],
+    })
+    expect(blockAsTable({ kind: 'math', latex: 'x\ny' })).toEqual({
+      kind: 'table',
+      header: [],
+      rows: [[{ latex: 'x' }], [{ latex: 'y' }]],
+    })
   })
 
   it('mathZoneAround : un bloc formule isolé est sa propre zone', () => {
@@ -165,11 +167,50 @@ describe('la « zone formule » (texte ↔ formule multi-ligne)', () => {
     ])
   })
 
-  it('mergeMathZone : round-trip exact avec splitTextToMathZone', () => {
+  it('mergeMathZone : round-trip exact avec la conversion texte → formule', () => {
     const original: CardBlock = { kind: 'text', text: 'a\nb\nc' }
-    const split = splitTextToMathZone(original)
-    const { blocks: merged } = mergeMathZone(split, 1)
+    const { blocks: merged } = mergeMathZone([convertBlock(original, 'math')], 0)
     expect(merged).toEqual([original])
+  })
+})
+
+describe('les tableaux et les lignes', () => {
+  it('une cellule formule garde ses lignes dans des champs séparés', () => {
+    renderEditor([{ kind: 'table', header: [], rows: [[{ latex: 'a\nb' }, 'c']] }])
+
+    // Deux champs pour la MÊME cellule : chaque ligne de formule reste
+    // éditable, et le libellé de la cellule leur est commun.
+    expect(
+      screen.getByRole('textbox', { name: /ligne 1 colonne 1 du tableau 1, ligne 1/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('textbox', { name: /ligne 1 colonne 1 du tableau 1, ligne 2/i })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /ligne 1 colonne 2 du tableau 1/i })).toBeInTheDocument()
+  })
+
+  it('une cellule TEXTE accepte plusieurs lignes, comme un bloc', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'table', header: [], rows: [['a', 'b']] }])
+
+    const cell = screen.getByRole('textbox', { name: /ligne 1 colonne 1 du tableau 1/i }) as HTMLTextAreaElement
+    await user.click(cell)
+    cell.setSelectionRange(1, 1)
+    await user.keyboard('{Enter}')
+
+    expect(latest()).toEqual([{ kind: 'table', header: [], rows: [['a\n', 'b']] }])
+  })
+
+  it('un bloc multi-ligne devient un tableau avec une ligne par ligne', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([{ kind: 'text', text: 'a\nb' }])
+
+    await user.click(screen.getByRole('button', { name: /type du bloc 1/i }))
+    await user.click(screen.getByRole('menuitem', { name: /tableau/i }))
+
+    // Une ligne de contenu = une ligne de tableau ; la 2e colonne est celle que
+    // le geste ajoute, vide.
+    expect(latest()).toEqual([{ kind: 'table', header: [], rows: [['a', ''], ['b', '']] }])
   })
 })
 
@@ -506,17 +547,14 @@ describe('the type switch, carried by each block', () => {
     ])
   })
 
-  it('splits a multi-line text block into one formula block per line, via the type menu', async () => {
+  it('turns a multi-line text block into ONE formula block, one line per formula', async () => {
     const user = userEvent.setup()
     const { latest } = renderEditor([{ kind: 'text', text: 'x^2\ny = mx + b' }])
 
     await user.click(screen.getByRole('button', { name: /type du bloc 1/i }))
     await user.click(screen.getByRole('menuitem', { name: /formule/i }))
 
-    expect(latest()).toEqual([
-      { kind: 'math', latex: 'x^2' },
-      { kind: 'math', latex: 'y = mx + b' },
-    ])
+    expect(latest()).toEqual([{ kind: 'math', latex: 'x^2\ny = mx + b' }])
   })
 
   it('folds a whole run of formula blocks back into one multi-line text block', async () => {

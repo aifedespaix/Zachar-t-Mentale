@@ -413,7 +413,7 @@ describe('DescriptionDialog', () => {
     expect(panel).not.toHaveTextContent('Nouveau bloc')
   })
 
-  it('names Entrée by where the caret is: a table row inside a cell, not a new block', async () => {
+  it('names Entrée by where the caret is: a line inside a cell, not a new block', async () => {
     const user = userEvent.setup()
     renderDialog({ blocks: [{ kind: 'table', header: [], rows: [['a']] }] })
 
@@ -421,7 +421,7 @@ describe('DescriptionDialog', () => {
     await user.click(screen.getByRole('button', { name: /raccourcis/i }))
 
     const panel = screen.getByRole('group', { name: /raccourcis clavier/i })
-    expect(panel).toHaveTextContent('Ajouter une ligne au tableau')
+    expect(panel).toHaveTextContent('Ajouter une ligne dans la cellule')
     expect(panel).not.toHaveTextContent('Nouveau bloc')
   })
 

@@ -24,7 +24,9 @@ vi.mock('mathlive', () => {
 
 async function mountField(props: {
   onEnter?: () => void
+  onEnterBlock?: () => void
   onEmptyBackspace?: () => void
+  onEmptyDelete?: () => void
 }) {
   render(
     <MathFieldEditor
@@ -44,18 +46,30 @@ async function mountField(props: {
 }
 
 describe('les touches du champ formule', () => {
-  it('Entrée seule ajoute une ligne de formule, Ctrl+Entrée aussi', async () => {
-    // Un champ formule n'a pas de « ligne » à écrire : Entrée seule y fait donc
-    // directement ce que Ctrl/Cmd+Entrée fait ailleurs, sans qu'il faille tenir
-    // une touche de modification pour l'obtenir.
+  it('Entrée seule ajoute une ligne, Ctrl+Entrée demande un nouveau bloc', async () => {
+    // Entrée écrit une ligne DANS le champ courant ; c'est Ctrl/Cmd+Entrée qui
+    // garde le geste « un bloc de plus », comme partout ailleurs.
     const onEnter = vi.fn()
-    const field = await mountField({ onEnter })
+    const onEnterBlock = vi.fn()
+    const field = await mountField({ onEnter, onEnterBlock })
 
     fireEvent.keyDown(field, { key: 'Enter' })
     expect(onEnter).toHaveBeenCalledTimes(1)
+    expect(onEnterBlock).not.toHaveBeenCalled()
 
     fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true })
-    expect(onEnter).toHaveBeenCalledTimes(2)
+    expect(onEnter).toHaveBeenCalledTimes(1)
+    expect(onEnterBlock).toHaveBeenCalledTimes(1)
+  })
+
+  it('Ctrl+Entrée sans `onEnterBlock` — une cellule — ajoute une ligne', async () => {
+    // Une cellule de tableau n'a pas de bloc à créer : la touche retombe sur le
+    // geste « une ligne de plus ».
+    const onEnter = vi.fn()
+    const field = await mountField({ onEnter })
+
+    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true })
+    expect(onEnter).toHaveBeenCalledTimes(1)
   })
 
   it('Maj+Entrée ne déclenche rien — MathLive garde la touche pour ses propres lignes', async () => {
@@ -73,5 +87,20 @@ describe('les touches du champ formule', () => {
     field.value = ''
     fireEvent.keyDown(field, { key: 'Backspace' })
     expect(onEmptyBackspace).toHaveBeenCalledTimes(1)
+  })
+
+  it('Suppr sur un champ vide demande la disparition vers le suivant', async () => {
+    const onEmptyDelete = vi.fn()
+    const field = await mountField({ onEmptyDelete })
+
+    field.value = ''
+    fireEvent.keyDown(field, { key: 'Delete' })
+    expect(onEmptyDelete).toHaveBeenCalledTimes(1)
+
+    // Un champ NON vide garde la touche pour MathLive : Suppr y efface le
+    // caractère à droite, il ne fait pas disparaître la ligne.
+    field.value = 'x'
+    fireEvent.keyDown(field, { key: 'Delete' })
+    expect(onEmptyDelete).toHaveBeenCalledTimes(1)
   })
 })

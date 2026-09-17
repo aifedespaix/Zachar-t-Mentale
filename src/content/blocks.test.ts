@@ -28,6 +28,14 @@ describe('latexToPlainText', () => {
     // unmapped command must still be readable, not silently dropped.
     expect(latexToPlainText('\\oint_C \\vec{F}')).toContain('oint')
   })
+
+  it('préserve les sauts de ligne : une ligne de formule reste une ligne', () => {
+    // Un latex multi-ligne est une SÉRIE de lignes de formule (voir
+    // BlockEditor), et le miroir definition doit garder cette structure
+    // plutôt que de tout aplatir sur une seule ligne.
+    expect(latexToPlainText('x^2\ny = mx + b')).toBe('x²\ny = mx + b')
+    expect(latexToPlainText('a\n\nb')).toBe('a\n\nb')
+  })
 })
 
 describe('blocksToPlainText', () => {

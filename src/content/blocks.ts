@@ -69,8 +69,17 @@ function toSuperscript(exponent: string): string | null {
  *
  * The mapped set is what a collège maths course actually writes: fractions,
  * powers, roots, ×, ÷, comparisons, π.
+ *
+ * Les sauts de ligne, eux, ne sont PAS de l'espacement : un `latex` multi-ligne
+ * est une série de lignes de formule, et elles traversent telles quelles — le
+ * miroir `definition` d'un bloc doit garder la structure que l'écran montre.
  */
 export function latexToPlainText(latex: string): string {
+  return latex.split('\n').map(oneLatexLineToPlainText).join('\n')
+}
+
+/** Une seule ligne de LaTeX, sans son saut de ligne — le corps partagé de `latexToPlainText`. */
+function oneLatexLineToPlainText(latex: string): string {
   let out = latex
 
   // Fractions first, and repeatedly: `\frac{\frac{a}{b}}{c}` resolves from the

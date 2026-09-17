@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { Fragment, memo } from 'react'
 import type { CardBlock, TableCell } from '../types/cardBlock'
 import { blockGroups } from './blocks'
 import { renderMathToHtml } from './renderMath'
@@ -133,13 +133,23 @@ const BlockItem = memo(function BlockItem({
       )
 
     case 'math': {
-      // Every math block is its own line, so it always typesets in display
-      // mode — there is no "inline in a sentence" case left to distinguish.
-      const html = renderMathToHtml(block.latex, true)
-      if (html === '') return null
+      // Un bloc formule porte une SÉRIE de lignes — un \n par ligne de formule.
+      // Chacune se compose en mode display, l'une sous l'autre, exactement comme
+      // l'éditeur les empile.
+      const parts = block.latex
+        .split('\n')
+        .map(line => renderMathToHtml(line, true))
+        .filter(html => html !== '')
+      if (parts.length === 0) return null
       // Safe: KaTeX escapes the text it emits, and `trust: false` keeps it
       // from building links or embedding resources (see renderMath tests).
-      return <div dangerouslySetInnerHTML={{ __html: html }} />
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+          {parts.map((html, index) => (
+            <div key={index} dangerouslySetInnerHTML={{ __html: html }} />
+          ))}
+        </div>
+      )
     }
 
     case 'image': {
@@ -233,9 +243,23 @@ const BlockItem = memo(function BlockItem({
 /** A table cell in either of its two modes — a formula typesets inline, never centred on its own line the way a standalone math block does: a cell is part of a row, not a paragraph. */
 function TableCellView({ cell }: { cell: TableCell }) {
   if (typeof cell === 'string') return <>{cell}</>
-  const html = renderMathToHtml(cell.latex, false)
-  if (html === '') return null
+  // Une cellule formule peut porter plusieurs lignes : elles s'empilent dans la
+  // cellule, séparées par un vrai retour à la ligne — pas par un signe inventé.
+  const parts = cell.latex
+    .split('\n')
+    .map(line => renderMathToHtml(line, false))
+    .filter(html => html !== '')
+  if (parts.length === 0) return null
   // Safe: KaTeX escapes the text it emits, and `trust: false` keeps it from
   // building links or embedding resources (see renderMath tests).
-  return <span dangerouslySetInnerHTML={{ __html: html }} />
+  return (
+    <>
+      {parts.map((html, index) => (
+        <Fragment key={index}>
+          {index > 0 && <br />}
+          <span dangerouslySetInnerHTML={{ __html: html }} />
+        </Fragment>
+      ))}
+    </>
+  )
 }

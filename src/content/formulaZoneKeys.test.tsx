@@ -27,18 +27,30 @@ vi.mock('mathlive', () => {
   return {}
 })
 
-function Harness({ initial }: { initial: CardBlock[] }) {
+function Harness({ initial, onState }: { initial: CardBlock[]; onState?: (blocks: CardBlock[]) => void }) {
   const [blocks, setBlocks] = useState(initial)
-  return <BlockEditor blocks={blocks} onChange={setBlocks} resolveAsset={asset => `/a/${asset}`} />
+  return (
+    <BlockEditor
+      blocks={blocks}
+      onChange={next => {
+        setBlocks(next)
+        onState?.(next)
+      }}
+      resolveAsset={asset => `/a/${asset}`}
+    />
+  )
 }
 
 async function mathFields(): Promise<(HTMLElement & { value: string; focus: () => void; executeCommand: (c: string) => boolean })[]> {
-  const hosts = await waitFor(() => {
-    const found = screen.getAllByTestId('math-field')
-    if (found.length === 0) throw new Error('pas encore de champ formule monté')
-    return found
-  })
-  return hosts.map(host => host.firstElementChild) as unknown as (HTMLElement & {
+  return (await waitFor(() => {
+    const hosts = screen.getAllByTestId('math-field')
+    if (hosts.length === 0) throw new Error('pas encore de champ formule monté')
+    const fields = hosts.map(host => host.firstElementChild)
+    // L'hôte est posé par le rendu, l'élément réel par un effet : attendre les
+    // deux, sinon on récupère un hôte encore vide et fireEvent n'a pas de cible.
+    if (fields.some(field => field === null)) throw new Error('le champ réel n’est pas encore monté')
+    return fields
+  })) as unknown as (HTMLElement & {
     value: string
     focus: () => void
     executeCommand: (c: string) => boolean
@@ -46,8 +58,9 @@ async function mathFields(): Promise<(HTMLElement & { value: string; focus: () =
 }
 
 describe('la « zone formule »', () => {
-  it('Entrée dans une formule ajoute une nouvelle ligne de formule', async () => {
-    render(<Harness initial={[{ kind: 'math', latex: 'x' }]} />)
+  it('Entrée dans une formule ajoute une LIGNE dans le même bloc, pas un bloc', async () => {
+    const onState = vi.fn()
+    render(<Harness initial={[{ kind: 'math', latex: 'x' }]} onState={onState} />)
     const [first] = await mathFields()
 
     fireEvent.keyDown(first, { key: 'Enter' })
@@ -55,6 +68,23 @@ describe('la « zone formule »', () => {
     await waitFor(async () => expect(await mathFields()).toHaveLength(2))
     const fields = await mathFields()
     expect(fields[1].value).toBe('')
+    expect(onState).toHaveBeenCalled()
+    const blocks = onState.mock.calls[onState.mock.calls.length - 1][0] as CardBlock[]
+    // UN bloc, dont le latex porte les deux lignes.
+    expect(blocks).toEqual([{ kind: 'math', latex: 'x\n' }])
+    expect(document.querySelectorAll('[data-row-index]')).toHaveLength(1)
+  })
+
+  it('pose le focus sur la nouvelle ligne', async () => {
+    render(<Harness initial={[{ kind: 'math', latex: 'x' }]} />)
+    const [first] = await mathFields()
+
+    fireEvent.keyDown(first, { key: 'Enter' })
+
+    await waitFor(async () => expect(await mathFields()).toHaveLength(2))
+    const [, second] = await mathFields()
+    await waitFor(() => expect(second.focus).toHaveBeenCalled())
+    expect(second.executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
   })
 
   it('Retour arrière sur la ligne vide la supprime et rend la main à la fin de la précédente', async () => {
@@ -70,8 +100,8 @@ describe('la « zone formule »', () => {
     await waitFor(async () => expect(await mathFields()).toHaveLength(1))
     const [remaining] = await mathFields()
     expect(remaining.value).toBe('x')
-    // Le focus revient sur la formule restante, avec le curseur ramené à sa
-    // fin — le même geste de fusion qu'un texte, via `MathFieldHandle.focusEnd`.
+    // Le focus revient sur la ligne restante, avec le curseur ramené à sa fin —
+    // le même geste de fusion qu'un texte, via `MathFieldHandle.focusEnd`.
     await waitFor(() => expect(remaining.focus).toHaveBeenCalled())
     expect(remaining.executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
   })

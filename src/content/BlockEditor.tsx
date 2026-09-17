@@ -139,11 +139,14 @@ export function convertBlock(block: CardBlock, kind: CardBlockKind): CardBlock {
 }
 
 /**
- * The contiguous run of `math` blocks around `index` — the "formula zone"
- * `Entrée` builds one line at a time (see `MathFieldEditor`'s `onEnter`).
- * Bounded by the group `index` sits in (see `blockGroups`), so a merge into
- * text can never reach into a different question's formulas. `index` itself
- * must already be a `math` block; anything else is its own one-block "run".
+ * The contiguous run of `math` blocks around `index` — la « zone formule » des
+ * fichiers écrits par l'ancien modèle, où `Entrée` empilait un bloc par ligne.
+ * `mergeMathZone` la replie en un seul texte ; l'éditeur ne la crée plus,
+ * puisque ses lignes de formule vivent maintenant DANS un bloc (voir
+ * `MathLinesField`). Bounded by the group `index` sits in (see `blockGroups`),
+ * so a merge into text can never reach into a different question's formulas.
+ * `index` itself must already be a `math` block; anything else is its own
+ * one-block "run".
  */
 export function mathZoneAround(blocks: CardBlock[], index: number): { start: number; end: number } {
   if (blocks[index]?.kind !== 'math') return { start: index, end: index }
@@ -158,9 +161,9 @@ export function mathZoneAround(blocks: CardBlock[], index: number): { start: num
 
 /**
  * Folds the formula zone around `index` into ONE text block, one line per
- * formula — the reverse of `splitTextToMathZone` below, and what lets the
- * stacked lines `Entrée` built become the single multi-line field a text
- * block already is, instead of leaving one text block behind per line.
+ * formula — the reverse of the conversion texte → formule, et ce qui replie un
+ * ancien fichier (un bloc par ligne) en un seul bloc texte multi-ligne au lieu
+ * de laisser un bloc derrière chaque ligne.
  */
 export function mergeMathZone(blocks: CardBlock[], index: number): { blocks: CardBlock[]; index: number } {
   const { start, end } = mathZoneAround(blocks, index)
@@ -168,18 +171,6 @@ export function mergeMathZone(blocks: CardBlock[], index: number): { blocks: Car
   const standalone = run[0]?.standalone === true ? { standalone: true } : {}
   const merged: CardBlock = { kind: 'text', text: run.map(sourceOf).join('\n'), ...standalone }
   return { blocks: [...blocks.slice(0, start), merged, ...blocks.slice(end + 1)], index: start }
-}
-
-/**
- * Splits a (possibly multi-line) text block into one `math` block per line —
- * the formula zone system arrived at directly, instead of cramming several
- * lines of prose into one formula's LaTeX source as a literal `\n`.
- */
-export function splitTextToMathZone(block: CardBlock): CardBlock[] {
-  const standalone = block.standalone === true ? { standalone: true } : {}
-  return sourceOf(block)
-    .split('\n')
-    .map((latex, i): CardBlock => ({ kind: 'math', latex, ...(i === 0 ? standalone : {}) }))
 }
 
 /**
@@ -194,15 +185,22 @@ export function splitTextToMathZone(block: CardBlock): CardBlock[] {
  * The cell keeps the block's own kind: a formula becomes a formula CELL, not
  * text that happens to look like LaTeX.
  *
+ * Une LIGNE de contenu donne une LIGNE de tableau : c'est la même règle « un
+ * passage à la ligne = une ligne » que la conversion texte ↔ formule, et c'est
+ * ce qui fait qu'un texte de trois lignes arrive dans un tableau de trois
+ * lignes au lieu d'être empilé dans une seule cellule.
+ *
  * An image is excluded by the TYPE, not by a runtime check: there is no text to
  * put in the cell, and a table containing the picture's alt text would be a
  * silent way to lose the picture.
  */
 export function blockAsTable(block: Exclude<CardBlock, { kind: 'image' }>): TableBlock {
   if (block.kind === 'table') return block
-  const cell: TableCell = block.kind === 'math' ? { latex: block.latex } : block.text
   const standalone = block.standalone === true ? { standalone: true } : {}
-  return { kind: 'table', header: [], rows: [[cell]], ...standalone }
+  const rows = sourceOf(block)
+    .split('\n')
+    .map((line): TableCell[] => [block.kind === 'math' ? { latex: line } : line])
+  return { kind: 'table', header: [], rows, ...standalone }
 }
 
 /**
@@ -569,6 +567,8 @@ export function BlockEditor({
    * (see `MathFieldHandle.focusEnd`).
    */
   const pendingMathFocusEnd = useRef<number | null>(null)
+  /** Même chose pour le DÉBUT — le Suppr qui retire un bloc vide et rend la main au suivant (voir `deleteForwardAt`). */
+  const pendingMathFocusStart = useRef<number | null>(null)
 
   /** The text field of block `index`, looked up in the DOM it is rendered in. */
   function textFieldAt(index: number): HTMLTextAreaElement | null {
@@ -603,10 +603,23 @@ export function BlockEditor({
         ?.setSelectionRange(cellCaret.position, cellCaret.position)
     }
 
+    // Un handle n'existe que si la ligne a DÉJÀ eu le focus : le bloc suivant
+    // d'un bloc supprimé au Suppr n'en a aucun, et il faut alors retrouver son
+    // premier champ dans le DOM plutôt que de perdre le focus.
     const mathFocusIndex = pendingMathFocusEnd.current
     if (mathFocusIndex !== null) {
       pendingMathFocusEnd.current = null
-      mathFields[mathFocusIndex]?.focusEnd()
+      const handle = mathFields[mathFocusIndex]
+      if (handle !== null && handle !== undefined) handle.focusEnd()
+      else editorRef.current?.querySelector<HTMLElement>(fieldSelector(mathFocusIndex))?.focus()
+    }
+
+    const mathFocusStartIndex = pendingMathFocusStart.current
+    if (mathFocusStartIndex !== null) {
+      pendingMathFocusStart.current = null
+      const handle = mathFields[mathFocusStartIndex]
+      if (handle !== null && handle !== undefined) handle.focusStart()
+      else editorRef.current?.querySelector<HTMLElement>(fieldSelector(mathFocusStartIndex))?.focus()
     }
   })
 
@@ -810,13 +823,22 @@ export function BlockEditor({
       const field = focused as MathfieldElement
       if (typeof field.insert === 'function') {
         field.insert(symbol.latex ?? symbol.glyph, { focus: true })
-        // `insert()` mute l'élément sans forcément émettre `input`.
-        replace(activeIndex, setTableCell(block, row, col, { latex: field.value }))
+        // `insert()` mute l'élément sans forcément émettre `input`. Une cellule
+        // formule peut avoir PLUSIEURS lignes : on ne réécrit que celle qui a
+        // le focus, sinon insérer un signe effacerait les autres.
+        const lineAttr = focused.closest<HTMLElement>('[data-cell-line]')?.dataset.cellLine
+        const lineIndex = lineAttr === undefined ? 0 : Number(lineAttr)
+        const lines = text.split('\n')
+        if (Number.isInteger(lineIndex) && lineIndex >= 0 && lineIndex < lines.length) lines[lineIndex] = field.value
+        else lines[0] = field.value
+        replace(activeIndex, setTableCell(block, row, col, { latex: lines.join('\n') }))
         return true
       }
     }
 
-    if (!(focused instanceof HTMLInputElement)) return false
+    // Une cellule TEXTE est un <textarea> (elle grandit avec ses lignes) : ne
+    // tester que <input> laissait le bandeau muet dans une cellule texte.
+    if (!(focused instanceof HTMLInputElement) && !(focused instanceof HTMLTextAreaElement)) return false
     const start = focused.selectionStart ?? text.length
     const end = focused.selectionEnd ?? start
     const insertion = insertCharacter(text, start, end, {
@@ -880,23 +902,45 @@ export function BlockEditor({
    * Retire un bloc VIDE dont le champ vient de recevoir Retour arrière, et rend
    * le curseur à la fin du précédent — le geste de fusion qu'offre tout éditeur
    * de texte. Le dernier bloc n'est jamais retiré, comme pour `removeAt`.
+   *
+   * Sans bloc PRÉCÉDENT il n'y a rien à fusionner : le geste ne fait rien, au
+   * lieu d'effacer le premier bloc sans que le curseur sache où aller.
    */
   function deleteEmptyAt(index: number) {
-    if (blocks.length <= 1) return
+    if (blocks.length <= 1 || index === 0) return
     const previous = blocks[index - 1]
     onChange(blocks.filter((_, i) => i !== index))
-    setActiveIndex(Math.max(0, index - 1))
-    if (previous !== undefined && (previous.kind === 'text' || previous.kind === 'question')) {
+    setActiveIndex(index - 1)
+    if (previous.kind === 'text' || previous.kind === 'question') {
       pendingCaret.current = { index: index - 1, position: previous.text.length }
-    } else if (previous !== undefined && previous.kind === 'math') {
+    } else if (previous.kind === 'math') {
       // Une formule n'a pas de position DOM à poser comme un texte : c'est le
       // champ lui-même (ou son repli LaTeX brut) qui sait se placer à la fin
       // de ce qu'il contient déjà — voir `MathFieldHandle.focusEnd`.
       pendingMathFocusEnd.current = index - 1
-    } else if (index > 0) {
+    } else {
       // Une image ou un tableau n'a pas de « fin » où poser un caret : on se
       // contente de ramener le focus sur son premier champ.
       focusBlockLater(index - 1)
+    }
+  }
+
+  /**
+   * Le geste symétrique de `deleteEmptyAt`, pour SUPPR : retire le bloc vide
+   * et pose le curseur au DÉBUT du suivant. Sans bloc suivant il ne fait rien —
+   * un Suppr sur le dernier élément n'a nulle part où mener.
+   */
+  function deleteForwardAt(index: number) {
+    if (blocks.length <= 1 || index === blocks.length - 1) return
+    const next = blocks[index + 1]
+    onChange(blocks.filter((_, i) => i !== index))
+    setActiveIndex(index)
+    if (next.kind === 'text' || next.kind === 'question') {
+      pendingCaret.current = { index, position: 0 }
+    } else if (next.kind === 'math') {
+      pendingMathFocusStart.current = index
+    } else {
+      focusBlockLater(index)
     }
   }
 
@@ -916,13 +960,14 @@ export function BlockEditor({
       focusBlockAfterMenu(index)
       return
     }
-    // Texte ↔ formule est la seule paire qui a une ZONE à respecter : plusieurs
-    // lignes de texte deviennent autant de blocs formule empilés, et la formule
-    // empilée qui en résulte refond en un seul bloc texte multi-ligne au retour
-    // — voir `splitTextToMathZone`/`mergeMathZone`. Toute autre conversion (vers
-    // ou depuis « question », par exemple) reste le geste un-bloc d'origine.
+    // Texte ↔ formule est la seule paire qui touche à des LIGNES : les sauts de
+    // ligne du texte deviennent les lignes de formule du MÊME bloc
+    // (`convertBlock` croise la chaîne telle quelle), et la série de blocs
+    // formule qui se touchent se replie en un seul texte multi-ligne — voir
+    // `mergeMathZone`. Toute autre conversion (vers ou depuis « question »,
+    // par exemple) reste le geste un-bloc d'origine.
     if (kind === 'math' && block.kind === 'text') {
-      onChange([...blocks.slice(0, index), ...splitTextToMathZone(block), ...blocks.slice(index + 1)])
+      replace(index, convertBlock(block, 'math'))
       setActiveIndex(index)
       focusBlockAfterMenu(index)
       return
@@ -1292,6 +1337,7 @@ ull quand l'utilisateur l'a refermé pour
                         onEnterBlock={() => insertBlockAfter(index, emptyBlock(inheritableKind(block)))}
                         onSwitchKind={direction => cycleKind(index, direction)}
                         onDeleteEmpty={() => deleteEmptyAt(index)}
+                        onDeleteForward={() => deleteForwardAt(index)}
                         onFieldChange={fieldSetterFor(index)}
                       />
                     </div>
@@ -1803,6 +1849,8 @@ interface BlockFieldProps {
   onSwitchKind: (direction: 1 | -1) => void
   /** Retour arrière sur un bloc vide — le retire et rend le curseur au précédent. */
   onDeleteEmpty: () => void
+  /** Suppr sur un bloc vide — le retire et rend le curseur au début du suivant. */
+  onDeleteForward: () => void
   /** Reports the block's live math handle, for the band's keys. Called with `null` when the block is not a formula (or unmounts as one). */
   onFieldChange: (handle: MathFieldHandle | null) => void
   /** For `FieldContextMenu`'s « Coller » — never silent about a failed paste, same convention as `BlockEditor`'s own `onError`. */
@@ -1817,6 +1865,7 @@ function BlockField({
   onEnterBlock,
   onSwitchKind,
   onDeleteEmpty,
+  onDeleteForward,
   onFieldChange,
   onError,
 }: BlockFieldProps) {
@@ -1849,6 +1898,7 @@ function BlockField({
           onEnter={onEnterBlock}
           onSwitchKind={onSwitchKind}
           onDeleteEmpty={onDeleteEmpty}
+          onDeleteForward={onDeleteForward}
         />
         </FieldContextMenu>
       )
@@ -1867,6 +1917,7 @@ function BlockField({
           onEnter={onEnterBlock}
           onSwitchKind={onSwitchKind}
           onDeleteEmpty={onDeleteEmpty}
+          onDeleteForward={onDeleteForward}
           // Sans bordure ni fond : la question vit dans le bandeau du groupe,
           // pas dans un cadre de bloc.
           style={{ border: 'none', background: 'transparent', padding: '2px 0', minHeight: 24, fontSize: 15, fontWeight: 650, color: 'var(--info-fg)' }}
@@ -1884,6 +1935,7 @@ function BlockField({
           onEnterBlock={onEnterBlock}
           onSwitchKind={onSwitchKind}
           onDeleteEmpty={onDeleteEmpty}
+          onDeleteForward={onDeleteForward}
           onFieldChange={onFieldChange}
         />
         </FieldContextMenu>
@@ -1912,6 +1964,7 @@ function AutoGrowTextarea({
   onEnter,
   onSwitchKind,
   onDeleteEmpty,
+  onDeleteForward,
   style,
   ...rest
 }: {
@@ -1923,6 +1976,8 @@ function AutoGrowTextarea({
   onSwitchKind: (direction: 1 | -1) => void
   /** Retour arrière sur un champ vide : le bloc demande à disparaître. */
   onDeleteEmpty: () => void
+  /** Suppr sur un champ vide : le bloc demande à disparaître vers le suivant. */
+  onDeleteForward: () => void
   /** Ce qui distingue le champ d'une question de celui d'un texte. */
   style?: CSSProperties
   'aria-label': string
@@ -1965,6 +2020,11 @@ function AutoGrowTextarea({
           onDeleteEmpty()
           return
         }
+        if (event.key === 'Delete' && value === '') {
+          event.preventDefault()
+          onDeleteForward()
+          return
+        }
         // Tab appartient au TYPE du bloc — sauf quand une combinaison est tenue,
         // où c'est un raccourci de l'application ou du système, pas le nôtre.
         if (event.key === 'Tab') {
@@ -1978,6 +2038,172 @@ function AutoGrowTextarea({
   )
 }
 
+/**
+ * Les lignes d'un `latex` : un saut de ligne EST une ligne de formule.
+ */
+function latexLines(latex: string): string[] {
+  return latex.split('\n')
+}
+
+function joinLatexLines(lines: string[]): string {
+  return lines.join('\n')
+}
+
+/** Ce qu'un champ brut de ligne peut demander — le pendant clavier de `MathFieldEditor`. */
+interface MathLineActions {
+  setValue: (next: string) => void
+  /** Entrée seule : une ligne de plus dans le même conteneur. */
+  addLine: () => void
+  /** Ctrl/Cmd+Entrée : un nouveau bloc. Absent dans une cellule de tableau. */
+  addBlock?: () => void
+  /** Retour arrière sur une ligne vide. */
+  backspace: () => void
+  /** Suppr sur une ligne vide. */
+  remove: () => void
+  /** Tab / Maj+Tab : le type du bloc. Absent dans une cellule de tableau. */
+  switchKind?: (direction: 1 | -1) => void
+}
+
+/** Le clavier d'un champ brut de ligne, partagé par le bloc et la cellule. */
+function mathLineKeyDown(actions: MathLineActions, value: string) {
+  return (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      if (event.shiftKey) return
+      event.preventDefault()
+      if ((event.ctrlKey || event.metaKey) && actions.addBlock !== undefined) actions.addBlock()
+      else actions.addLine()
+      return
+    }
+    if (event.key === 'Backspace' && value === '') {
+      event.preventDefault()
+      actions.backspace()
+      return
+    }
+    if (event.key === 'Delete' && value === '') {
+      event.preventDefault()
+      actions.remove()
+      return
+    }
+    if (event.key === 'Tab' && actions.switchKind !== undefined) {
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      event.preventDefault()
+      actions.switchKind(event.shiftKey ? -1 : 1)
+    }
+  }
+}
+
+/**
+ * Une suite de lignes de formule éditables, empilées.
+ *
+ * Le cœur de la « formule multi-ligne » : chaque ligne a SON champ, mais les
+ * lignes vivent dans le même bloc (ou la même cellule). Entrée en ajoute une,
+ * Retour arrière / Suppr sur une ligne vide la retirent, et le `\n` qui les
+ * sépare est exactement ce que la conversion texte ↔ formule fait traverser. Un
+ * conteneur à une seule ligne se comporte donc comme l'ancien champ unique.
+ */
+function MathLinesField({
+  latex,
+  onChange,
+  label,
+  onEnterBlock,
+  onEmptyBackspace,
+  onEmptyDelete,
+  onFocusHandle,
+  renderFallback,
+  lineAttribute,
+}: {
+  latex: string
+  onChange: (latex: string) => void
+  label: (line: number, count: number) => string
+  onEnterBlock?: () => void
+  onEmptyBackspace?: () => void
+  onEmptyDelete?: () => void
+  onFocusHandle?: (handle: MathFieldHandle | null) => void
+  renderFallback: (line: number, count: number, actions: MathLineActions) => ReactNode
+  lineAttribute?: (line: number) => Record<string, string | number> | undefined
+}) {
+  const lines = latexLines(latex)
+  const handles = useRef<(MathFieldHandle | null)[]>([])
+  const pending = useRef<{ line: number; at: 'start' | 'end' } | null>(null)
+
+  // Le focus est posé APRÈS le rendu qui a ajouté ou retiré la ligne : c'est le
+  // seul moment où le handle de la ligne visée existe.
+  useEffect(() => {
+    const target = pending.current
+    if (target === null) return
+    pending.current = null
+    const handle = handles.current[target.line]
+    if (handle === null || handle === undefined) return
+    if (target.at === 'end') handle.focusEnd()
+    else handle.focusStart()
+  })
+
+  // Le bandeau cible la ligne FOCALISÉE, jamais une ligne mémorisée : insérer
+  // une ligne décale toutes les suivantes.
+  useEffect(() => () => onFocusHandle?.(null), [onFocusHandle])
+
+  function write(next: string[]) {
+    onChange(joinLatexLines(next))
+  }
+
+  function actionsFor(line: number): MathLineActions {
+    return {
+      setValue: next => write(lines.map((current, i) => (i === line ? next : current))),
+      addLine: () => {
+        write([...lines.slice(0, line + 1), '', ...lines.slice(line + 1)])
+        pending.current = { line: line + 1, at: 'start' }
+      },
+      addBlock: onEnterBlock,
+      backspace: () => {
+        if (line > 0) {
+          write([...lines.slice(0, line), ...lines.slice(line + 1)])
+          pending.current = { line: line - 1, at: 'end' }
+          return
+        }
+        // Première ligne : c'est le conteneur (bloc, ou cellule) qui demande à
+        // se retirer — et sans précédent, le conteneur ne fait rien.
+        onEmptyBackspace?.()
+      },
+      remove: () => {
+        if (line < lines.length - 1) {
+          write([...lines.slice(0, line), ...lines.slice(line + 1)])
+          pending.current = { line, at: 'start' }
+          return
+        }
+        onEmptyDelete?.()
+      },
+    }
+  }
+
+  return (
+    <>
+      {lines.map((line, i) => (
+        <div
+          key={i}
+          {...(lineAttribute?.(i) ?? {})}
+          // Le focus REMONTE depuis le champ : un seul point d'écoute suffit à
+          // dire au bandeau quelle ligne est vivante.
+          onFocus={() => onFocusHandle?.(handles.current[i] ?? null)}
+        >
+          <MathFieldEditor
+            ref={handle => {
+              handles.current[i] = handle
+            }}
+            latex={line}
+            onChange={next => actionsFor(i).setValue(next)}
+            onEnter={() => actionsFor(i).addLine()}
+            onEnterBlock={onEnterBlock}
+            onEmptyBackspace={() => actionsFor(i).backspace()}
+            onEmptyDelete={() => actionsFor(i).remove()}
+            ariaLabel={label(i, lines.length)}
+            fallback={renderFallback(i, lines.length, actionsFor(i))}
+          />
+        </div>
+      ))}
+    </>
+  )
+}
+
 function MathBlockField({
   block,
   index,
@@ -1985,6 +2211,7 @@ function MathBlockField({
   onEnterBlock,
   onSwitchKind,
   onDeleteEmpty,
+  onDeleteForward,
   onFieldChange,
 }: {
   block: Extract<CardBlock, { kind: 'math' }>
@@ -1993,73 +2220,52 @@ function MathBlockField({
   onEnterBlock: () => void
   onSwitchKind: (direction: 1 | -1) => void
   onDeleteEmpty: () => void
+  onDeleteForward: () => void
   onFieldChange: (handle: MathFieldHandle | null) => void
 }) {
   // WYSIWYG when MathLive is available, the raw LaTeX field until then — and
-  // permanently if it never loads.
-  //
-  // The separated preview that used to sit BELOW this field is gone. When
-  // MathLive is there, the field IS the typeset formula, so a second identical
-  // rendering underneath it was the same thing said twice — and the quieter of
-  // the two was the one the user could not type into. The palette in the
-  // band ABOVE the list is what carries the "what will this look like" answer
-  // now, at the moment a symbol is chosen rather than after.
-  //
-  // The raw-LaTeX path is the one case where the field and the result really
-  // differ, so the preview stays — but only there, next to the source it
-  // renders. See `fallback` below.
+  // permanently if it never loads. The raw-LaTeX fallback stays the one case
+  // where the field and the result really differ, so its preview stays next to
+  // the source it renders.
+  const lines = latexLines(block.latex)
   return (
-    <MathFieldEditor
-      ref={onFieldChange}
+    <MathLinesField
       latex={block.latex}
       onChange={latex => onChange({ ...block, latex })}
-      onEnter={onEnterBlock}
+      label={(line, count) =>
+        count > 1 ? `Formule du bloc ${index + 1}, ligne ${line + 1}` : `Formule du bloc ${index + 1}`
+      }
+      onEnterBlock={onEnterBlock}
       onEmptyBackspace={onDeleteEmpty}
-      ariaLabel={`Formule du bloc ${index + 1}`}
-      fallback={
+      onEmptyDelete={onDeleteForward}
+      onFocusHandle={onFieldChange}
+      renderFallback={(line, count, actions) => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <textarea
             // Distinct from the WYSIWYG field's label: both are text
             // inputs for the same value, and sharing one name makes them
             // indistinguishable to assistive tech and to tests alike.
-            aria-label={`Formule du bloc ${index + 1} (LaTeX)`}
-            value={block.latex}
-            onChange={event => onChange({ ...block, latex: event.target.value })}
-            onKeyDown={event => {
-              // Le repli est un <textarea>, mais une formule n'a pas de
-              // « ligne » à elle : Entrée (seule ou avec Ctrl/Cmd) demande
-              // directement le bloc formule suivant, la même façon de simuler
-              // le retour à la ligne que le vrai champ MathLive (voir
-              // `MathFieldEditor`) — jamais un `\n` littéral dans le LaTeX.
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                onEnterBlock()
-                return
-              }
-              if (event.key === 'Backspace' && block.latex === '') {
-                event.preventDefault()
-                onDeleteEmpty()
-                return
-              }
-              if (event.key === 'Tab') {
-                if (event.ctrlKey || event.metaKey || event.altKey) return
-                event.preventDefault()
-                onSwitchKind(event.shiftKey ? -1 : 1)
-              }
-            }}
+            aria-label={
+              count > 1
+                ? `Formule du bloc ${index + 1}, ligne ${line + 1} (LaTeX)`
+                : `Formule du bloc ${index + 1} (LaTeX)`
+            }
+            value={lines[line] ?? ''}
+            onChange={event => actions.setValue(event.target.value)}
+            onKeyDown={mathLineKeyDown({ ...actions, switchKind: onSwitchKind }, lines[line] ?? '')}
             spellCheck={false}
             style={{ ...FIELD_STYLE, minHeight: 44, resize: 'vertical', fontFamily: 'monospace', fontSize: 13 }}
           />
           <div
-            data-testid={`math-preview-${index}`}
+            data-testid={count > 1 ? `math-preview-${index}-${line}` : `math-preview-${index}`}
             style={{ minHeight: 22, padding: '2px 0', overflowX: 'auto' }}
             // Safe: `renderMathToHtml` escapes the text it emits, and
             // `trust: false` keeps it from building links or embedding
             // resources (see its own tests).
-            dangerouslySetInnerHTML={{ __html: renderMathToHtml(block.latex, true) }}
+            dangerouslySetInnerHTML={{ __html: renderMathToHtml(lines[line] ?? '', true) }}
           />
         </div>
-      }
+      )}
     />
   )
 }
@@ -2569,10 +2775,38 @@ function TableRow({
           label={`ligne ${rowIndex + 1} colonne ${columnIndex + 1} du tableau ${tableIndex + 1}`}
           onChange={next => onChange(setTableCell(block, rowIndex, columnIndex, next))}
           onKind={kind => onChange(setTableCellKind(block, rowIndex, columnIndex, kind))}
-          onEnter={() => onChange(addTableRow(block, rowIndex))}
         />
       ))}
     </>
+  )
+}
+
+/** Une cellule TEXTE qui grandit avec ses lignes — Entrée y écrit un saut de ligne, comme dans un bloc. */
+function AutoGrowCellTextarea({
+  value,
+  onChange,
+  ...rest
+}: {
+  value: string
+  onChange: (text: string) => void
+  'aria-label': string
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const field = ref.current
+    if (field === null) return
+    field.style.height = 'auto'
+    field.style.height = `${field.scrollHeight}px`
+  })
+  return (
+    <textarea
+      {...rest}
+      ref={ref}
+      value={value}
+      rows={1}
+      onChange={event => onChange(event.target.value)}
+      style={{ ...FIELD_STYLE, fontSize: 13, resize: 'none', overflow: 'hidden', minHeight: 28 }}
+    />
   )
 }
 
@@ -2583,7 +2817,6 @@ function TableCellField({
   label,
   onChange,
   onKind,
-  onEnter,
 }: {
   cell: TableCell
   /** `"row,column"` — how the palette finds this cell back from the focused element. */
@@ -2591,7 +2824,6 @@ function TableCellField({
   label: string
   onChange: (cell: TableCell) => void
   onKind: (kind: SwitchableKind) => void
-  onEnter: () => void
 }) {
   const isMath = typeof cell !== 'string'
   const latex = isMath ? cell.latex : ''
@@ -2599,39 +2831,27 @@ function TableCellField({
   return (
     <div data-cell={cellKey} data-cell-kind={isMath ? 'math' : 'text'} style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
       {isMath ? (
-        <MathFieldEditor
-          ref={() => {}}
+        <MathLinesField
           latex={latex}
           onChange={next => onChange({ latex: next })}
-          onEnter={onEnter}
-          ariaLabel={label}
-          fallback={
+          label={(line, count) => (count > 1 ? `${label}, ligne ${line + 1}` : label)}
+          // Le bandeau retrouve la CELLULE par `data-cell`, et la LIGNE par
+          // `data-cell-line` : sans ce second repère, insérer un symbole n'écrirait
+          // que la ligne focalisée et effacerait les autres.
+          lineAttribute={line => ({ 'data-cell-line': line })}
+          renderFallback={(line, count, actions) => (
             <input
-              aria-label={`${label} (LaTeX)`}
-              value={latex}
-              onChange={event => onChange({ latex: event.target.value })}
-              onKeyDown={event => {
-                if (event.key !== 'Enter') return
-                event.preventDefault()
-                onEnter()
-              }}
+              aria-label={count > 1 ? `${label}, ligne ${line + 1} (LaTeX)` : `${label} (LaTeX)`}
+              value={latexLines(latex)[line] ?? ''}
+              onChange={event => actions.setValue(event.target.value)}
+              onKeyDown={mathLineKeyDown(actions, latexLines(latex)[line] ?? '')}
               spellCheck={false}
               style={{ ...FIELD_STYLE, fontSize: 13, fontFamily: 'monospace' }}
             />
-          }
+          )}
         />
       ) : (
-        <input
-          aria-label={label}
-          value={cell}
-          onChange={event => onChange(event.target.value)}
-          onKeyDown={event => {
-            if (event.key !== 'Enter') return
-            event.preventDefault()
-            onEnter()
-          }}
-          style={{ ...FIELD_STYLE, fontSize: 13 }}
-        />
+        <AutoGrowCellTextarea aria-label={label} value={cell} onChange={onChange} />
       )}
 
       {/* Beside the field, never floating over its corner: the old badge sat on

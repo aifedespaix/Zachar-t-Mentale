@@ -1128,17 +1128,11 @@ function ShortcutsPanel({
         Raccourcis
       </span>
       {scope === 'title' && canRename && <Shortcut keys="Entrée" label="Valider le renommage" />}
-      {scope === 'cell' && <Shortcut keys="Entrée" label="Ajouter une ligne au tableau" />}
-      {/* Dans un bloc TEXTE : Entrée seule n'ajoute pas de bloc — c'est
-          Ctrl/Cmd+Entrée, la même touche que dans une cellule d'un traitement
-          de texte pour valider un paragraphe sans le fermer ; Entrée seule y
-          garde son sens ordinaire (retour à la ligne). Une formule n'a pas ce
-          sens ordinaire à garder — voir la ligne suivante. */}
+      {scope === 'cell' && <Shortcut keys="Entrée" label="Ajouter une ligne dans la cellule" />}
+      {/* Entrée écrit une LIGNE dans le champ où est le curseur — un texte, une
+          cellule, une formule. C'est Ctrl/Cmd+Entrée qui ajoute un BLOC, comme
+          dans un traitement de texte. */}
       {scope === 'block' && <Shortcut keys="Ctrl/Cmd + Entrée" label="Nouveau bloc" />}
-      {/* Une formule n'a pas de « ligne » à elle : Entrée seule y fait donc
-          directement ce que Ctrl/Cmd+Entrée fait ailleurs — un nouveau bloc
-          formule juste après, la ligne de la « zone formule » qu'un Retour
-          arrière sur un bloc vide referme. */}
       {scope === 'block' && <Shortcut keys="Entrée (en formule)" label="Ajoute une ligne de formule" />}
       {scope === 'block' && <Shortcut keys="Tab / Maj + Tab" label="Type de bloc suivant / précédent" />}
       {scope === 'block' && <Shortcut keys="Alt + ↑ / ↓" label="Déplacer le bloc" />}

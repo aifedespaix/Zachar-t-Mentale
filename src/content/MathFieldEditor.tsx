@@ -28,6 +28,16 @@ export interface MathFieldHandle {
    * ask, so this falls back to the plain field the `fallback` prop rendered.
    */
   focusEnd: () => void
+  /**
+   * Focuses the field with the caret at its very START.
+   *
+   * Le geste symétrique de `focusEnd` : Suppr sur une ligne (ou un bloc)
+   * vide fait disparaître ce qui est DEVANT, et le curseur doit atterrir là où
+   * ce qui suit commence — le début du champ suivant, comme un
+   * `setSelectionRange(0, 0)` sur un texte. MathLive l'obtient par
+   * `moveToMathfieldStart` ; le repli LaTeX brut pose la sélection à zéro.
+   */
+  focusStart: () => void
 }
 
 export interface MathFieldEditorProps {
@@ -37,19 +47,22 @@ export interface MathFieldEditorProps {
   /** Shown until the editor is available, and kept if it never becomes available. */
   fallback: React.ReactNode
   /**
-   * Plain Enter — never Shift+Enter, which MathLive's own field keeps for
-   * moving between rows of a multi-line construct — and Ctrl/Cmd+Enter alike.
-   * A formula field has no "new line" of its own to write (there is no
-   * paragraph to break inside one expression), so both land on the same
-   * gesture every other field offers for "the next one of these": a table
-   * cell reads it as "add a row", a formula BLOCK reads it as "add a formula
-   * line" (see `onEnterBlock` in `BlockEditor`, which inserts a new `math`
-   * block right after this one — the same simulated line the user's own
-   * Retour arrière merges back on an empty one).
+   * Entrée seule — jamais Maj+Entrée, que MathLive garde pour circuler entre
+   * les rangées d'une construction multi-lignes : ajoute une LIGNE dans le
+   * même bloc (ou la même cellule). C'est le « retour à la ligne » d'un texte,
+   * transposé à une formule dont les lignes vivent côte à côte.
    */
   onEnter?: () => void
-  /** Retour arrière sur un champ vide : le bloc demande à être supprimé. */
+  /**
+   * Ctrl/Cmd+Entrée : un NOUVEAU bloc après celui-ci — le geste « un bloc de
+   * plus » de tous les autres champs. Absent dans une cellule de tableau, où
+   * il n'y a pas de bloc à créer : `onEnter` prend alors la touche.
+   */
+  onEnterBlock?: () => void
+  /** Retour arrière sur un champ vide : la ligne (ou le bloc) demande à être supprimée vers le précédent. */
   onEmptyBackspace?: () => void
+  /** Suppr sur un champ vide : la ligne (ou le bloc) demande à disparaître vers le suivant. */
+  onEmptyDelete?: () => void
   ref?: React.Ref<MathFieldHandle>
 }
 
@@ -63,7 +76,7 @@ export interface MathFieldEditorProps {
 export type MathfieldElement = HTMLElement & {
   value: string
   insert?: (fragment: string, options?: { focus?: boolean }) => void
-  /** MathLive's generic command runner — used here only for `moveToMathfieldEnd` (see `MathFieldHandle.focusEnd`). */
+  /** MathLive's generic command runner — `moveToMathfieldEnd`/`moveToMathfieldStart` (see `MathFieldHandle`). */
   executeCommand?: (command: string) => boolean
 }
 
@@ -134,7 +147,9 @@ export function MathFieldEditor({
   ariaLabel,
   fallback,
   onEnter,
+  onEnterBlock,
   onEmptyBackspace,
+  onEmptyDelete,
   ref,
 }: MathFieldEditorProps) {
   // Which editor this block shows. It starts on the caller's field whenever
@@ -161,8 +176,12 @@ export function MathFieldEditor({
   onChangeRef.current = onChange
   const onEnterRef = useRef(onEnter)
   onEnterRef.current = onEnter
+  const onEnterBlockRef = useRef(onEnterBlock)
+  onEnterBlockRef.current = onEnterBlock
   const onEmptyBackspaceRef = useRef(onEmptyBackspace)
   onEmptyBackspaceRef.current = onEmptyBackspace
+  const onEmptyDeleteRef = useRef(onEmptyDelete)
+  onEmptyDeleteRef.current = onEmptyDelete
   // Same reason as `onChangeRef`: the handle below is built once, so it must
   // not close over the formula as it was at mount.
   const latexRef = useRef(latex)
@@ -198,6 +217,18 @@ export function MathFieldEditor({
         const raw = rootRef.current?.querySelector<HTMLTextAreaElement | HTMLInputElement>('textarea, input')
         raw?.focus()
         raw?.setSelectionRange(raw.value.length, raw.value.length)
+      },
+      focusStart() {
+        const field = fieldRef.current
+        if (field !== null) {
+          field.focus()
+          field.executeCommand?.('moveToMathfieldStart')
+          return
+        }
+        // Same raw-LaTeX fallback as `focusEnd`, at the other end.
+        const raw = rootRef.current?.querySelector<HTMLTextAreaElement | HTMLInputElement>('textarea, input')
+        raw?.focus()
+        raw?.setSelectionRange(0, 0)
       },
     }),
     []
@@ -264,9 +295,18 @@ export function MathFieldEditor({
         onEmptyBackspaceRef.current()
         return
       }
+      if (event.key === 'Delete' && field.value === '' && onEmptyDeleteRef.current !== undefined) {
+        event.preventDefault()
+        onEmptyDeleteRef.current()
+        return
+      }
       if (event.key !== 'Enter' || event.shiftKey) return
       event.preventDefault()
-      onEnterRef.current?.()
+      // Ctrl/Cmd+Entrée demande un NOUVEAU bloc ; Entrée seule une ligne de plus
+      // dans celui-ci. Dans une cellule (pas de `onEnterBlock`), les deux
+      // ajoutent une ligne : il n'y a pas de bloc à créer.
+      if ((event.ctrlKey || event.metaKey) && onEnterBlockRef.current !== undefined) onEnterBlockRef.current()
+      else onEnterRef.current?.()
     })
     host.replaceChildren(field)
     fieldRef.current = field

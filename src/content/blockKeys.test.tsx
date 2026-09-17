@@ -130,4 +130,50 @@ describe('Retour arrière sur un bloc vide', () => {
     expect(onState).not.toHaveBeenCalled()
     expect(screen.getByRole('textbox', { name: /texte du bloc 1/i })).toBeInTheDocument()
   })
+
+  it('ne supprime pas le PREMIER bloc vide : il n’y a pas de précédent où aller', async () => {
+    const user = userEvent.setup()
+    const { onState } = renderEditor([
+      { kind: 'text', text: '' },
+      { kind: 'text', text: 'suite' },
+    ])
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 1/i }))
+    await user.keyboard('{Backspace}')
+
+    expect(onState).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('textbox', { name: /texte du bloc/i })).toHaveLength(2)
+  })
+})
+
+describe('Suppr sur un bloc vide', () => {
+  it('supprime le bloc et met le curseur au DÉBUT du suivant', async () => {
+    const user = userEvent.setup()
+    const { latest } = renderEditor([
+      { kind: 'text', text: '' },
+      { kind: 'text', text: 'suite' },
+    ])
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 1/i }))
+    await user.keyboard('{Delete}')
+
+    expect(latest()).toEqual([{ kind: 'text', text: 'suite' }])
+    const next = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    await waitFor(() => expect(next).toHaveFocus())
+    expect(next.selectionStart).toBe(0)
+  })
+
+  it('ne supprime pas le DERNIER bloc vide : il n’y a pas de suivant', async () => {
+    const user = userEvent.setup()
+    const { onState } = renderEditor([
+      { kind: 'text', text: 'a' },
+      { kind: 'text', text: '' },
+    ])
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 2/i }))
+    await user.keyboard('{Delete}')
+
+    expect(onState).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('textbox', { name: /texte du bloc/i })).toHaveLength(2)
+  })
 })

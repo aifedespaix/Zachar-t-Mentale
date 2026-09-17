@@ -20,15 +20,18 @@
  * migration is needed: a `string[][]` is already a valid `TableCell[][]`.
  * `{ latex }` is deliberately the only other shape, one field, easy to tell
  * apart from text at a glance in the JSON and impossible to confuse with a
- * future richer cell kind.
+ * future richer cell kind. Son `latex` peut porter des `\n` : ce sont les
+ * LIGNES de formule de la cellule, la même convention que pour un bloc.
  */
 export type TableCell = string | { latex: string }
 
 type CardBlockShape =
   | { kind: 'text'; text: string }
   /**
-   * Every math block is its own line by construction — the block list IS the
-   * line breaks — so there is no "inline in a sentence" case left to toggle.
+   * Un bloc formule porte une ou plusieurs LIGNES de formule, séparées par des
+   * `\n` — la même convention que la conversion texte ↔ formule, où un passage
+   * à la ligne EST une ligne de formule. La conversion ne change donc que le
+   * `kind` : la chaîne traverse telle quelle, lignes comprises.
    */
   | { kind: 'math'; latex: string }
   /**
