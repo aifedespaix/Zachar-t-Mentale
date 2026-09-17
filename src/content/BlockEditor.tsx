@@ -12,6 +12,7 @@ import {
   Table2,
   Trash2,
   Type,
+  X,
 } from 'lucide-react'
 import type { CardBlock, CardBlockKind, TableCell } from '../types/cardBlock'
 import { blockGroups, questionLabels } from './blocks'
@@ -1220,7 +1221,19 @@ ull quand l'utilisateur l'a refermé pour
           lastScrollTop.current = blockListRef.current?.scrollTop ?? 0
         }}
         data-testid="block-list"
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          // De l'air pour la croix, qui est posée SUR le coin haut-droit du bloc :
+          // la moitié d'elle déborde au-dessus et à droite. Sans ce `padding`,
+          // `overflow-y: auto` — qui force aussi l'axe X à `auto` — la rognait à
+          // la moitié et faisait apparaître une barre de défilement horizontale.
+          padding: '12px 14px 0',
+        }}
       >
         {blockGroups(blocks).map(group => (
           <div
@@ -1288,6 +1301,9 @@ ull quand l'utilisateur l'a refermé pour
                     // Un bloc ne se comprime jamais non plus : sa hauteur est son
                     // contenu, et c'est la zone qui défile qui l'absorbe.
                     flexShrink: 0,
+                    // Le repère de la croix de suppression, posée à cheval sur le
+                    // coin haut-droit (voir `BlockRemoveButton`).
+                    position: 'relative',
                     // `--ring`, not `--accent`: `--accent` is a SURFACE token
                     // (`oklch(0.97)` in the light theme, i.e. lighter than
                     // `--border` at `0.922`, on a `--popover` of `1`), so painting
@@ -1311,7 +1327,10 @@ ull quand l'utilisateur l'a refermé pour
                           background: isActive ? 'color-mix(in oklch, var(--border), transparent 88%)' : 'transparent',
                           // Un bloc DANS un groupe laisse le fond bleu respirer
                           // sur ses côtés : c'est le groupe qui fait la bordure.
-                          ...(isQuestionGroup ? { margin: '0 10px' } : {}),
+                          // 12 et non 10 : c'est aussi la place de la moitié de
+                          // la croix, que `overflow: hidden` (voir
+                          // `GROUP_STYLE`) rognerait sur le bord droit du bloc.
+                          ...(isQuestionGroup ? { margin: '0 12px' } : {}),
                         }),
     
                   }}
@@ -1361,8 +1380,15 @@ ull quand l'utilisateur l'a refermé pour
                       {/* « Supprimer » est descendu du gutter : il est maintenant sous
                           le menu de type, du même côté. Le gutter ne garde que le
                           déplacement, et la corbeille garde la règle « jamais le
-                          dernier bloc » (`removeAt` la refuse). */}
-                      {blocks.length > 1 && (
+                          dernier bloc » (`removeAt` la refuse).
+
+                          Un vrai BLOC n'en a plus ici : sa suppression est la croix
+                          posée sur son coin haut-droit (`BlockRemoveButton`). Seul
+                          le BANDEAU d'une question la garde — il n'est pas un
+                          « bloc », et le cadre arrondi du groupe, qui le rogne
+                          (`overflow: hidden`, `GROUP_STYLE`), couperait une croix
+                          à cheval sur son coin. */}
+                      {isHeader && blocks.length > 1 && (
                         <GutterIcon
                           label={`Supprimer le bloc ${index + 1}`}
                           destructive
@@ -1372,7 +1398,15 @@ ull quand l'utilisateur l'a refermé pour
                       )}
                     </div>
                   </div>
-    
+
+                  {/* La croix de suppression d'un bloc, à cheval sur son coin
+                      haut-droit — la position et les transitions vivent dans
+                      `.block-remove` (`index.css`). `removeAt` refuse de retirer le
+                      dernier bloc, et l'appelant le sait : elle n'est pas dessinée
+                      quand il ne reste qu'un bloc. */}
+                  {!isHeader && blocks.length > 1 && (
+                    <BlockRemoveButton index={index} onRemove={() => removeAt(index)} />
+                  )}
                 </motion.div>
                 </BlockContextMenu>
               )
@@ -1714,6 +1748,34 @@ function GutterIcon({
     >
       {icon}
     </button>
+    </Hint>
+  )
+}
+
+/**
+ * La croix rouge qui retire un bloc, à cheval sur son coin haut-droit.
+ *
+ * Elle a remplacé la corbeille de la colonne de droite : celle-ci obligeait à
+ * viser l'INTÉRIEUR du bloc, et partageait sa colonne avec le menu de type —
+ * deux cibles voisines dont une destructive. La croix se pose au même endroit
+ * sur TOUS les blocs, quel que soit leur type, et c'est sa position qui dit
+ * qu'elle ferme le bloc entier.
+ *
+ * Tout son dessin vit dans `.block-remove` (`index.css`), jamais en ligne :
+ * un style en ligne l'emporterait sur `:hover`, et la croix ne pourrait plus
+ * rougir (même piège que le « + » d'une frontière de tableau).
+ *
+ * `removeAt` refuse de retirer le DERNIER bloc ; c'est l'appelant qui décide de
+ * ne pas dessiner la croix dans ce cas (voir `blocks.length > 1`), exactement
+ * comme le faisait la corbeille qu'elle remplace.
+ */
+function BlockRemoveButton({ index, onRemove }: { index: number; onRemove: () => void }) {
+  const label = `Supprimer le bloc ${index + 1}`
+  return (
+    <Hint label={label}>
+      <button type="button" aria-label={label} onClick={onRemove} className="block-remove">
+        <X size={12} strokeWidth={3} />
+      </button>
     </Hint>
   )
 }

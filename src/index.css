@@ -1424,3 +1424,98 @@
 @media (prefers-reduced-motion: reduce) {
   .table-handle { transition: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   La croix qui supprime un bloc, à cheval sur son coin haut-droit.
+
+   Elle remplace la corbeille qui vivait dans la colonne de droite : celle-ci
+   obligeait à viser l'INTÉRIEUR du bloc, dans la même colonne que le menu de
+   type. Une croix posée SUR la bordure nomme le geste — fermer ce bloc — et se
+   trouve au même endroit sur tous les blocs, quel que soit leur type.
+
+   Le fond est OPAQUE et c'est lui qui EFFACE la bordure du bloc sous le bouton :
+   sans lui, le trait passerait au travers du cercle. Il prend `--popover`, la
+   surface de la modale.
+
+   Les couleurs vivent ICI et pas en ligne : un style en ligne l'emporterait sur
+   `:hover`, et la croix ne pourrait jamais rougir (même piège que
+   `.table-handle`).
+
+   Le centrage sur le coin passe par `top`/`right` NÉGATIFS, jamais par un
+   `translate(-50%, -50%)` : `:hover` compose un `scale()` dans la MÊME
+   propriété `transform`, et le décalage littéral serait écrasé dès que le
+   pointeur arrive — le bouton sauterait hors de son coin (même piège que les
+   flèches de `DescriptionDialog`).
+   --------------------------------------------------------------------------- */
+.block-remove {
+  position: absolute;
+  top: -11px;
+  right: -11px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--popover);
+  border: 1px solid color-mix(in oklch, var(--destructive), transparent 55%);
+  border-radius: 50%;
+  color: var(--destructive);
+  cursor: pointer;
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground), transparent 90%);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Rouge PLEIN au survol : la couleur est l'avertissement, et elle n'apparaît
+   qu'une fois la cible tenue. Le focus clavier y a droit aussi — sinon le bouton
+   serait atteignable au clavier sans jamais montrer de quoi il s'agit.
+
+   Le CERCLE ne grandit pas : posé à cheval sur le coin, tout grossissement
+   sortirait du bloc, et le cadre d'un groupe (`overflow: hidden`) le
+   rognerait. C'est la croix, à l'INTÉRIEUR, qui grandit — plus un halo rouge
+   qui dit « cible tenue » sans déplacer un seul pixel. */
+.block-remove:hover,
+.block-remove:focus-visible {
+  background: var(--destructive);
+  border-color: var(--destructive);
+  color: var(--popover);
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--destructive), transparent 78%),
+    0 2px 8px color-mix(in oklch, var(--destructive), transparent 45%);
+}
+
+.block-remove svg {
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.block-remove:hover svg,
+.block-remove:focus-visible svg {
+  transform: scale(1.18);
+}
+
+.block-remove:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--destructive), transparent 40%);
+  outline-offset: 2px;
+}
+
+/* L'appui : la croix s'écrase et se vrille. Le quart de tour est ramené à 12°
+   volontairement — une croix est symétrique d'un quart de tour, donc 90° ne se
+   verraient pas, alors que la petite torsion se sent. */
+.block-remove:active {
+  transform: scale(0.86) rotate(-12deg);
+  box-shadow: none;
+  transition-duration: 70ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block-remove,
+  .block-remove svg { transition: none; }
+  .block-remove:hover svg,
+  .block-remove:focus-visible svg,
+  .block-remove:active { transform: none; }
+}

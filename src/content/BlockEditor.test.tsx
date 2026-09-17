@@ -652,6 +652,46 @@ describe('the type switch, carried by each block', () => {
 
     expect((latest()![0] as { header: string[] }).header).toEqual([])
   })
+
+  it('porte la croix de suppression sur le COIN du bloc, et non plus dans sa colonne', () => {
+    // Le survol et l'appui vivent dans `.block-remove` (index.css) : recopier ici
+    // un `border` ou un `background` en ligne les tuerait, exactement comme pour
+    // `.table-handle`. Ce test fige donc la CLASSE et le RATTACHEMENT, pas les
+    // couleurs.
+    renderEditor([
+      { kind: 'text', text: 'un' },
+      { kind: 'text', text: 'deux' },
+    ])
+
+    const cross = screen.getByRole('button', { name: /supprimer le bloc 1/i })
+
+    expect(cross).toHaveClass('block-remove')
+    // Rien de la feuille de style n'est recopié dans un `style` en ligne : c'est
+    // ce qui laisse `:hover` peindre le rouge plein.
+    expect(cross.style.background).toBe('')
+    expect(cross.style.border).toBe('')
+    // Elle est posée SUR le bloc (dont elle est l'enfant direct, donc le repère
+    // `position: relative`) — pas rangée dans la colonne du menu de type, où il
+    // fallait viser l'intérieur du bloc pour la trouver.
+    expect(cross.parentElement).toBe(cross.closest('[data-row-index]'))
+  })
+
+  it('ne dessine la croix ni sur le dernier bloc, ni sur le bandeau d’une question', () => {
+    renderEditor([{ kind: 'text', text: 'seul' }])
+    // La règle « jamais le dernier bloc » est tenue par le RENDU, comme avant :
+    // `removeAt` la refuserait de toute façon.
+    expect(screen.queryByRole('button', { name: /supprimer le bloc 1/i })).not.toBeInTheDocument()
+
+    renderEditor([
+      { kind: 'question', text: 'Pourquoi ?' },
+      { kind: 'text', text: 'Parce que.' },
+    ])
+    // Le bandeau-question n'est pas un « bloc » : le cadre arrondi du groupe le
+    // rogne (`overflow: hidden`), donc une croix à cheval sur son coin y serait
+    // coupée. Il garde la corbeille de sa colonne ; le vrai bloc, lui, a la croix.
+    expect(screen.getByRole('button', { name: /supprimer le bloc 1/i })).not.toHaveClass('block-remove')
+    expect(screen.getByRole('button', { name: /supprimer le bloc 2/i })).toHaveClass('block-remove')
+  })
 })
 
 describe('the kind a new block starts as', () => {
