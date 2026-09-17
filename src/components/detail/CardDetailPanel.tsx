@@ -102,22 +102,18 @@ export function CardDetailPanel() {
   const cards = useCardsStore(s => s.history.present)
 
   /**
-   * The card a "+" just created, so the fresh editor can open on its title with
-   * the placeholder selected. Held HERE rather than in `FicheEditor` because
-   * that component is keyed by card id: creating a card swaps it out, and the
-   * flag has to outlive the instance that set it.
-   */
-  const [titleFocusCardId, setTitleFocusCardId] = useState<string | null>(null)
-
-  /**
-   * Creates the neighbour an edge asked for, then moves the dialog onto it.
+   * Creates the neighbour an edge asked for, with the title its own prompt
+   * already collected (see `CreatePromptOverlay`), then moves the dialog onto
+   * it. A card is never born blind or nameless any more, so there is no
+   * placeholder left to type over — unlike the "+" this replaced, nothing here
+   * asks the fresh dialog to auto-select a title field.
    *
-   * The dialog only knows a "+" was clicked on its left/right/top/bottom; which
-   * op that maps to is the caller's business. The store owns the rules, and an
-   * op it refuses simply leaves the dialog where it was.
+   * The dialog only knows a "+" was activated on its left/right/top/bottom;
+   * which op that maps to is the caller's business. The store owns the rules,
+   * and an op it refuses simply leaves the dialog where it was.
    */
   const createRelative = useCallback(
-    (cardId: string, side: NavSide) => {
+    (cardId: string, side: NavSide, title: string) => {
       const store = useCardsStore.getState()
       const newCardId =
         side === 'right'
@@ -128,18 +124,11 @@ export function CardDetailPanel() {
               ? store.addSibling(cardId, 'below')
               : null
       if (newCardId === null) return
-      setTitleFocusCardId(newCardId)
+      store.updateTitle(newCardId, title)
       setEditing(newCardId)
     },
     [setEditing]
   )
-
-  // The title focus is spent the moment the dialog moves off that card. Without
-  // this, closing and reopening the same card later would silently select its
-  // title again.
-  useEffect(() => {
-    if (titleFocusCardId !== null && editingCardId !== titleFocusCardId) setTitleFocusCardId(null)
-  }, [editingCardId, titleFocusCardId])
 
   const [width, setWidth] = useState(loadCardDetailWidth)
   const [resizing, setResizing] = useState(false)
@@ -336,7 +325,6 @@ export function CardDetailPanel() {
         cards={cards}
         onClose={() => setEditing(null)}
         onCreateRelative={createRelative}
-        titleFocus={editingCard.id === titleFocusCardId}
       />
     )
 
@@ -782,14 +770,11 @@ function FicheEditor({
   cards,
   onClose,
   onCreateRelative,
-  titleFocus,
 }: {
   card: Card
   cards: Card[]
   onClose: () => void
-  onCreateRelative: (cardId: string, side: NavSide) => void
-  /** Opens on the title with it selected — the card was just born from a "+". */
-  titleFocus: boolean
+  onCreateRelative: (cardId: string, side: NavSide, title: string) => void
 }) {
   const updateContent = useCardsStore(s => s.updateContent)
   const updateTitle = useCardsStore(s => s.updateTitle)
@@ -851,13 +836,13 @@ function FicheEditor({
     ? undefined
     : {
         right: canReceiveChildren(card)
-          ? { colors: paletteForLevel(card.level + 1), onSelect: () => onCreateRelative(card.id, 'right') }
+          ? { colors: paletteForLevel(card.level + 1), onSelect: (title: string) => onCreateRelative(card.id, 'right', title) }
           : undefined,
         top: canCreateSibling
-          ? { colors: paletteForLevel(card.level), onSelect: () => onCreateRelative(card.id, 'top') }
+          ? { colors: paletteForLevel(card.level), onSelect: (title: string) => onCreateRelative(card.id, 'top', title) }
           : undefined,
         bottom: canCreateSibling
-          ? { colors: paletteForLevel(card.level), onSelect: () => onCreateRelative(card.id, 'bottom') }
+          ? { colors: paletteForLevel(card.level), onSelect: (title: string) => onCreateRelative(card.id, 'bottom', title) }
           : undefined,
       }
 
@@ -890,7 +875,6 @@ function FicheEditor({
       nextSibling={nextSibling && { id: nextSibling.id, title: nextSibling.title, colors: chipColorsFor(nextSibling) }}
       onNavigate={setEditing}
       onCreate={onCreate}
-      autoFocusTitle={titleFocus}
       // The dialog's title field mirrors the card's own — same colours, same
       // rename — so "the biggest, most present place to work on this card" is
       // recognisably the same card, not a bare form.

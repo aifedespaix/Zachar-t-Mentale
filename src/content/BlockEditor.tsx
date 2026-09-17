@@ -20,6 +20,7 @@ import { MathFieldEditor, type MathFieldHandle, type MathfieldElement } from './
 import { SymbolBand } from './SymbolBand'
 import type { BandTabId, PaletteSymbol } from '../types/symbolBand'
 import { loadBandTab, saveBandTab } from '../persistence/bandTab'
+import { SYMBOL_TABS } from './symbolTabs'
 import { insertCharacter, type SpecialCharacter } from './languageHelp'
 import {
   DropdownMenu,
@@ -29,6 +30,9 @@ import {
 } from '../components/ui/dropdown-menu'
 import { Hint } from '../components/ui/hint'
 import { TooltipProvider } from '../components/ui/tooltip'
+import { EmptyAreaContextMenu, type EmptyAreaMenuActions } from './EmptyAreaContextMenu'
+import { BlockContextMenu } from './BlockContextMenu'
+import { FieldContextMenu } from './FieldContextMenu'
 
 /** The two kinds a block can be switched between. `table` and `image` are made, not switched to. */
 export type SwitchableKind = 'text' | 'math'
@@ -210,6 +214,13 @@ export function moveBlock(blocks: CardBlock[], from: number, to: number): CardBl
   return next
 }
 
+/** A copy of block `index`, inserted right after it. A shallow copy is enough: every block mutation in this file returns a new object rather than editing one in place, so the two can safely share a table's rows or an image's dimensions until one of them is next edited. */
+export function duplicateBlock(blocks: CardBlock[], index: number): CardBlock[] {
+  const block = blocks[index]
+  if (block === undefined) return blocks
+  return [...blocks.slice(0, index + 1), { ...block }, ...blocks.slice(index + 1)]
+}
+
 /**
  * Rescales an image block to a new displayed width, keeping its shape.
  *
@@ -362,6 +373,19 @@ export interface BlockEditorProps {
    * donc dont la dernière ligne sort souvent de la vue.
    */
   hiddenFamilies?: string[]
+  /**
+   * The empty-area right-click menu's actions that belong to the DIALOG
+   * rather than to this editor — width, the shortcuts panel, the symbol
+   * families overlay, the description's own undo history, closing and
+   * deleting the whole description. Everything the menu needs that this
+   * editor already owns (adding a block, the band's open tab) is supplied
+   * from here instead; see `EmptyAreaContextMenu`.
+   *
+   * Optional so a caller with nowhere to route these — every current test
+   * harness — gets the editor with no empty-area menu at all, rather than
+   * one whose actions silently do nothing.
+   */
+  dialogMenuActions?: Omit<EmptyAreaMenuActions, 'onAddBlock' | 'bandTab' | 'onChooseTab'>
 }
 
 /**
@@ -391,6 +415,7 @@ export function BlockEditor({
   onError,
   autoFocusField = false,
   hiddenFamilies = NO_HIDDEN_FAMILIES,
+  dialogMenuActions,
 }: BlockEditorProps) {
   // Which block the band's insertion targets. Kept in state rather than derived
   // from DOM focus: the band is permanent, so it must still name a target while
@@ -916,6 +941,77 @@ ull quand l'utilisateur l'a refermé pour
   let questionRank = 0
   const questionNumbers = blocks.map(block => (block.kind === 'question' ? (questionRank += 1) : 0))
 
+  const emptyAreaActions =
+    dialogMenuActions === undefined
+      ? undefined
+      : { ...dialogMenuActions, onAddBlock: appendOutside, bandTab, onChooseTab: chooseTab }
+
+  /**
+   * Le clavier des blocs — Alt+flèches, Alt+D, Alt+Q, Alt+chiffre pour
+   * l'onglet du bandeau — et le seul geste du bandeau vide qui n'a pas déjà
+   * de bouton : Ctrl+Maj+Entrée pour ajouter un bloc HORS de la dernière
+   * question, le même geste que le clic sur « Ajouter un bloc » en pied de
+   * liste.
+   *
+   * Un seul gestionnaire, sur la racine, plutôt qu'un par bloc : `closest`
+   * retrouve la ligne visée depuis n'importe quel champ qu'elle contient.
+   * `event.ctrlKey` exclut la touche AltGr d'un clavier AZERTY, qui compose un
+   * caractère (`€`, `@`…) en posant CTRL et ALT ensemble sous Windows — sans
+   * cette garde, écrire un caractère AltGr dans un bloc l'aurait déplacé ou
+   * dupliqué à la place.
+   */
+  function handleEditorKeyDown(event: React.KeyboardEvent) {
+    if (event.ctrlKey || event.metaKey) {
+      if (event.key === 'Enter' && event.shiftKey) {
+        event.preventDefault()
+        appendOutside()
+      }
+      return
+    }
+    if (!event.altKey) return
+
+    // Alt+1…Alt+5 et Alt+0 : les onglets du bandeau, dans l'ordre de
+    // `SYMBOL_TABS`, et « aucun » pour le refermer — le même sous-menu que le
+    // clic droit dans le vide. `event.code` plutôt que `event.key` : sur un
+    // clavier AZERTY, la touche « 1 » n'écrit `1` qu'avec Majuscule, alors que
+    // `Digit1` nomme la touche physique quel que soit l'état de Majuscule
+    // (même raison que `bindingFromEvent`, dans `shortcuts/keys.ts`).
+    const digit = /^Digit([0-9])$/.exec(event.code)
+    if (digit !== null) {
+      event.preventDefault()
+      const n = Number(digit[1])
+      if (n === 0) chooseTab(null)
+      else if (SYMBOL_TABS[n - 1] !== undefined) chooseTab(SYMBOL_TABS[n - 1].id)
+      return
+    }
+
+    const row = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-row-index]')
+    const index = row === null || row === undefined ? NaN : Number(row.dataset.rowIndex)
+    if (!Number.isInteger(index)) return
+
+    switch (event.key) {
+      case 'ArrowUp':
+        event.preventDefault()
+        move(index, index - 1)
+        return
+      case 'ArrowDown':
+        event.preventDefault()
+        move(index, index + 1)
+        return
+      case 'd':
+      case 'D':
+        event.preventDefault()
+        onChange(duplicateBlock(blocks, index))
+        setActiveIndex(index + 1)
+        return
+      case 'q':
+      case 'Q':
+        event.preventDefault()
+        if (blocks[index]?.kind !== 'image') applyKind(index, 'question')
+        return
+    }
+  }
+
   return (
     // ONE provider for the whole editor. The app's tooltip defaults are used
     // unchanged, so a hint on a block's controls behaves like a hint anywhere
@@ -928,6 +1024,7 @@ ull quand l'utilisateur l'a refermé pour
       ref={editorRef}
       style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
       onPaste={handlePaste}
+      onKeyDown={handleEditorKeyDown}
       // Un seul couple focus/blur sur la racine : React les fait remonter, donc
       // il couvre tous les champs de l'éditeur sans câbler chaque bloc.
       onFocus={event => setFocusedFieldKind(fieldKindOf(event.target))}
@@ -962,7 +1059,11 @@ ull quand l'utilisateur l'a refermé pour
         />
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <EmptyAreaContextMenu actions={emptyAreaActions}>
+      <div
+        data-testid="block-list"
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}
+      >
         {blockGroups(blocks).map(group => (
           <div
             key={group.indexes[0]}
@@ -986,13 +1087,26 @@ ull quand l'utilisateur l'a refermé pour
               const isHeader = index === group.headerIndex
               const isQuestionGroup = group.headerIndex !== null
               return (
-                <motion.div
+                <BlockContextMenu
                   // Une clé STABLE, pas l'index : c'est ce qui fait que React déplace
                   // le nœud au lieu de réécrire son contenu, donc ce qui rend
-                  // l'animation possible (voir `blockIds`). `data-row-index` reste
-                  // l'INDEX, lui : les recherches DOM et l'insertion au caret en
-                  // dépendent, et c'est une coordonnée, pas une identité.
+                  // l'animation possible (voir `blockIds`).
                   key={blockIds.current[index]}
+                  index={index}
+                  kind={block.kind}
+                  blockCount={blocks.length}
+                  onMove={move}
+                  onDuplicate={() => {
+                    onChange(duplicateBlock(blocks, index))
+                    setActiveIndex(index + 1)
+                  }}
+                  onDelete={() => removeAt(index)}
+                  onChangeKind={kind => applyKind(index, kind)}
+                >
+                <motion.div
+                  // `data-row-index` reste l'INDEX : les recherches DOM et
+                  // l'insertion au caret en dépendent, et c'est une coordonnée,
+                  // pas une identité.
                   data-row-index={index}
                   data-block-kind={block.kind}
                   data-question-banner={isHeader ? '' : undefined}
@@ -1101,6 +1215,7 @@ ull quand l'utilisateur l'a refermé pour
                   </div>
     
                 </motion.div>
+                </BlockContextMenu>
               )
             })}
 
@@ -1139,6 +1254,7 @@ ull quand l'utilisateur l'a refermé pour
           </div>
         ))}
       </div>
+      </EmptyAreaContextMenu>
 
       <div style={{ display: 'flex', gap: 8, paddingTop: 10, flex: '0 0 auto' }}>
         <button
@@ -1576,6 +1692,8 @@ interface BlockFieldProps {
   onDeleteEmpty: () => void
   /** Reports the block's live math handle, for the band's keys. Called with `null` when the block is not a formula (or unmounts as one). */
   onFieldChange: (handle: MathFieldHandle | null) => void
+  /** For `FieldContextMenu`'s « Coller » — never silent about a failed paste, same convention as `BlockEditor`'s own `onError`. */
+  onError?: (message: string) => void
 }
 
 function BlockField({
@@ -1587,10 +1705,12 @@ function BlockField({
   onSwitchKind,
   onDeleteEmpty,
   onFieldChange,
+  onError,
 }: BlockFieldProps) {
   switch (block.kind) {
     case 'text':
       return (
+        <FieldContextMenu kind="text" onError={onError}>
         <AutoGrowTextarea
           aria-label={`Texte du bloc ${index + 1}`}
           // How the character palette finds this field to insert at its caret —
@@ -1617,6 +1737,7 @@ function BlockField({
           onSwitchKind={onSwitchKind}
           onDeleteEmpty={onDeleteEmpty}
         />
+        </FieldContextMenu>
       )
 
     case 'question':
@@ -1624,6 +1745,7 @@ function BlockField({
       // title, and a title that turned into a formula because it happened to end
       // in `$$` would take its whole group with it.
       return (
+        <FieldContextMenu kind="text" onError={onError}>
         <AutoGrowTextarea
           aria-label={`Question du bloc ${index + 1}`}
           data-block-index={index}
@@ -1636,10 +1758,12 @@ function BlockField({
           // pas dans un cadre de bloc.
           style={{ border: 'none', background: 'transparent', padding: '2px 0', minHeight: 24, fontSize: 15, fontWeight: 650, color: 'var(--info-fg)' }}
         />
+        </FieldContextMenu>
       )
 
     case 'math':
       return (
+        <FieldContextMenu kind="math" onError={onError}>
         <MathBlockField
           block={block}
           index={index}
@@ -1649,6 +1773,7 @@ function BlockField({
           onDeleteEmpty={onDeleteEmpty}
           onFieldChange={onFieldChange}
         />
+        </FieldContextMenu>
       )
 
     case 'image':

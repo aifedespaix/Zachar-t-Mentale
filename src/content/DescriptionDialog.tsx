@@ -11,6 +11,7 @@ import { loadDescriptionNarrow, saveDescriptionNarrow } from '../persistence/des
 import { Button } from '../components/ui/button'
 import { Hint } from '../components/ui/hint'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip'
+import { isTypingTarget } from '../hooks/useGlobalShortcuts'
 import {
   ensureDescriptionHistory,
   recordDescriptionState,
@@ -63,7 +64,8 @@ export type NavSide = 'top' | 'bottom' | 'left' | 'right'
  */
 export interface DescriptionCreateTarget {
   colors?: TitleChipColors
-  onSelect: () => void
+  /** Called once the create-prompt (see `CreatePromptOverlay`) has a title — never on the bare click/shortcut, which only OPENS that prompt. */
+  onSelect: (title: string) => void
 }
 
 export interface DescriptionDialogProps {
@@ -199,6 +201,14 @@ export function DescriptionDialog({
   const [draft, setDraft] = useState<CardBlock[]>(initial.current)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  /**
+   * Which edge's "+" is asking for a title — `null` when none is.
+   *
+   * A card is never created blind any more: Ctrl+flèche and the "+" button
+   * both land HERE first, never straight on `onCreate[side].onSelect`. Only
+   * the prompt's own Valider calls that, with the title it collected.
+   */
+  const [createPrompt, setCreatePrompt] = useState<NavSide | null>(null)
   // The width the dialog was last closed in, read SYNCHRONOUSLY at mount so
   // the first paint is already the chosen one. The dialog is remounted on
   // every opening (`key={cardId}`), so this flag — not a component state that
@@ -355,6 +365,32 @@ export function DescriptionDialog({
     onNavigate?.(targetId)
   }
 
+  /** Opens the title prompt for the edge's own « + » — never `onCreate[side].onSelect` directly; see `createPrompt`. */
+  function openCreatePrompt(side: NavSide) {
+    setCreatePrompt(side)
+  }
+
+  const edgeTarget: Record<NavSide, DescriptionNavTarget | undefined> = {
+    top: prevSibling,
+    bottom: nextSibling,
+    left: parentTarget,
+    right: childTarget,
+  }
+
+  /**
+   * What an edge does when activated — by Ctrl+flèche or by clicking its
+   * arrow, the same one step either way: jump straight there when there is
+   * already a neighbour, ask for a title first when there is not.
+   */
+  function activateEdge(side: NavSide) {
+    const target = edgeTarget[side]
+    if (target !== undefined && onNavigate !== undefined) {
+      navigate(target.id)
+      return
+    }
+    if (onCreate?.[side] !== undefined) openCreatePrompt(side)
+  }
+
   function deleteDescription() {
     clearTimeout(debounceRef.current)
     onSave([])
@@ -380,12 +416,50 @@ export function DescriptionDialog({
   // No dependency array on purpose: the handler must close over the CURRENT
   // draft (through the refs above) and re-registering one listener per render
   // is cheaper than the ref dance that avoiding it would need.
+  //
+  // `Ctrl/Cmd + <letter>` here, `Alt + <letter>` for the per-block shortcuts in
+  // `BlockEditor` : the split is deliberate and is what the shortcuts panel
+  // documents it as — this modifier is for what the whole DIALOG owns (width,
+  // the shortcuts panel itself, the symbol families overlay, this history),
+  // `Alt` is for what one BLOCK owns. Safe from the app's own global shortcuts
+  // regardless: `useGlobalShortcuts` disables itself entirely while any dialog
+  // is open (see `isModalOpen`), which is also why none of these need to avoid
+  // colliding with a `COMMANDS` binding.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
-      event.preventDefault()
-      if (event.shiftKey) redo()
-      else undo()
+      if (!(event.ctrlKey || event.metaKey)) return
+      const key = event.key.toLowerCase()
+      if (key === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) redo()
+        else undo()
+        return
+      }
+      if (key === 'm') {
+        event.preventDefault()
+        toggleWidth()
+        return
+      }
+      if (key === '/') {
+        event.preventDefault()
+        setShortcutsOpen(open => !open)
+        return
+      }
+      if (event.shiftKey && key === 'f') {
+        event.preventDefault()
+        setBandOptionsOpen(open => !open)
+        return
+      }
+      // Ctrl+flèches, comme les quatre flèches du cadre — mais seulement hors
+      // d'un champ où elles ont déjà un sens : dans un texte, Ctrl+←/→ saute
+      // d'un mot, et voler cette touche pour changer de carte casserait la
+      // frappe en plein milieu d'une phrase.
+      if (isTypingTarget(event.target)) return
+      const side = ARROW_SIDE[event.key]
+      if (side !== undefined) {
+        event.preventDefault()
+        activateEdge(side)
+      }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
@@ -398,6 +472,10 @@ export function DescriptionDialog({
         if (next) return
         if (confirmingDelete) {
           setConfirmingDelete(false)
+          return
+        }
+        if (createPrompt !== null) {
+          setCreatePrompt(null)
           return
         }
         close()
@@ -470,10 +548,10 @@ export function DescriptionDialog({
             outline: 'none',
           }}
         >
-          <NavArrow side="top" target={prevSibling} create={onCreate?.top} onNavigate={onNavigate && navigate} />
-          <NavArrow side="bottom" target={nextSibling} create={onCreate?.bottom} onNavigate={onNavigate && navigate} />
-          <NavArrow side="left" target={parentTarget} create={onCreate?.left} onNavigate={onNavigate && navigate} />
-          <NavArrow side="right" target={childTarget} create={onCreate?.right} onNavigate={onNavigate && navigate} />
+          <NavArrow side="top" target={prevSibling} create={onCreate?.top} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} />
+          <NavArrow side="bottom" target={nextSibling} create={onCreate?.bottom} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} />
+          <NavArrow side="left" target={parentTarget} create={onCreate?.left} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} />
+          <NavArrow side="right" target={childTarget} create={onCreate?.right} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} />
 
           {/* The two chrome controls of the top-right corner, in ONE
               absolutely-positioned row: the width toggle and the cross. The row
@@ -602,6 +680,22 @@ export function DescriptionDialog({
                 onError={onError}
                 autoFocusField={!autoFocusTitle}
                 hiddenFamilies={hiddenFamilies}
+                dialogMenuActions={{
+                  // La même confirmation que le bouton du pied : une
+                  // suppression totale n'est jamais à un seul clic droit
+                  // malencontreux de distance.
+                  onDeleteDescription: () => setConfirmingDelete(true),
+                  onOpenBandOptions: () => setBandOptionsOpen(open => !open),
+                  narrow,
+                  onToggleNarrow: toggleWidth,
+                  shortcutsOpen,
+                  onToggleShortcuts: () => setShortcutsOpen(open => !open),
+                  canUndo,
+                  canRedo,
+                  onUndo: undo,
+                  onRedo: redo,
+                  onClose: close,
+                }}
               />
             </div>
           </div>
@@ -718,6 +812,17 @@ export function DescriptionDialog({
               }
             />
           )}
+          {createPrompt !== null && onCreate?.[createPrompt] !== undefined && (
+            <CreatePromptOverlay
+              side={createPrompt}
+              colors={onCreate[createPrompt]?.colors}
+              onCreate={title => {
+                onCreate[createPrompt]?.onSelect(title)
+                setCreatePrompt(null)
+              }}
+              onCancel={() => setCreatePrompt(null)}
+            />
+          )}
           {bandOptionsOpen && (
             <BandOptionsOverlay
               hidden={hiddenFamilies}
@@ -744,6 +849,14 @@ const NAV_ICON: Record<NavSide, typeof ArrowUp> = {
   bottom: ArrowDown,
   left: ArrowLeft,
   right: ArrowRight,
+}
+
+/** `Ctrl + <flèche>` names the same edge its arrow button sits on. */
+const ARROW_SIDE: Record<string, NavSide> = {
+  ArrowUp: 'top',
+  ArrowDown: 'bottom',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
 }
 
 /**
@@ -836,11 +949,14 @@ function NavArrow({
   target,
   create,
   onNavigate,
+  onOpenCreatePrompt,
 }: {
   side: NavSide
   target?: DescriptionNavTarget
   create?: DescriptionCreateTarget
   onNavigate?: (id: string) => void
+  /** Opens the title prompt instead of creating blind — see `createPrompt` on the dialog. */
+  onOpenCreatePrompt: (side: NavSide) => void
 }) {
   const Icon = NAV_ICON[side]
 
@@ -877,7 +993,7 @@ function NavArrow({
         side={side}
         colors={create.colors}
         ariaLabel={NAV_CREATE_LABEL[side]}
-        onActivate={create.onSelect}
+        onActivate={() => onOpenCreatePrompt(side)}
         tip={<span style={NAV_TIP_LABEL}>{NAV_CREATE_LABEL[side]}</span>}
       >
         <Plus size={16} />
@@ -1013,11 +1129,25 @@ function ShortcutsPanel({
       </span>
       {scope === 'title' && canRename && <Shortcut keys="Entrée" label="Valider le renommage" />}
       {scope === 'cell' && <Shortcut keys="Entrée" label="Ajouter une ligne au tableau" />}
-      {scope === 'block' && <Shortcut keys="Entrée" label="Nouveau bloc" />}
-      {scope === 'block' && <Shortcut keys="Maj + Entrée" label="Retour à la ligne" />}
+      {/* Entrée seule n'ajoute PAS de bloc — c'est Ctrl/Cmd+Entrée, la même
+          touche que dans une cellule d'un traitement de texte pour valider un
+          paragraphe sans le fermer ; Entrée seule garde son sens ordinaire
+          (retour à la ligne). */}
+      {scope === 'block' && <Shortcut keys="Ctrl/Cmd + Entrée" label="Nouveau bloc" />}
+      {scope === 'block' && <Shortcut keys="Tab / Maj + Tab" label="Type de bloc suivant / précédent" />}
+      {scope === 'block' && <Shortcut keys="Alt + ↑ / ↓" label="Déplacer le bloc" />}
+      {scope === 'block' && <Shortcut keys="Alt + D" label="Dupliquer le bloc" />}
+      {scope === 'block' && <Shortcut keys="Alt + Q" label="Marquer comme question" />}
+      {scope === 'block' && <Shortcut keys="Alt + 1…5 / 0" label="Onglet du bandeau / aucun" />}
+      {scope === 'block' && <Shortcut keys="Ctrl/Cmd + Maj + Entrée" label="Ajouter un bloc" />}
       {/* `$$` is a text-block gesture only: it does nothing in the title, and a
           table cell keeps its two dollar signs as literal text. */}
       {scope === 'block' && <Shortcut keys="$$" label="Transforme le texte en formule" />}
+      <Shortcut keys="Ctrl/Cmd + M" label="Rétrécir / élargir la modale" />
+      <Shortcut keys="Ctrl/Cmd + /" label="Afficher / masquer les raccourcis" />
+      <Shortcut keys="Ctrl/Cmd + Maj + F" label="Familles de symboles" />
+      {/* Hors d'un champ de texte seulement — Ctrl+←/→ y saute déjà d'un mot. */}
+      <Shortcut keys="Ctrl/Cmd + flèches" label="Carte parente / sous-partie / précédente / suivante" />
       <Shortcut keys="Ctrl/Cmd + Z" label="Annuler" />
       <Shortcut keys="Ctrl/Cmd + Maj + Z" label="Rétablir" />
       <Shortcut keys="Échap" label="Fermer" />
@@ -1144,6 +1274,129 @@ function ConfirmOverlay({
           }}
         >
           {actions}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The title prompt an edge's « + » opens — by click or by Ctrl+flèche, never
+ * straight into `onCreate[side].onSelect` any more (see `activateEdge`).
+ *
+ * Dressed in the SAME chip the dialog's own title wears (`titleColors`) and
+ * the header title chip below it — `colors` here is the palette the new card
+ * WILL carry, exactly what the "+" already predicted with its own border —
+ * so the prompt reads as "the card about to be born", not a bare form pasted
+ * over the description.
+ */
+function CreatePromptOverlay({
+  side,
+  colors,
+  onCreate,
+  onCancel,
+}: {
+  side: NavSide
+  colors?: TitleChipColors
+  onCreate: (title: string) => void
+  onCancel: () => void
+}) {
+  const [title, setTitle] = useState('')
+
+  function commit() {
+    const trimmed = title.trim()
+    if (trimmed === '') return
+    onCreate(trimmed)
+  }
+
+  return (
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={NAV_CREATE_LABEL[side]}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+        background: 'color-mix(in oklch, var(--popover), transparent 12%)',
+        borderRadius: 12,
+      }}
+    >
+      <div
+        style={{
+          width: 'min(420px, 100%)',
+          padding: 20,
+          borderRadius: 10,
+          border: '1px solid var(--border)',
+          background: 'var(--popover)',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
+        }}
+      >
+        <p style={{ margin: '0 0 12px', fontSize: 15, fontWeight: 600, lineHeight: 1.3 }}>{NAV_CREATE_LABEL[side]}</p>
+
+        {/* Le même chip que le titre de la modale : bordure, fond et texte de
+            la palette que la carte va porter — la carte qui va naître, montrée
+            avant d'exister. */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '9px 14px',
+            borderRadius: 9,
+            border: `2px solid ${colors?.border ?? 'var(--border)'}`,
+            background: colors?.bg ?? 'var(--muted)',
+            color: colors?.text ?? 'var(--foreground)',
+          }}
+        >
+          <span
+            aria-hidden
+            style={{ flexShrink: 0, width: 10, height: 10, borderRadius: 999, background: colors?.border ?? 'currentColor' }}
+          />
+          <input
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+            aria-label="Titre de la nouvelle carte"
+            placeholder="Titre de la carte"
+            value={title}
+            onChange={event => setTitle(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commit()
+              }
+            }}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
+              background: 'transparent',
+              color: 'inherit',
+              font: 'inherit',
+              fontSize: 17,
+              fontWeight: 650,
+              outline: 'none',
+            }}
+          />
+        </div>
+
+        <div
+          role="group"
+          aria-label="Choix possibles"
+          style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}
+        >
+          <Button variant="outline" onClick={onCancel}>
+            <X />
+            Annuler
+          </Button>
+          <Button onClick={commit} disabled={title.trim() === ''}>
+            <Plus />
+            Valider
+          </Button>
         </div>
       </div>
     </div>

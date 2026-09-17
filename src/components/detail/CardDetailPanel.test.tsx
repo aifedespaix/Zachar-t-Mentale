@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { CardDetailPanel } from './CardDetailPanel'
@@ -100,26 +100,25 @@ describe('CardDetailPanel', () => {
     expect(useCardDetailStore.getState().open).toEqual([])
   })
 
-  it('creates a child from the dialog’s "+", moves onto it and selects its title', async () => {
+  it('prompts for a title before creating a child from the dialog’s "+", then moves onto it', async () => {
     // `leaf` is level 3 with no children, so its right edge has nothing to jump
-    // to and offers a "+" instead. Clicking it must do three things at once: add
-    // the card, move the dialog onto it, and open on its title so the
-    // placeholder can be typed over immediately.
+    // to and offers a "+" instead. Clicking it opens a title prompt FIRST — the
+    // card is never created blind — and validating it must do two things at
+    // once: add the card with that title, and move the dialog onto it.
     const user = userEvent.setup()
     useCardDetailStore.getState().setEditing(leaf.id)
     render(<CardDetailPanel />)
 
     await user.click(screen.getByRole('button', { name: /nouvelle sous-partie/i }))
+    expect(useCardsStore.getState().history.present.find(c => c.parentId === leaf.id)).toBeUndefined()
+
+    await user.type(screen.getByRole('textbox', { name: /titre de la nouvelle carte/i }), 'Sous-partie fraîche')
+    await user.click(screen.getByRole('button', { name: /^valider$/i }))
 
     const created = useCardsStore.getState().history.present.find(c => c.parentId === leaf.id)
     expect(created).toBeDefined()
+    expect(created!.title).toBe('Sous-partie fraîche')
     expect(useCardDetailStore.getState().editingCardId).toBe(created!.id)
-
-    const title = screen.getByRole('textbox', { name: /titre de la carte/i }) as HTMLInputElement
-    expect(title).toHaveValue('Nouveau titre')
-    await waitFor(() => expect(title).toHaveFocus())
-    expect(title.selectionStart).toBe(0)
-    expect(title.selectionEnd).toBe('Nouveau titre'.length)
   })
 
   it('offers no editing on a locked map', () => {

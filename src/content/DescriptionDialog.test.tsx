@@ -395,7 +395,7 @@ describe('DescriptionDialog', () => {
 
     const panel = screen.getByRole('group', { name: /raccourcis clavier/i })
     expect(panel).toHaveTextContent('Nouveau bloc')
-    expect(panel).toHaveTextContent('Retour à la ligne')
+    expect(panel).toHaveTextContent('Ctrl/Cmd + Entrée')
   })
 
   it('names Entrée by where the caret is: validating a rename, not a new block', async () => {
@@ -550,7 +550,7 @@ describe('DescriptionDialog', () => {
     expect(tip).toHaveStyle({ backgroundColor: 'rgb(1, 2, 3)', borderTopColor: 'rgb(4, 5, 6)' })
   })
 
-  it('offers a "+" where there is no neighbour, explains it, and creates on click', async () => {
+  it('offers a "+" where there is no neighbour, explains it, and prompts for a title before creating', async () => {
     const user = userEvent.setup()
     const onSelect = vi.fn()
     renderDialog({ onCreate: { right: { onSelect } } })
@@ -560,7 +560,66 @@ describe('DescriptionDialog', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Nouvelle sous-partie')
 
     await user.click(plus)
+    // The click alone never creates anything blind: it only opens the prompt.
+    expect(onSelect).not.toHaveBeenCalled()
+
+    const titleField = await screen.findByRole('textbox', { name: /titre de la nouvelle carte/i })
+    await user.type(titleField, 'Un titre')
+    await user.click(screen.getByRole('button', { name: /^valider$/i }))
+
     expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith('Un titre')
+  })
+
+  it('also validates the create prompt with Entrée, and refuses a blank title', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    renderDialog({ onCreate: { right: { onSelect } } })
+
+    await user.click(screen.getByRole('button', { name: /nouvelle sous-partie/i }))
+    const titleField = await screen.findByRole('textbox', { name: /titre de la nouvelle carte/i })
+
+    expect(screen.getByRole('button', { name: /^valider$/i })).toBeDisabled()
+
+    await user.type(titleField, 'Chapitre 6{Enter}')
+    expect(onSelect).toHaveBeenCalledWith('Chapitre 6')
+    expect(screen.queryByRole('textbox', { name: /titre de la nouvelle carte/i })).not.toBeInTheDocument()
+  })
+
+  it('jumps to the parent card with Ctrl + ArrowLeft, in one step — no prompt, no confirmation', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    renderDialog({ parentTarget: { id: 'p1', title: 'Chapitre 5' }, onNavigate })
+
+    // Away from the auto-focused text field first: Ctrl+←/→ already means
+    // something THERE (jump a word), so the shortcut only fires outside one.
+    await user.click(screen.getByRole('button', { name: /raccourcis/i }))
+    await user.keyboard('{Control>}{ArrowLeft}{/Control}')
+
+    expect(onNavigate).toHaveBeenCalledWith('p1')
+  })
+
+  it('never steals Ctrl + ArrowLeft/Right from a text field, where it already moves the caret by word', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    renderDialog({ parentTarget: { id: 'p1', title: 'Chapitre 5' }, onNavigate, blocks: text('Départ') })
+
+    await user.click(screen.getByRole('textbox', { name: /texte du bloc 1/i }))
+    await user.keyboard('{Control>}{ArrowLeft}{/Control}')
+
+    expect(onNavigate).not.toHaveBeenCalled()
+  })
+
+  it('opens the create prompt with Ctrl + ArrowRight when there is no sibling to jump to — same prompt as the button', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    renderDialog({ onCreate: { right: { onSelect } } })
+
+    await user.click(screen.getByRole('button', { name: /raccourcis/i }))
+    await user.keyboard('{Control>}{ArrowRight}{/Control}')
+
+    expect(await screen.findByRole('textbox', { name: /titre de la nouvelle carte/i })).toBeInTheDocument()
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   it('shows no "+" on an edge nobody offered to create', () => {
