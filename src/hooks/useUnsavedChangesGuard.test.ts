@@ -24,7 +24,7 @@ vi.mock('../state/useSyncStore', () => ({
 import { useSyncStore } from '../state/useSyncStore'
 import { useWorkspaceStore } from '../state/useWorkspaceStore'
 
-import { useUnsavedChangesGuard } from './useUnsavedChangesGuard'
+import { CLOSE_SYNC_TIMEOUT_MS, useUnsavedChangesGuard } from './useUnsavedChangesGuard'
 
 describe('useUnsavedChangesGuard', () => {
   beforeEach(() => {
@@ -33,6 +33,13 @@ describe('useUnsavedChangesGuard', () => {
     onCloseRequested.mockClear()
     getCurrentWindowThrows = false
     useWorkspaceStore.setState({ currentFilePath: '/cours/a.json' })
+    // Le mock partagé : chaque test repart avec les DEUX méthodes, sinon un test
+    // qui n'en stubbe qu'une laisse l'autre absente pour le suivant.
+    vi.mocked(useSyncStore.getState).mockReset()
+    vi.mocked(useSyncStore.getState).mockReturnValue({
+      syncNow: vi.fn().mockResolvedValue(undefined),
+      syncOneFile: vi.fn().mockResolvedValue(undefined),
+    } as any)
   })
 
   describe('requestOpenFile', () => {
@@ -140,9 +147,15 @@ describe('useUnsavedChangesGuard', () => {
       expect(destroy).toHaveBeenCalled()
     })
 
-    it('triggers a targeted sync of the still-open file after a successful flush on close', async () => {
-      const syncOneFile = vi.fn().mockResolvedValue(undefined)
-      vi.mocked(useSyncStore.getState).mockReturnValue({ syncOneFile } as any)
+    it('runs a full sync on close when online, before closing the window', async () => {
+      const order: string[] = []
+      const syncNow = vi.fn(async () => {
+        order.push('sync')
+      })
+      vi.mocked(useSyncStore.getState).mockReturnValue({ syncNow } as any)
+      destroy.mockImplementation(async () => {
+        order.push('destroy')
+      })
       useWorkspaceStore.setState({ currentFilePath: '/cours/a.json' })
       const flush = vi.fn().mockResolvedValue(undefined)
       renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
@@ -150,20 +163,68 @@ describe('useUnsavedChangesGuard', () => {
 
       await act(async () => closeHandler({ preventDefault: vi.fn() }))
 
-      expect(syncOneFile).toHaveBeenCalledWith('/cours/a.json')
+      expect(syncNow).toHaveBeenCalledWith({ trigger: 'auto' })
+      expect(order).toEqual(['sync', 'destroy'])
     })
 
-    it('triggers no sync on close when no file was open', async () => {
-      const syncOneFile = vi.fn().mockResolvedValue(undefined)
-      vi.mocked(useSyncStore.getState).mockReturnValue({ syncOneFile } as any)
-      useWorkspaceStore.setState({ currentFilePath: null })
+    it('closes normally, without syncing, when there is no internet', async () => {
+      const syncNow = vi.fn().mockResolvedValue(undefined)
+      vi.mocked(useSyncStore.getState).mockReturnValue({ syncNow } as any)
       const flush = vi.fn().mockResolvedValue(undefined)
-      renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
+      renderHook(() => useUnsavedChangesGuard(flush, vi.fn(), { isOnline: () => false }))
       await waitFor(() => expect(onCloseRequested).toHaveBeenCalled())
 
       await act(async () => closeHandler({ preventDefault: vi.fn() }))
 
-      expect(syncOneFile).not.toHaveBeenCalled()
+      expect(syncNow).not.toHaveBeenCalled()
+      expect(destroy).toHaveBeenCalled()
+    })
+
+    it('shows the closing screen while the close-time sync is running', async () => {
+      let resolveSync: () => void = () => {}
+      const syncNow = vi.fn(
+        () =>
+          new Promise<void>(resolve => {
+            resolveSync = resolve
+          })
+      )
+      vi.mocked(useSyncStore.getState).mockReturnValue({ syncNow } as any)
+      const flush = vi.fn().mockResolvedValue(undefined)
+      const { result } = renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
+      await waitFor(() => expect(onCloseRequested).toHaveBeenCalled())
+
+      let pending: Promise<void> = Promise.resolve()
+      await act(async () => {
+        pending = closeHandler({ preventDefault: vi.fn() }) as Promise<void>
+      })
+
+      expect(result.current.closing).toBe(true)
+
+      await act(async () => {
+        resolveSync()
+        await pending
+      })
+
+      expect(result.current.closing).toBe(false)
+      expect(destroy).toHaveBeenCalled()
+    })
+
+    it('closes anyway when the close-time sync never finishes', async () => {
+      const syncNow = vi.fn(() => new Promise<void>(() => {}))
+      vi.mocked(useSyncStore.getState).mockReturnValue({ syncNow } as any)
+      const flush = vi.fn().mockResolvedValue(undefined)
+      renderHook(() => useUnsavedChangesGuard(flush, vi.fn()))
+      await waitFor(() => expect(onCloseRequested).toHaveBeenCalled())
+
+      vi.useFakeTimers()
+      await act(async () => {
+        const pending = closeHandler({ preventDefault: vi.fn() })
+        await vi.advanceTimersByTimeAsync(CLOSE_SYNC_TIMEOUT_MS)
+        await pending
+      })
+      vi.useRealTimers()
+
+      expect(destroy).toHaveBeenCalled()
     })
 
     it('prompts instead of closing when the flush fails', async () => {

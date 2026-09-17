@@ -5,6 +5,7 @@ import {
   buildDetail,
   buildSyncEvent,
   levelOf,
+  reportSyncFailure,
   reportSyncRun,
   type ReportContext,
   type ReportingClient,
@@ -299,5 +300,47 @@ describe('reportSyncRun', () => {
     expect(closeConflict).toHaveBeenCalledTimes(2)
     expect(outcome.closed).toBe(1)
     expect(outcome.failures).toEqual(['classement du conflit « file-1 » : refusé'])
+  })
+})
+
+describe('reportSyncFailure', () => {
+  it('envoie une ligne error pour un échec qui n’a produit aucun résultat', async () => {
+    const client = fakeClient()
+    const landed = await reportSyncFailure(client, {
+      username: 'eleve1',
+      role: 'eleve',
+      trigger: 'auto',
+      message: 'Serveur injoignable.',
+      detail: Object.assign(new Error('fetch failed'), { status: 0 }),
+      device: 'Windows',
+    })
+
+    expect(landed).toBe(true)
+    expect(client.createEvent).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(client.createEvent).mock.calls[0][0]
+    expect(payload).toMatchObject({
+      level: 'error',
+      trigger: 'auto',
+      summary: 'Serveur injoignable.',
+      failures: 1,
+    })
+    // L'erreur BRUTE dans `detail` : c'est la matière que le prof lit depuis
+    // l'app admin, texte SDK anglais et statut compris.
+    expect(payload.detail.errors).toEqual([{ fileId: '', message: 'Error: fetch failed (status 0)' }])
+  })
+
+  it('ne lève jamais, même quand le serveur refuse la ligne', async () => {
+    const client = fakeClient({ createEvent: vi.fn().mockRejectedValue(new Error('404')) })
+
+    await expect(
+      reportSyncFailure(client, {
+        username: 'eleve1',
+        role: 'eleve',
+        trigger: 'auto',
+        message: 'Serveur injoignable.',
+        detail: new Error('boum'),
+        device: 'Windows',
+      })
+    ).resolves.toBe(false)
   })
 })

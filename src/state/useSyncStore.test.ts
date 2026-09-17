@@ -29,6 +29,7 @@ import { loadServerSyncState, saveSyncState, serverStateOf } from '../persistenc
 import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { surveySyncFolder, sync, syncOneFile } from '../sync/syncService'
 import { logSyncEvent } from '../persistence/syncLog'
+import { createReportingClient } from '../sync/pocketBaseAdapter'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { createSyncStore, type SyncStore } from './useSyncStore'
 import { useWorkspaceStore } from './useWorkspaceStore'
@@ -188,6 +189,21 @@ describe('useSyncStore', () => {
         currentUser: { username: 'aife', role: 'prof' },
         entries: expect.any(Object),
       })
+    )
+  })
+
+  it('refreshPendingCount() leaves the file open in the canvas out of the count', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+    useWorkspaceStore.setState({ currentFilePath: '/cours/ouvert.zmap' })
+
+    await store.getState().refreshPendingCount()
+
+    expect(surveySyncFolder).toHaveBeenCalledWith(
+      expect.objectContaining({ openFilePath: '/cours/ouvert.zmap' })
     )
   })
 
@@ -390,7 +406,7 @@ describe('useSyncStore', () => {
     expect(store.getState().status).toBe('idle')
   })
 
-  it('syncOneFile() never throws to the caller when the run fails — only the journal knows', async () => {
+  it('syncOneFile() never throws to the caller, but shows the failure and reports it', async () => {
     const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
     vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
     vi.mocked(syncOneFile).mockRejectedValue(new Error('réseau coupé'))
@@ -399,7 +415,16 @@ describe('useSyncStore', () => {
     await store.getState().login('aife', 'secret')
 
     await expect(store.getState().syncOneFile('/cours/a.zmap')).resolves.toBeUndefined()
-    expect(store.getState().error).toBeNull()
+    // Brièvement : la bannière du bandeau latéral, éteinte par son minuteur.
+    expect(store.getState().error).toBe('Une erreur est survenue. Réessayez plus tard.')
+    // Le texte brut pour la modale « Détails ».
+    expect(store.getState().errorDetail).toContain('Error: réseau coupé')
+    const client = vi.mocked(createReportingClient).mock.results[0]?.value as unknown as {
+      createEvent: ReturnType<typeof vi.fn>
+    }
+    expect(client.createEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ level: 'error', trigger: 'auto' })
+    )
   })
 
   it('syncNow() logs the raw failure, status included, when the server is unreachable', async () => {
@@ -419,6 +444,43 @@ describe('useSyncStore', () => {
       expect.stringContaining('Serveur injoignable'),
       failure
     )
+  })
+
+  it('syncNow() sends an unreachable-server failure to the server, where the teacher can read it', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    const failure = Object.assign(new Error('Failed to fetch'), { name: 'ClientResponseError', status: 0 })
+    vi.mocked(sync).mockRejectedValue(failure)
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+
+    await store.getState().syncNow()
+
+    const client = vi.mocked(createReportingClient).mock.results[0]?.value as unknown as {
+      createEvent: ReturnType<typeof vi.fn>
+    }
+    expect(client.createEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: 'error',
+        trigger: 'manual',
+        summary: expect.stringContaining('Serveur injoignable'),
+      })
+    )
+  })
+
+  it('syncNow() keeps the raw failure for the details modal', async () => {
+    const authWithPassword = vi.fn().mockResolvedValue({ record: { username: 'aife', role: 'prof' } })
+    vi.mocked(createPocketBaseClient).mockReturnValue(fakePocketBase(authWithPassword) as any)
+    const failure = Object.assign(new Error('Failed to fetch'), { name: 'ClientResponseError', status: 0 })
+    vi.mocked(sync).mockRejectedValue(failure)
+    await store.getState().setServerUrl('https://pi.local')
+    await store.getState().setSyncFolderPath('/cours')
+    await store.getState().login('aife', 'secret')
+
+    await store.getState().syncNow()
+
+    expect(store.getState().errorDetail).toContain('ClientResponseError: Failed to fetch (status 0)')
   })
 
   it('syncNow() logs the per-file failures of an otherwise successful batch', async () => {

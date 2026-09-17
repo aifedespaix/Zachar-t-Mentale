@@ -417,10 +417,18 @@ export async function surveySyncFolder(params: {
   syncFolderPath: string
   currentUser: SyncUser
   entries: Record<string, SyncStateEntry>
+  /**
+   * Le fichier ouvert dans le canevas. Le sync ne le pousse ni ne le réécrit
+   * (voir `sync()`, gardes sur `openFilePath`), donc le compter « à envoyer »
+   * allumerait un badge qu'aucune synchronisation ne peut éteindre tant qu'on
+   * édite. Il partira à la fermeture, via `syncOneFile`.
+   */
+  openFilePath?: string
 }): Promise<SyncSurvey> {
   const tree = await scanFolder(params.syncFolderPath)
   const survey: SyncSurvey = { pending: [], localOnly: [] }
   for (const path of flattenMindMapPaths(tree)) {
+    if (isSameFilePath(path, params.openFilePath ?? '')) continue
     // `loadMindMapMeta` throws on anything that is not a mind map, and answers
     // `null` for a map that has simply never been published: the two cases this
     // survey has to tell apart.

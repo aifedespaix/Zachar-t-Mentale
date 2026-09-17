@@ -82,6 +82,7 @@ function resetSyncStore() {
     currentUser: null,
     status: 'idle',
     error: null,
+    errorDetail: null,
     lastResult: null,
     lastSuccessAt: null,
     pendingCount: null,
@@ -415,6 +416,55 @@ describe('FileSidebar', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('résume un lot en échec en fichiers synchronisés / non synchronisés, avec une modale de détails', async () => {
+    const user = userEvent.setup()
+    useSyncStore.setState({
+      lastResult: {
+        pushed: 2,
+        pulled: 1,
+        errors: [{ fileId: 'f1', message: 'réseau coupé' }],
+        cancelled: false,
+        conflicts: [],
+        transferred: [],
+      },
+    })
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    expect(screen.getByText('3 fichiers synchronisés, 1 non synchronisé')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Détails' }))
+
+    expect(await screen.findByTestId('sync-detail-dialog')).toBeInTheDocument()
+    expect(screen.getByText('f1 : réseau coupé')).toBeInTheDocument()
+  })
+
+  it('montre le détail brut d’un échec levé dans la modale', async () => {
+    const user = userEvent.setup()
+    useSyncStore.setState({
+      error: 'Serveur injoignable.',
+      errorDetail: 'ClientResponseError: Failed to fetch (status 0)',
+    })
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    await user.click(screen.getByRole('button', { name: 'Détails' }))
+
+    expect(await screen.findByTestId('sync-detail-dialog')).toBeInTheDocument()
+    expect(screen.getByText('ClientResponseError: Failed to fetch (status 0)')).toBeInTheDocument()
+  })
+
+  it('n’offre pas de détails quand le lot n’a rien à détailler', async () => {
+    useSyncStore.setState({
+      lastResult: { pushed: 2, pulled: 1, errors: [], cancelled: false, conflicts: [], transferred: [] },
+    })
+    render(<FileSidebar onOpenFile={() => {}} />)
+    await screen.findByText('Cartes mentales')
+
+    expect(screen.getByText(/2 envoyé\(s\), 1 reçu\(s\)/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Détails' })).not.toBeInTheDocument()
+  })
+
   describe('auto-hide of sync messages', () => {
     afterEach(() => {
       vi.useRealTimers()
@@ -545,6 +595,27 @@ describe('FileSidebar', () => {
     const tooltip = await screen.findByRole('tooltip')
     expect(tooltip).toHaveTextContent('12 cartes à publier')
     expect(tooltip).toHaveTextContent('2 cartes à envoyer')
+  })
+
+  it('recomputes the pending count when the file open in the canvas changes', async () => {
+    // Restored in `finally`: this spy must not survive into the next test, which
+    // relies on the real recompute to walk the folder.
+    const real = useSyncStore.getState().refreshPendingCount
+    const refreshPendingCount = vi.fn().mockResolvedValue(undefined)
+    useSyncStore.setState({ refreshPendingCount })
+    try {
+      render(<FileSidebar onOpenFile={() => {}} />)
+      await screen.findByText('Cartes mentales')
+      refreshPendingCount.mockClear()
+
+      await act(async () => {
+        useWorkspaceStore.setState({ currentFilePath: '/cours/a.zmap' })
+      })
+
+      expect(refreshPendingCount).toHaveBeenCalled()
+    } finally {
+      act(() => useSyncStore.setState({ refreshPendingCount: real }))
+    }
   })
 
   it('badges the sync button with what is waiting to be sent', async () => {

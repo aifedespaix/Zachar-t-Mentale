@@ -35,3 +35,33 @@ export function syncResultLabel(result: SyncResult): string {
   // what keeps them from reading as a complete result.
   return `${parts.join(', ')}${result.cancelled ? ' (interrompue)' : ''}`
 }
+
+/**
+ * Le résumé que l'utilisateur lit quand un lot a des ratés : deux nombres, pas
+ * la liste. « X fichiers synchronisés, Y non synchronisés » répond à la seule
+ * question qu'on se pose devant un bandeau d'erreur — est-ce que quelque chose
+ * est passé ? — et le détail par fichier vit dans la modale, pas dans une
+ * colonne de 240 px.
+ *
+ * `synchronisés` = ce qui a effectivement bougé (envoyé + reçu) ; `non
+ * synchronisés` = les échecs par fichier. Un conflit n'entre dans aucun des
+ * deux : il est déjà tranché, donc le fichier, lui, est passé.
+ */
+export function syncOutcomeSummary(result: SyncResult): string {
+  const synced = result.pushed + result.pulled
+  const failed = result.errors.length
+  return `${synced} fichier${synced > 1 ? 's' : ''} synchronisé${synced > 1 ? 's' : ''}, ${failed} non synchronisé${failed > 1 ? 's' : ''}`
+}
+
+/**
+ * Le détail d'une exécution, une ligne par fait — la matière de la modale
+ * ouverte par « Détails ». L'ordre suit la gravité : conflits (tranchés mais
+ * notables), erreurs, puis remarques.
+ */
+export function syncResultDetailLines(result: SyncResult): string[] {
+  return [
+    ...result.conflicts.map(conflict => `conflit résolu : ${conflict.path}`),
+    ...result.errors.map(error => `${error.fileId} : ${error.message}`),
+    ...(result.notices ?? []).map(notice => notice.message),
+  ]
+}

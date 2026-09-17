@@ -397,6 +397,39 @@ describe('surveySyncFolder', () => {
       surveySyncFolder({ syncFolderPath: '/cours', currentUser: AIFE_USER, entries: {} })
     ).rejects.toThrow('dossier disparu')
   })
+
+  it('leaves the file open in the canvas out of the count — a sync will not push it either', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      { type: 'mindmap', name: 'ouvert.zmap', path: '/cours/ouvert.zmap' },
+      { type: 'mindmap', name: 'autre.zmap', path: '/cours/autre.zmap' },
+    ])
+    vi.mocked(loadMindMapMeta).mockImplementation(async path =>
+      path === '/cours/ouvert.zmap' ? { ...AIFE, id: 'ouvert' } : { ...AIFE, id: 'autre' }
+    )
+
+    const survey = await surveySyncFolder({
+      syncFolderPath: '/cours',
+      currentUser: AIFE_USER,
+      entries: {},
+      openFilePath: '/cours/ouvert.zmap',
+    })
+
+    expect(survey.pending).toEqual(['/cours/autre.zmap'])
+  })
+
+  it('leaves the file open out of the "never published" count too', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'mindmap', name: 'neuve.zmap', path: '/cours/neuve.zmap' }])
+    vi.mocked(loadMindMapMeta).mockResolvedValue(null)
+
+    const survey = await surveySyncFolder({
+      syncFolderPath: '/cours',
+      currentUser: AIFE_USER,
+      entries: {},
+      openFilePath: '/cours/neuve.zmap',
+    })
+
+    expect(survey.localOnly).toEqual([])
+  })
 })
 
 describe('sync — push', () => {

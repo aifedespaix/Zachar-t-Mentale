@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { syncResultLabel } from './syncResultLabel'
+import { syncResultDetailLines, syncOutcomeSummary, syncResultLabel } from './syncResultLabel'
 import type { SyncResult } from './syncService'
 
 /** A finished run, with only what a test cares about spelled out. */
@@ -72,5 +72,35 @@ describe('syncResultLabel — suppressions', () => {
 
   it('ne dit rien quand rien n’a été supprimé', () => {
     expect(syncResultLabel(result())).toBe('0 envoyé(s), 0 reçu(s)')
+  })
+})
+
+describe('syncOutcomeSummary', () => {
+  it('résume le lot en fichiers synchronisés et non synchronisés', () => {
+    const errors = [{ fileId: 'f1', message: 'réseau coupé' }]
+    expect(syncOutcomeSummary(result({ pushed: 2, pulled: 1, errors }))).toBe(
+      '3 fichiers synchronisés, 1 non synchronisé'
+    )
+  })
+
+  it('accorde le singulier quand un seul fichier est passé', () => {
+    expect(syncOutcomeSummary(result({ pushed: 1 }))).toBe('1 fichier synchronisé, 0 non synchronisé')
+  })
+})
+
+describe('syncResultDetailLines', () => {
+  it('liste les conflits, les erreurs et les remarques, dans cet ordre', () => {
+    const errors = [{ fileId: 'f1', message: 'réseau coupé' }]
+    const conflicts = [{ fileId: 'f2', path: 'a.zmap', localModified: 'x', remoteUpdated: 'y' }]
+    const notices = [{ fileId: 'f3', message: 'déplacé des deux côtés' }]
+    expect(syncResultDetailLines(result({ errors, conflicts, notices }))).toEqual([
+      'conflit résolu : a.zmap',
+      'f1 : réseau coupé',
+      'déplacé des deux côtés',
+    ])
+  })
+
+  it('ne rend aucune ligne pour un lot sans rien à détailler', () => {
+    expect(syncResultDetailLines(result({ pushed: 2 }))).toEqual([])
   })
 })

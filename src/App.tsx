@@ -32,6 +32,7 @@ import { contentOf } from './content/blocks'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { AppToolbar } from './components/toolbar/AppToolbar'
 import { BootScreen } from './components/BootScreen'
+import { ClosingSyncScreen } from './components/ClosingSyncScreen'
 import { AnimatedLogo } from './components/AnimatedLogo'
 import { RecentFilesList } from './components/RecentFilesList'
 import { collectMindMapPaths } from './persistence/fileTree'
@@ -129,6 +130,8 @@ function App() {
     () => setSaveFailed(true)
   )
   const syncResult = useSyncStore(s => s.lastResult)
+  /** L'avancement du run de fermeture, montré par l'écran de chargement. */
+  const syncProgress = useSyncStore(s => s.progress)
   /**
    * The ONE follow-up a sync's relocations get.
    *
@@ -181,7 +184,7 @@ function App() {
       if (folder !== null) await refreshFolder(folder)
     })()
   }, [syncResult, flush, setCurrentFile, refreshFolder])
-  const { requestOpenFile, prompt, dismissPrompt } = useUnsavedChangesGuard(flush, setCurrentFile)
+  const { requestOpenFile, prompt, dismissPrompt, closing } = useUnsavedChangesGuard(flush, setCurrentFile)
   /**
    * An image dropped on a card is appended to that card's definition.
    *
@@ -402,6 +405,9 @@ function App() {
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
       {showBootScreen && <BootScreen />}
+      {/* La synchronisation de fermeture couvre tout : on ne veut pas qu'un clic
+          atterrisse dans un canevas pendant qu'il est en train de partir. */}
+      {closing && <ClosingSyncScreen progress={syncProgress} />}
       {/*
         The file tree is gone for the duration of a quiz. Leaving it there let
         the user switch mind maps mid-quiz — which silently answers nothing,

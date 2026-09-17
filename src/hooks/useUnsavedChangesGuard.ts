@@ -1,7 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { describeError, useWorkspaceStore } from '../state/useWorkspaceStore'
 import { useSyncStore } from '../state/useSyncStore'
+
+/**
+ * Plafond de la synchronisation de fermeture. Une fenêtre qui refuse de se
+ * fermer parce que le réseau traîne est pire qu'une synchro manquée : au-delà,
+ * on ferme quand même, et le prochain lancement rattrapera.
+ */
+export const CLOSE_SYNC_TIMEOUT_MS = 5000
+
+/** La question posée au moment de fermer, isolée pour que les tests la pilotent. */
+function defaultIsOnline(): boolean {
+  return navigator.onLine
+}
 
 export interface UnsavedChangesPrompt {
   message: string
@@ -27,15 +39,35 @@ export interface UnsavedChangesPrompt {
  * a prompt, since that is the one case where continuing really would lose
  * the change.
  */
+export interface UnsavedChangesGuardOptions {
+  /**
+   * Répond « y a-t-il un réseau ? ». La synchro de fermeture ne part que si
+   * oui ; sinon on ferme normalement, comme si de rien n'était.
+   */
+  isOnline?: () => boolean
+}
+
 export function useUnsavedChangesGuard(
   flush: () => Promise<void>,
-  setCurrentFile: (path: string | null) => void
+  setCurrentFile: (path: string | null) => void,
+  options: UnsavedChangesGuardOptions = {}
 ): {
   requestOpenFile: (path: string) => void
   prompt: UnsavedChangesPrompt | null
   dismissPrompt: () => void
+  /** Vrai pendant la synchro de fermeture : l'écran de chargement se montre. */
+  closing: boolean
 } {
   const [prompt, setPrompt] = useState<UnsavedChangesPrompt | null>(null)
+  const [closing, setClosing] = useState(false)
+  // Le « en ligne » du dernier rendu, lu au moment de fermer. Une ref plutôt
+  // qu'une dépendance d'effet : repasser par onCloseRequested à chaque rendu
+  // reposerait un écouteur pour rien.
+  const isOnline = options.isOnline ?? defaultIsOnline
+  const isOnlineRef = useRef(isOnline)
+  useEffect(() => {
+    isOnlineRef.current = isOnline
+  }, [isOnline])
 
   const requestOpenFile = useCallback(
     (path: string) => {
@@ -99,9 +131,6 @@ export function useUnsavedChangesGuard(
       win
         .onCloseRequested(async event => {
           event.preventDefault()
-          // Lu AVANT `flush()` : c'est le fichier encore ouvert au moment de
-          // fermer qu'il faut synchroniser — voir `requestOpenFile`.
-          const closingPath = useWorkspaceStore.getState().currentFilePath
           try {
             await flush()
           } catch (error) {
@@ -120,8 +149,33 @@ export function useUnsavedChangesGuard(
             })
             return
           }
-          if (closingPath !== null) void useSyncStore.getState().syncOneFile(closingPath)
-          await closeNow()
+          // Pas de réseau : on ferme normalement, la synchro attendra un
+          // prochain lancement — c'est la consigne, et insister ne ferait que
+          // retarder une fermeture pour un run qui échouerait de toute façon.
+          if (!isOnlineRef.current()) {
+            await closeNow()
+            return
+          }
+          // Un réseau, donc : on synchronise TOUT le dossier avant de partir —
+          // dernière occasion de pousser quoi que ce soit. L'écran de chargement
+          // couvre l'attente, plafonnée pour ne jamais bloquer la fermeture.
+          setClosing(true)
+          let timer: ReturnType<typeof setTimeout> | undefined
+          try {
+            await Promise.race([
+              useSyncStore.getState().syncNow({ trigger: 'auto' }),
+              new Promise<void>(resolve => {
+                timer = setTimeout(resolve, CLOSE_SYNC_TIMEOUT_MS)
+              }),
+            ])
+          } finally {
+            if (timer !== undefined) clearTimeout(timer)
+            // L'écran reste jusqu'au dernier instant : le retirer avant
+            // `destroy` ferait réapparaître l'application une fraction de
+            // seconde, juste avant qu'elle disparaisse.
+            await closeNow()
+            setClosing(false)
+          }
         })
         .then(fn => {
           if (cancelled) fn()
@@ -138,5 +192,5 @@ export function useUnsavedChangesGuard(
     }
   }, [flush])
 
-  return { requestOpenFile, prompt, dismissPrompt: () => setPrompt(null) }
+  return { requestOpenFile, prompt, dismissPrompt: () => setPrompt(null), closing }
 }

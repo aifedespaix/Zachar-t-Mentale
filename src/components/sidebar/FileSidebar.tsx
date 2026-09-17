@@ -18,7 +18,8 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } 
 import { CommandButton } from '../commands/CommandButton'
 import { useWorkspaceStore, describeError } from '../../state/useWorkspaceStore'
 import { useSyncStore } from '../../state/useSyncStore'
-import { syncResultLabel } from '../../sync/syncResultLabel'
+import { syncOutcomeSummary, syncResultDetailLines, syncResultLabel } from '../../sync/syncResultLabel'
+import { SyncDetailDialog } from '../SyncDetailDialog'
 import { formatRelativeTime } from '../../utils/relativeTime'
 import { FileTreeRow } from './FileTreeRow'
 import { TreeDragGhost } from './TreeDragGhost'
@@ -103,12 +104,17 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
   const removeRootFolder = useWorkspaceStore(s => s.removeRootFolder)
   const refreshAll = useWorkspaceStore(s => s.refreshAll)
   const workspaceError = useWorkspaceStore(s => s.workspaceError)
+  // Le fichier ouvert : le compteur « à envoyer » l'exclut (voir
+  // `surveySyncFolder`), donc le badge doit se recalculer quand on l'ouvre ou
+  // le referme, sans quoi il resterait figé sur l'état précédent.
+  const currentFilePath = useWorkspaceStore(s => s.currentFilePath)
   const refreshFolder = useWorkspaceStore(s => s.refreshFolder)
   const expandPaths = useWorkspaceStore(s => s.expandPaths)
   const collapseAllFolders = useWorkspaceStore(s => s.collapseAllFolders)
   const setWorkspaceError = useWorkspaceStore(s => s.setWorkspaceError)
   const syncStatus = useSyncStore(s => s.status)
   const syncError = useSyncStore(s => s.error)
+  const syncErrorDetail = useSyncStore(s => s.errorDetail)
   const lastResult = useSyncStore(s => s.lastResult)
   const syncNow = useSyncStore(s => s.syncNow)
   const syncProgress = useSyncStore(s => s.progress)
@@ -161,6 +167,8 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
    * run, and closing the sidebar's copy must not blank it there.
    */
   const [syncFeedbackDismissed, setSyncFeedbackDismissed] = useState(false)
+  /** Ouvre la modale des détails de la dernière exécution. */
+  const [syncDetailsOpen, setSyncDetailsOpen] = useState(false)
   /** Hovering the sync banner holds off the auto-hide timer below. */
   const [syncFeedbackHovered, setSyncFeedbackHovered] = useState(false)
   const handleRef = useRef<HTMLDivElement>(null)
@@ -212,7 +220,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
     // one header per .zmap, so it is deliberately NOT run on every render —
     // publishing refreshes it itself, from the hook that changed the file.
     void refreshPendingCount()
-  }, [refreshPendingCount, syncFolderPath, syncUserName, rootFolders, lastResult])
+  }, [refreshPendingCount, syncFolderPath, syncUserName, rootFolders, lastResult, currentFilePath])
 
   // Writing on every pointer move would hammer `localStorage` a hundred times
   // per drag for a value only the NEXT launch reads, so the width is persisted
@@ -401,19 +409,36 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
     />
   )
 
-  // The per-file failures are far too long to list in a 240 px column; they stay
-  // readable in the tooltip, and in full in Réglages → Synchronisation.
-  // Both lists are far too long for a 240 px column, and both are detailed in
-  // Réglages → Synchronisation: the tooltip is the summary's memory aid.
-  const syncResultDetail =
-    showSyncResult && (lastResult.conflicts.length > 0 || lastResult.errors.length > 0)
-      ? [
-          // Un conflit est déjà TRANCHÉ à ce stade (voir syncService.ts) : ce
-          // n'est plus une décision qui attend, juste ce qui s'est passé.
-          ...lastResult.conflicts.map(conflict => `conflit résolu : ${conflict.path}`),
-          ...lastResult.errors.map(error => `${error.fileId} : ${error.message}`),
-        ].join('\n')
-      : undefined
+  // Le résumé de la dernière exécution, indépendant du fait que la bannière ait
+  // été masquée : la modale « Détails » peut lui survivre. Un lot avec des ratés
+  // se lit en deux nombres — « X fichiers synchronisés, Y non synchronisés » —
+  // le détail par fichier vivant dans la modale, pas dans une colonne de 240 px.
+  const syncSummary =
+    syncError !== null
+      ? syncError
+      : lastResult === null
+        ? ''
+        : lastResult.errors.length > 0
+          ? syncOutcomeSummary(lastResult)
+          : syncResultLabel(lastResult)
+  // Une erreur levée n'a pas de résultat à détailler : c'est son texte BRUT qui
+  // part dans la modale.
+  const syncDetailLines =
+    syncError !== null
+      ? syncErrorDetail === null
+        ? []
+        : [syncErrorDetail]
+      : lastResult === null
+        ? []
+        : syncResultDetailLines(lastResult)
+
+  const syncDetailsDialog = syncDetailsOpen && (
+    <SyncDetailDialog
+      summary={syncSummary}
+      lines={syncDetailLines}
+      onClose={() => setSyncDetailsOpen(false)}
+    />
+  )
 
   /**
    * What the sync button's tooltip adds to its name: the two facts the footer
@@ -668,6 +693,15 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
                     onMouseLeave={() => setSyncFeedbackHovered(false)}
                   >
                     <span style={{ flex: 1 }}>{syncError}</span>
+                    {syncDetailLines.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        onClick={() => setSyncDetailsOpen(true)}
+                      >
+                        Détails
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -687,11 +721,19 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
                         : 'status-banner status-banner--info'
                     }
                     style={{ margin: 0 }}
-                    title={syncResultDetail}
                     onMouseEnter={() => setSyncFeedbackHovered(true)}
                     onMouseLeave={() => setSyncFeedbackHovered(false)}
                   >
-                    <span style={{ flex: 1 }}>{syncResultLabel(lastResult)}</span>
+                    <span style={{ flex: 1 }}>{syncSummary}</span>
+                    {syncDetailLines.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        onClick={() => setSyncDetailsOpen(true)}
+                      >
+                        Détails
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -839,6 +881,7 @@ export function FileSidebar({ onOpenFile }: FileSidebarProps) {
             />
             </Hint>
             {newFolderDialog}
+            {syncDetailsDialog}
             {folderCreation.dialog}
               </>
             )}

@@ -8,7 +8,7 @@ import { createPocketBaseClient } from '../persistence/pocketbaseClient'
 import { loadSyncStatus, saveSyncStatus } from '../persistence/syncStatus'
 import { logSyncEvent } from '../persistence/syncLog'
 import { createReportingClient, createSyncClient } from '../sync/pocketBaseAdapter'
-import { reportSyncRun } from '../sync/syncReporting'
+import { describeSyncFailure, reportSyncFailure, reportSyncRun } from '../sync/syncReporting'
 import { surveySyncFolder, sync, syncOneFile as syncOneFileTargeted, type SyncResult } from '../sync/syncService'
 import { syncResultLabel } from '../sync/syncResultLabel'
 import { useWorkspaceStore } from './useWorkspaceStore'
@@ -44,6 +44,12 @@ interface SyncStoreState {
   currentUser: SyncUser | null
   status: 'idle' | 'connecting' | 'syncing'
   error: string | null
+  /**
+   * Le texte BRUT de l'erreur qui a produit `error` — nom, message et statut
+   * du SDK. La phrase française est pour l'utilisateur, ceci est pour la modale
+   * « Détails » et pour le rapport au serveur.
+   */
+  errorDetail: string | null
   lastResult: SyncResult | null
   /** When the last sync succeeded (ISO), remembered across runs — « il y a 12 min ». */
   lastSuccessAt: string | null
@@ -179,9 +185,41 @@ export function createSyncStore(): SyncStore {
      * not put the same banner back every fifteen minutes; the journal keeps
      * every occurrence either way.
      */
-    function reportFailure(message: string, trigger: SyncTrigger): void {
+    function reportFailure(message: string, trigger: SyncTrigger, detail?: unknown): void {
       if (trigger === 'auto' && get().error === message) return
-      set({ error: message })
+      set({ error: message, errorDetail: detail === undefined ? null : describeSyncFailure(detail) })
+    }
+
+    /**
+     * Porte un échec SANS résultat jusqu'au serveur, pour que le prof le lise
+     * depuis l'app admin. Ces échecs (réseau coupé, serveur injoignable) ne
+     * passent jamais par reportSyncRun, faute de résultat à décrire : sans ce
+     * chemin, ils restaient dans sync-debug.log, sur la machine de l'élève.
+     *
+     * Ne lève jamais : le rapport est un effet de bord, et une synchronisation
+     * déjà en échec ne doit pas en plus planter pour une ligne de journal.
+     */
+    async function reportServerFailure(
+      serverUrl: string,
+      trigger: SyncTrigger,
+      message: string,
+      detail: unknown
+    ): Promise<void> {
+      const user = get().currentUser
+      if (user === null) return
+      try {
+        const landed = await reportSyncFailure(createReportingClient(clientFor(serverUrl)), {
+          username: user.username,
+          role: user.role,
+          trigger,
+          message,
+          detail,
+          device: describeDevice(navigator.userAgent),
+        })
+        if (!landed) await logSyncEvent('debug', 'échec non rapporté au serveur')
+      } catch (error) {
+        await logSyncEvent('debug', 'compte rendu d’échec impossible', error)
+      }
     }
 
     function userFromClient(pb: PocketBase | null | undefined): SyncUser | null {
@@ -197,6 +235,7 @@ export function createSyncStore(): SyncStore {
       currentUser: null,
       status: 'idle',
       error: null,
+      errorDetail: null,
       lastResult: null,
       lastSuccessAt: null,
       pendingCount: null,
@@ -297,6 +336,9 @@ export function createSyncStore(): SyncStore {
             syncFolderPath,
             currentUser,
             entries: serverStateOf(state, get().serverUrl, syncFolderPath).entries,
+            // Le fichier ouvert n'est pas « à envoyer » : le sync ne le pousse
+            // pas et le badge ne doit donc pas l'annoncer (voir surveySyncFolder).
+            openFilePath: useWorkspaceStore.getState().currentFilePath ?? undefined,
           })
           set({
             pendingCount: survey.pending.length,
@@ -384,7 +426,11 @@ export function createSyncStore(): SyncStore {
         // A manual attempt starts from a clean slate — it is fresh news. A
         // BACKGROUND one leaves whatever is on screen alone: clearing it would
         // make the same failure flicker back every tick.
-        set({ status: 'syncing', progress: null, ...(trigger === 'manual' ? { error: null } : {}) })
+        set({
+          status: 'syncing',
+          progress: null,
+          ...(trigger === 'manual' ? { error: null, errorDetail: null } : {}),
+        })
         // Written BEFORE the network work: if the app dies mid-sync, the log
         // still shows a run was under way.
         await logSyncEvent(
@@ -489,8 +535,11 @@ export function createSyncStore(): SyncStore {
         } catch (error) {
           const message = describeSyncStoreError(error)
           await logSyncEvent('error', `synchronisation échouée : ${message}`, error)
-          reportFailure(message, trigger)
+          reportFailure(message, trigger, error)
           set({ status: 'idle', progress: null })
+          // Le serveur n'a rien reçu de ce run (il a échoué avant tout résultat) :
+          // c'est précisément le cas que le rapport de run ne couvre pas.
+          await reportServerFailure(serverUrl, trigger, message, error)
         } finally {
           // Cleared only if it is still OURS: a run that finished must not
           // disarm the controller of the one that replaced it.
@@ -548,9 +597,14 @@ export function createSyncStore(): SyncStore {
           }
           await get().refreshPendingCount()
         } catch (error) {
-          // Jamais de bannière pour ce chemin : voir le commentaire en tête de
-          // fonction. Le journal garde la trace pour qui la cherche.
-          await logSyncEvent('error', `synchronisation ciblée échouée : ${describeSyncStoreError(error)}`, error)
+          // La fermeture d'un fichier est un déclenchement d'arrière-plan : la
+          // bannière s'affiche brièvement, mais reportFailure avale les
+          // répétitions identiques — une coupure réseau ne clignote donc pas à
+          // chaque fichier fermé. Le serveur, lui, reçoit la trace.
+          const message = describeSyncStoreError(error)
+          await logSyncEvent('error', `synchronisation ciblée échouée : ${message}`, error)
+          reportFailure(message, 'auto', error)
+          await reportServerFailure(serverUrl, 'auto', message, error)
         }
       },
     }

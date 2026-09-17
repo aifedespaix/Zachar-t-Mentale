@@ -298,3 +298,82 @@ function describe(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
 }
+
+export interface SyncFailureReport {
+  username: string
+  role: UserRole
+  trigger: SyncTrigger
+  /** La phrase française déjà montrée à l'utilisateur. */
+  message: string
+  /** L'erreur brute — texte SDK anglais compris : c'est ce qu'un diagnostic lit. */
+  detail: unknown
+  device: string
+}
+
+/**
+ * Signale un échec qui n'a produit AUCUN résultat — réseau coupé, serveur
+ * injoignable, sync ciblée refusée. Ces cas n'ont pas de resultat a rapporter,
+ * donc ils n'atteignaient jamais le serveur : tout finissait dans
+ * sync-debug.log, c'est-a-dire sur la machine ou le prof n'est pas.
+ *
+ * Ne lève JAMAIS, comme reportSyncRun — le rapport est un effet de bord.
+ *
+ * @returns true quand la ligne est partie.
+ */
+export async function reportSyncFailure(
+  client: ReportingClient,
+  failure: SyncFailureReport
+): Promise<boolean> {
+  try {
+    await client.createEvent(buildSyncFailureEvent(failure))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function buildSyncFailureEvent(failure: SyncFailureReport): SyncEventPayload {
+  return {
+    username: failure.username,
+    role: failure.role,
+    level: 'error',
+    trigger: failure.trigger,
+    summary: failure.message,
+    pushed: 0,
+    pulled: 0,
+    conflicts: 0,
+    failures: 1,
+    cancelled: false,
+    detail: {
+      errors: [{ fileId: '', message: describeSyncFailure(failure.detail) }],
+      transferred: [],
+      moved: [],
+      notices: [],
+      merged: [],
+      relocated: 0,
+      reclassified: 0,
+      published: 0,
+      localDeleted: 0,
+      remoteDeleted: 0,
+    },
+    device: failure.device,
+  }
+}
+
+/**
+ * Le même texte que le journal local : nom, message, et le status du SDK quand
+ * il existe (0 = la requête n'a jamais atteint le serveur).
+ */
+export function describeSyncFailure(detail: unknown): string {
+  if (detail instanceof Error) {
+    const status = (detail as { status?: unknown }).status
+    const suffix = status === undefined ? '' : ' (status ' + String(status) + ')'
+    return detail.name + ': ' + detail.message + suffix
+  }
+  if (typeof detail === 'string') return detail
+  try {
+    return JSON.stringify(detail) ?? String(detail)
+  } catch {
+    return String(detail)
+  }
+}
