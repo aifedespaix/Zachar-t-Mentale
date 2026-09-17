@@ -196,6 +196,16 @@ describe('AppToolbar', () => {
     expect(screen.getByRole('button', { name: 'Supprimer' })).toBeEnabled()
   })
 
+  it('focuses the destructive button of the delete confirmation, so Entrée deletes instead of cancelling', async () => {
+    const user = userEvent.setup()
+    renderToolbar()
+    await user.click(screen.getByRole('button', { name: 'Fichier' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Supprimer la carte mentale/ }))
+
+    await screen.findByRole('dialog')
+    expect(screen.getByRole('button', { name: 'Supprimer' })).toHaveFocus()
+  })
+
   it('shows the file in the system explorer', async () => {
     const user = userEvent.setup()
     renderToolbar()

@@ -471,8 +471,13 @@ export function AppToolbar({ filePath, cards, meta, onOpenFile, onRequestFork, f
               >
                 Annuler
               </Button>
+              {/* Focused on open, visibly — not just Radix's default focus on
+                  the first tabbable button (« Annuler ») — so the ring shows
+                  which action Entrée will trigger, and Entrée actually
+                  triggers it. */}
               <Button
                 variant="destructive"
+                autoFocus
                 disabled={busy || deletePlan.files.length === 0}
                 onClick={() => void confirmDelete()}
               >

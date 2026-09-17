@@ -72,7 +72,10 @@ export function CorruptedMapDialog({
           <Button variant="outline" onClick={onCancel} disabled={repairing}>
             Annuler
           </Button>
-          <Button onClick={onRepair} disabled={repairing}>
+          {/* Focused on open, visibly — not just Radix's default focus on
+              « Annuler » — so the ring shows which action Entrée will
+              trigger, and Entrée actually triggers it. */}
+          <Button autoFocus onClick={onRepair} disabled={repairing}>
             {repairing ? 'Réparation…' : 'Créer une copie réparée'}
           </Button>
         </DialogFooter>

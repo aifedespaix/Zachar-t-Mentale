@@ -732,8 +732,12 @@ function CardFiche({
                   <Button variant="outline" onClick={() => setConfirmDeleteOpen(false)}>
                     Annuler
                   </Button>
+                  {/* Focused on open, visibly — not just Radix's default focus
+                      on « Annuler » — so the ring shows which action Entrée
+                      will trigger, and Entrée actually triggers it. */}
                   <Button
                     variant="destructive"
+                    autoFocus
                     onClick={() => {
                       updateContent(card.id, [])
                       setConfirmDeleteOpen(false)

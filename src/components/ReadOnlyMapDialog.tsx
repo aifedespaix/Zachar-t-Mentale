@@ -60,11 +60,15 @@ export function ReadOnlyMapDialog({ author, onDuplicate, onContinue }: ReadOnlyM
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={onContinue} disabled={duplicating}>
+          {/* Focused on open, visibly, when it is the button the dialog is
+              actually offering — the ring shows which action Entrée will
+              trigger, and Entrée actually triggers it. With no copy to offer,
+              this is the only way out, so it takes the focus instead. */}
+          <Button variant="outline" autoFocus={!onDuplicate} onClick={onContinue} disabled={duplicating}>
             Continuer en lecture seule
           </Button>
           {onDuplicate && (
-            <Button onClick={() => void handleDuplicate()} disabled={duplicating}>
+            <Button autoFocus onClick={() => void handleDuplicate()} disabled={duplicating}>
               {duplicating ? 'Copie en cours…' : 'Faire ma copie'}
             </Button>
           )}
