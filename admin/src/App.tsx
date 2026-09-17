@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { FilePlus2, FolderTree, GitCompareArrows, LogOut, ScrollText } from 'lucide-react'
+import { FilePlus2, Files, FolderTree, GitCompareArrows, LogOut, ScrollText } from 'lucide-react'
 import { Login } from './components/Login'
 import { LibraryView } from './components/LibraryView'
 import { NewMapView } from './components/NewMapView'
 import { ConflictsView } from './components/ConflictsView'
+import { DuplicatesView } from './components/DuplicatesView'
 import { LogsView } from './components/LogsView'
 import { currentUser, logout, type AdminUser } from './lib/pb'
 import { openConflictCount, useLibrary } from './state/useLibrary'
@@ -24,6 +25,7 @@ const TABS = [
   { id: 'fichiers', label: 'Fichiers', icon: FolderTree },
   { id: 'nouvelle', label: 'Nouvelle', icon: FilePlus2 },
   { id: 'conflits', label: 'Conflits', icon: GitCompareArrows },
+  { id: 'doublons', label: 'Doublons', icon: Files },
   { id: 'journal', label: 'Journal', icon: ScrollText },
 ] as const
 
@@ -87,6 +89,9 @@ export function App() {
         </Pane>
         <Pane active={tab === 'conflits'}>
           <ConflictsView user={user} />
+        </Pane>
+        <Pane active={tab === 'doublons'}>
+          <DuplicatesView />
         </Pane>
         <Pane active={tab === 'journal'}>
           <LogsView />

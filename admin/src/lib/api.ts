@@ -10,6 +10,7 @@ import {
 import { serializeMindMap } from '@app/persistence/serialization'
 import type { Card, MindMapMeta, UserRole } from '@app/types/card'
 import { mapTypeOf } from '@app/types/mapType'
+import type { DuplicateFile } from './duplicates'
 
 /**
  * Ce que l'interface d'administration fait au serveur.
@@ -227,6 +228,22 @@ export async function fetchFolders(): Promise<LibraryFolder[]> {
 /** Le contenu d'une carte, chargé seulement quand on l'ouvre. */
 export async function fetchMap(id: string): Promise<RemoteMap> {
   return pb.collection(MIND_MAPS).getOne<RemoteMap>(id)
+}
+
+/**
+ * TOUS les contenus, pour chercher les doublons.
+ *
+ * C'est la seule lecture de l'admin qui charge la bibliothèque entière en
+ * mémoire : `content` porte la carte mentale complète, et `fetchMaps` l'évite
+ * précisément partout ailleurs. Elle est donc déclenchée à la demande depuis
+ * l'onglet « Doublons », jamais au chargement de l'espace professeur, et elle
+ * demande aussi `created` — la date de création que l'écran doit afficher.
+ */
+export async function fetchMapContents(): Promise<DuplicateFile[]> {
+  return pb.collection(MIND_MAPS).getFullList<DuplicateFile>({
+    fields: 'id,file_id,author,path,type,created,updated,content',
+    sort: 'path',
+  })
 }
 
 export async function fetchConflicts(): Promise<RemoteConflict[]> {

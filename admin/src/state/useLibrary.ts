@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import {
+  MIND_MAPS,
   applyRelocation,
   applyRemoval,
   createFolder,
@@ -58,6 +59,8 @@ interface LibraryState {
   remove: (path: string) => Promise<void>
   addMap: (params: { path: string; cards: readonly Card[]; author: string; role: UserRole; type: string }) => Promise<void>
   setMapType: (id: string, type: string) => Promise<void>
+  /** Supprime des cartes par identifiant — l'arbitrage d'un doublon. */
+  removeMaps: (ids: readonly string[]) => Promise<void>
   settleConflict: (
     conflict: RemoteConflict,
     resolution: 'kept-remote' | 'took-local' | 'dismissed',
@@ -155,6 +158,22 @@ export const useLibrary = create<LibraryState>((set, get) => ({
   setMapType: async (id, type) => {
     await updateMapType(id, type)
     await get().refreshLibrary()
+  },
+
+  removeMaps: async ids => {
+    if (ids.length === 0) return
+    set({ busy: { label: 'Suppression', done: 0, total: ids.length } })
+    try {
+      await applyRemoval(
+        ids.map(id => ({ collection: MIND_MAPS, id })),
+        (done, total) => set({ busy: { label: 'Suppression', done, total } })
+      )
+    } finally {
+      // Même en cas d'échec à mi-parcours, une partie des fichiers a bel et
+      // bien disparu : rafraîchir est la seule réponse honnête.
+      set({ busy: null })
+      await get().refreshLibrary()
+    }
   },
 
   settleConflict: async (conflict, resolution, by) => {
