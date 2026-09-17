@@ -7,7 +7,7 @@ import { createMindMapFile, createSubfolder, freeMindMapPath, freeSiblingPath } 
 import { saveMindMap, mindMapExists } from '../../persistence/fileStore'
 import { pickXmindFile, readBinaryFile } from '../../persistence/exportIO'
 import { readXmindFile } from '../../xmind/importXmind'
-import { fileNameOf, mindMapBaseName, separatorOf, withMindMapExtension } from '../../persistence/paths'
+import { fileNameOf, mindMapBaseName, mindMapFileNameFor, separatorOf } from '../../persistence/paths'
 
 /** A dialog that needs a name typed into it before it can act. */
 interface NamingAction {
@@ -54,11 +54,10 @@ export function useFolderCreation(
 
   async function submitCreateMindMap(name: string) {
     setNamingAction(null)
-    const destPath = `${folderPath}${separatorOf(folderPath)}${withMindMapExtension(name)}`
+    const fileName = mindMapFileNameFor(name)
+    const destPath = `${folderPath}${separatorOf(folderPath)}${fileName}`
     if (await mindMapExists(destPath)) {
-      setWorkspaceError(
-        `Impossible de créer la carte mentale « ${name} » : un fichier « ${withMindMapExtension(name)} » existe déjà.`
-      )
+      setWorkspaceError(`Impossible de créer la carte mentale « ${name} » : un fichier « ${fileName} » existe déjà.`)
       return
     }
     try {

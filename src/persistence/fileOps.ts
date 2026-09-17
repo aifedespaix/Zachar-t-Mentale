@@ -8,6 +8,8 @@ import {
   sanitizeFileName,
   withMindMapExtension,
   mindMapBaseName,
+  mindMapFileNameFor,
+  sanitizedMindMapBase,
   parentDirOf,
   fileNameOf,
   separatorOf,
@@ -21,18 +23,20 @@ import type { MindMapMeta, UserRole } from '../types/card'
 /**
  * Writes a brand-new mind map with a single root card, and returns its path.
  *
- * The root card is NAMED AFTER THE FILE. It used to be the placeholder
- * « Nouveau chapitre », which meant a freshly created map showed the same
- * anonymous card whether it was « Chapitre 1 – Les nombres relatifs » or
- * « Chapitre 2 – Pythagore »: the first thing the user had to do was rename the
- * very card the name they had just typed was already about. The name is
- * title-cased for the card (« les nombres relatifs » → « Les Nombres
- * Relatifs ») and left as typed for the FILE, which stays the thing the user
- * named.
+ * Both the FILE and the root card are normalized from `rawName`, whatever
+ * punctuation or casing the user typed it with, and independently of each
+ * other: the file gets kebab-cased (« Chapitre 1 : Les nombres relatifs » →
+ * `chapitre-1-les-nombres-relatifs.zmap`, so it stays a well-behaved,
+ * portable file name), while the root card — NAMED AFTER what was typed — is
+ * title-cased instead (→ « Chapitre 1 Les Nombres Relatifs »). It used to be
+ * the placeholder « Nouveau chapitre », which meant a freshly created map
+ * showed the same anonymous card whether it was « Chapitre 1 » or « Chapitre
+ * 2 – Pythagore »: the first thing the user had to do was rename the very
+ * card the name they had just typed was already about.
  */
-export async function createMindMapFile(folderPath: string, fileName: string): Promise<string> {
-  const path = await join(folderPath, withMindMapExtension(fileName))
-  const title = titleCase(mindMapBaseName(path))
+export async function createMindMapFile(folderPath: string, rawName: string): Promise<string> {
+  const path = await join(folderPath, mindMapFileNameFor(rawName))
+  const title = titleCase(sanitizedMindMapBase(rawName))
   await writeTextFile(path, serializeMindMap(null, [createRootCard(title === '' ? 'Nouveau chapitre' : title)]))
   return path
 }

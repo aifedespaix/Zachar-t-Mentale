@@ -30,23 +30,23 @@ import { mindMapExists, loadMindMap, stripMindMapSyncMeta } from './fileStore'
 describe('createMindMapFile', () => {
   beforeEach(() => vi.mocked(writeTextFile).mockReset())
 
-  it('writes a new .zmap file whose root card is named after the file', async () => {
+  it('writes a new .zmap file whose name is the kebab-cased typed name, with the root card named after it', async () => {
     const path = await createMindMapFile('/cours', 'Chapitre 3')
-    expect(path).toBe('/cours/Chapitre 3.zmap')
+    expect(path).toBe('/cours/chapitre-3.zmap')
 
     const [writtenPath, content] = vi.mocked(writeTextFile).mock.calls[0]
-    expect(writtenPath).toBe('/cours/Chapitre 3.zmap')
+    expect(writtenPath).toBe('/cours/chapitre-3.zmap')
     const cards = JSON.parse(content as string)
     expect(cards).toEqual([
       expect.objectContaining({ level: 1, title: 'Chapitre 3', parentId: null, order: 0 }),
     ])
   })
 
-  it('title-cases the name it gives the root card, without touching the file name', async () => {
-    // « les nombres relatifs » is how a chapter is typed and how its file is
-    // named; the card that carries it reads as a title.
+  it('kebab-cases the file name and title-cases the root card, independently, from whatever was typed', async () => {
+    // « les nombres relatifs » is how a chapter is typed; the file gets a
+    // portable kebab-case name, and the card that carries it reads as a title.
     const path = await createMindMapFile('/cours', 'les nombres relatifs')
-    expect(path).toBe('/cours/les nombres relatifs.zmap')
+    expect(path).toBe('/cours/les-nombres-relatifs.zmap')
 
     const cards = JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string)
     expect(cards[0].title).toBe('Les Nombres Relatifs')
@@ -61,7 +61,23 @@ describe('createMindMapFile', () => {
 
   it('does not double-append .json when the given name already has it', async () => {
     const path = await createMindMapFile('/cours', 'Chapitre 3.json')
-    expect(path).toBe('/cours/Chapitre 3.json')
+    expect(path).toBe('/cours/chapitre-3.json')
+  })
+
+  it('kebab-cases punctuation typed into the name, for the file only', async () => {
+    const path = await createMindMapFile('/cours', 'Chapitre 3: Vecteurs/Forces')
+    expect(path).toBe('/cours/chapitre-3-vecteurs-forces.zmap')
+
+    const cards = JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string)
+    expect(cards[0].title).toBe('Chapitre 3 Vecteurs Forces')
+  })
+
+  it('title-cases an accented, lowercase name for the card while kebab-casing the file', async () => {
+    const path = await createMindMapFile('/cours', 'électricité et magnétisme')
+    expect(path).toBe('/cours/électricité-et-magnétisme.zmap')
+
+    const cards = JSON.parse(vi.mocked(writeTextFile).mock.calls[0][1] as string)
+    expect(cards[0].title).toBe('Électricité Et Magnétisme')
   })
 })
 
