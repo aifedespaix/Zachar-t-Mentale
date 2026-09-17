@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { oklchWcagContrast } from '../colors/contrast'
-import { DEFAULT_APPEARANCE_SETTINGS, mergeAppearanceSettings } from './appearanceSettings'
+import { DEFAULT_APPEARANCE_SETTINGS, defaultLevelAppearances, mergeAppearanceSettings } from './appearanceSettings'
 
 describe('DEFAULT_APPEARANCE_SETTINGS', () => {
   it.each([1, 2, 3, 4] as const)('level %s light and dark text meet WCAG AA against their background', level => {
@@ -59,5 +59,21 @@ describe('mergeAppearanceSettings', () => {
   it('falls back to the default themeMode when the file has an invalid value', () => {
     const merged = mergeAppearanceSettings({ themeMode: 'not-a-real-mode' as never })
     expect(merged.themeMode).toBe('system')
+  })
+})
+
+describe('defaultLevelAppearances', () => {
+  it('returns the four default levels', () => {
+    expect(defaultLevelAppearances()).toEqual(DEFAULT_APPEARANCE_SETTINGS.levels)
+  })
+
+  // The settings dialog hands the result straight to the store as a draft. If
+  // this shared the constant's objects, one in-place edit would rewrite the
+  // app-wide defaults for the rest of the session.
+  it('returns fresh objects, not the module-level constant', () => {
+    const levels = defaultLevelAppearances()
+    expect(levels[1]).not.toBe(DEFAULT_APPEARANCE_SETTINGS.levels[1])
+    expect(levels[4].color).not.toBe(DEFAULT_APPEARANCE_SETTINGS.levels[4].color)
+    expect(levels[2].color.light).not.toBe(DEFAULT_APPEARANCE_SETTINGS.levels[2].color.light)
   })
 })

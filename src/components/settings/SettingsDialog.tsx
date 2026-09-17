@@ -129,7 +129,12 @@ export function SettingsDialog({ open, onOpenChange, updateCheck, initialTab = '
       }}
     >
       <DialogContent
-        className="sm:max-w-3xl grid-rows-[auto_minmax(0,1fr)_auto] max-h-[85vh] overflow-hidden"
+        // A FIXED height, not a max-height: with the tabs sharing one frame,
+        // an auto-height dialog grew and shrank as you flipped between Général
+        // (short) and Apparence/Raccourcis (long), so the whole window jumped
+        // under the cursor. Pinning it at the 85vh cap keeps every tab the same
+        // size and lets the middle row scroll instead.
+        className="sm:max-w-3xl grid-rows-[auto_minmax(0,1fr)_auto] h-[85vh] overflow-hidden"
         // A stray click on the backdrop must not throw away a page of colour
         // tweaks. Escape and "Annuler" still discard — both are deliberate.
         onPointerDownOutside={event => {

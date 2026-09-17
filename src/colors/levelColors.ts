@@ -27,18 +27,18 @@ export const levelColors: Record<CardLevel, LevelColorPair> = {
     },
   },
   2: {
-    // Orange — Sous-titre. Hue pushed from 55° to 70° and chroma raised so it
-    // reads apart from both rouge and jaune at a glance (they used to sit
-    // within 40° of each other).
+    // Orange — Sous-titre. Hue 57° is a true orange (`darkorange`), where the
+    // old 70° sat on the amber edge; chroma is raised so it reads as orange
+    // beside both the rouge of level 1 and the jaune of level 4.
     light: {
-      bg: { l: 0.96, c: 0.03, h: 70 },
-      border: { l: 0.6, c: 0.19, h: 70 },
-      text: { l: 0.34, c: 0.16, h: 70 },
+      bg: { l: 0.95, c: 0.05, h: 57 },
+      border: { l: 0.63, c: 0.2, h: 57 },
+      text: { l: 0.35, c: 0.17, h: 57 },
     },
     dark: {
-      bg: { l: 0.22, c: 0.035, h: 70 },
-      border: { l: 0.66, c: 0.17, h: 70 },
-      text: { l: 0.88, c: 0.06, h: 70 },
+      bg: { l: 0.23, c: 0.05, h: 57 },
+      border: { l: 0.7, c: 0.19, h: 57 },
+      text: { l: 0.88, c: 0.07, h: 57 },
     },
   },
   3: {
@@ -55,17 +55,22 @@ export const levelColors: Record<CardLevel, LevelColorPair> = {
     },
   },
   4: {
-    // Jaune — Info. Hue pushed from 95° to 105° and chroma raised, same
-    // reason as orange above.
+    // Jaune — Info. Hue 98° and a saturated background carry the yellow.
+    //
+    // The LIGHT border stays gold (~l 0.63) rather than bright: the mnemonic
+    // icon is drawn in the border colour on a near-white badge wash, and a
+    // brighter yellow there drops below the 3:1 non-text contrast (guarded by
+    // iconBadge.test.ts). The DARK border is free to be bright (l 0.78), since
+    // its badge fill is dark.
     light: {
-      bg: { l: 0.96, c: 0.03, h: 105 },
-      border: { l: 0.62, c: 0.17, h: 105 },
-      text: { l: 0.3, c: 0.15, h: 105 },
+      bg: { l: 0.95, c: 0.08, h: 98 },
+      border: { l: 0.63, c: 0.2, h: 98 },
+      text: { l: 0.34, c: 0.14, h: 98 },
     },
     dark: {
-      bg: { l: 0.22, c: 0.035, h: 105 },
-      border: { l: 0.68, c: 0.15, h: 105 },
-      text: { l: 0.86, c: 0.06, h: 105 },
+      bg: { l: 0.25, c: 0.06, h: 98 },
+      border: { l: 0.78, c: 0.18, h: 98 },
+      text: { l: 0.9, c: 0.09, h: 98 },
     },
   },
 }

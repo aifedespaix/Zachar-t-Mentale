@@ -28,6 +28,24 @@ describe('levelColors', () => {
     expect(levelColors[level].light.border.c).toBeGreaterThanOrEqual(0.16)
   })
 
+  // In the dark theme a yellow border can be bright — the badge fill behind it
+  // is dark, so the icon stays legible. In the light theme the same brightness
+  // would wash the icon badge out (iconBadge.test.ts enforces the 3:1 there),
+  // so the yellow is carried by a more saturated background instead.
+  it('keeps level 4 clearly yellow in both themes', () => {
+    expect(levelColors[4].dark.border.l).toBeGreaterThanOrEqual(0.75)
+    expect(levelColors[4].light.bg.c).toBeGreaterThanOrEqual(0.06)
+  })
+
+  // The warm levels used to sit close enough to read as "the same orange".
+  // Anchor the hues so a future tweak cannot drift them back: orange below the
+  // amber edge, yellow up in gold territory.
+  it('puts orange and yellow at unmistakable hues', () => {
+    expect(levelColors[2].light.border.h).toBeGreaterThanOrEqual(50)
+    expect(levelColors[2].light.border.h).toBeLessThanOrEqual(65)
+    expect(levelColors[4].light.border.h).toBeGreaterThanOrEqual(88)
+  })
+
   // The dark variant is built from the same hue as light — only lightness
   // (and slightly chroma) changes — so distinguishability between levels
   // carries over automatically. Guards against a future edit accidentally

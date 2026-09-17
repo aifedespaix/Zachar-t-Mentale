@@ -96,3 +96,21 @@ export function mergeAppearanceSettings(partial: PartialAppearanceSettings | nul
     themeMode: validThemeMode(partial.themeMode) ?? DEFAULT_APPEARANCE_SETTINGS.themeMode,
   }
 }
+
+/**
+ * A FRESH copy of the four default level appearances, for the settings
+ * dialog's "Réinitialiser" button.
+ *
+ * A spread of `DEFAULT_APPEARANCE_SETTINGS.levels` would hand every level the
+ * very same color objects the module-level constant holds; one accidental
+ * in-place mutation somewhere downstream would then rewrite the app's idea of
+ * "default" for the rest of the session. Building each level through
+ * `mergeLevelAppearance` returns new objects all the way down.
+ */
+export function defaultLevelAppearances(): Record<CardLevel, LevelAppearance> {
+  const levels = {} as Record<CardLevel, LevelAppearance>
+  for (const level of [1, 2, 3, 4] as const) {
+    levels[level] = mergeLevelAppearance(DEFAULT_APPEARANCE_SETTINGS.levels[level], undefined)
+  }
+  return levels
+}

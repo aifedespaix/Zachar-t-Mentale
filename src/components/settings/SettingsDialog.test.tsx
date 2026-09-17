@@ -197,4 +197,57 @@ describe('SettingsDialog', () => {
 
     expect(screen.getByLabelText('URL du serveur')).toBeInTheDocument()
   })
+
+  // jsdom has no layout, so this leans on the sizing class: a fixed `h-\[85vh\]`
+  // instead of a `max-h-\[85vh\]`, which is what let the dialog grow and shrink
+  // between the short Général tab and the long ones.
+  it('keeps one fixed height so the window cannot resize between tabs', async () => {
+    const user = userEvent.setup()
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
+
+    const dialog = document.querySelector('[data-slot="dialog-content"]') as HTMLElement
+    expect(dialog.className).toMatch(/(^|\s)h-\[85vh\](\s|$)/)
+    expect(dialog.className).not.toMatch(/max-h-/)
+
+    await user.click(screen.getByRole('tab', { name: /apparence/i }))
+
+    expect(dialog.className).toMatch(/(^|\s)h-\[85vh\](\s|$)/)
+  })
+
+  it('resets the card levels to their defaults from the Apparence tab', async () => {
+    const user = userEvent.setup()
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
+
+    await user.click(screen.getByRole('tab', { name: /apparence/i }))
+    const label = screen.getByDisplayValue('Titre')
+    await user.clear(label)
+    await user.type(label, 'Chapitre')
+    expect(useAppearanceSettingsStore.getState().levels[1].label).toBe('Chapitre')
+
+    await user.click(screen.getByRole('button', { name: /Réinitialiser les niveaux/ }))
+
+    expect(useAppearanceSettingsStore.getState().levels).toEqual(DEFAULT_APPEARANCE_SETTINGS.levels)
+    // A reset is a draft edit like any other: it previews, it does not persist.
+    expect(saveAppearanceSettings).not.toHaveBeenCalled()
+  })
+
+  it('lets Annuler put a customised level back after a reset', async () => {
+    useAppearanceSettingsStore.setState({
+      ...DEFAULT_APPEARANCE_SETTINGS,
+      levels: {
+        ...DEFAULT_APPEARANCE_SETTINGS.levels,
+        1: { ...DEFAULT_APPEARANCE_SETTINGS.levels[1], label: 'Chapitre' },
+      },
+    })
+    const user = userEvent.setup()
+    render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
+
+    await user.click(screen.getByRole('tab', { name: /apparence/i }))
+    await user.click(screen.getByRole('button', { name: /Réinitialiser les niveaux/ }))
+    expect(useAppearanceSettingsStore.getState().levels[1].label).toBe('Titre')
+
+    await user.click(screen.getByRole('button', { name: 'Annuler' }))
+
+    expect(useAppearanceSettingsStore.getState().levels[1].label).toBe('Chapitre')
+  })
 })
