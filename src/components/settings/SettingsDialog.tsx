@@ -6,7 +6,7 @@ import { useAppearanceSettingsStore } from '../../state/useAppearanceSettingsSto
 import { useQuizSettingsStore } from '../../state/useQuizSettingsStore'
 import type { AppearanceSettings } from '../../types/appearanceSettings'
 import type { QuizSettings } from '../../types/quizSettings'
-import type { UpdateCheckStatus } from '../../hooks/useAppUpdater'
+import type { UpdateCheckHandle } from '../../hooks/useAppUpdater'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { AppearanceSettingsPanel } from './AppearanceSettingsPanel'
 import { QuizSettingsPanel } from './QuizSettingsPanel'
@@ -28,7 +28,7 @@ const TABS: { id: SettingsTab; label: string; icon: LucideIcon; hint: string }[]
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  updateCheck: { status: UpdateCheckStatus; checkNow: () => Promise<void> }
+  updateCheck: Partial<UpdateCheckHandle> & { status: UpdateCheckHandle['status']; checkNow: () => Promise<void> }
   /** Which tab the window opens on — « Raccourcis clavier » lands straight on its own. */
   initialTab?: SettingsTab
 }

@@ -44,6 +44,20 @@ describe('SettingsDialog', () => {
     expect(checkNow).toHaveBeenCalled()
   })
 
+  it('shows the restart action on the Général tab once an update is ready', () => {
+    const applyUpdate = vi.fn().mockResolvedValue(undefined)
+    render(
+      <SettingsDialog
+        open
+        onOpenChange={() => {}}
+        updateCheck={{ status: 'idle', checkNow: vi.fn(), updateReady: true, applyUpdate }}
+      />
+    )
+
+    expect(screen.getByText('Mise à jour prête')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Redémarrer' })).toBeInTheDocument()
+  })
+
   it('offers every section as a tab so the header only needs one button', () => {
     render(<SettingsDialog open onOpenChange={() => {}} updateCheck={updateCheckStub} />)
 

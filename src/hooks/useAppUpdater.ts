@@ -3,6 +3,16 @@ import { check, type Update } from '@tauri-apps/plugin-updater'
 
 export type UpdateCheckStatus = 'idle' | 'checking' | 'up-to-date' | 'error'
 
+/** What the settings window's "Mises à jour" section needs: the manual
+ * check plus enough of the ready-to-restart state to offer the same
+ * restart action the app-wide banner offers, without duplicating it. */
+export interface UpdateCheckHandle {
+  status: UpdateCheckStatus
+  checkNow: () => Promise<void>
+  updateReady: boolean
+  applyUpdate: () => Promise<void>
+}
+
 export interface AppUpdaterState {
   /** True once a signed update has been fully downloaded (not yet
    * installed) — the download itself never interrupts the app; only

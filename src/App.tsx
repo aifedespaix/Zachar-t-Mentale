@@ -430,7 +430,7 @@ function App() {
               onOpenFile={requestOpenFile}
               onRequestFork={() => setForkPromptOpen(true)}
               flush={flush}
-              updateCheck={{ status: updateStatus, checkNow: checkForUpdates }}
+              updateCheck={{ status: updateStatus, checkNow: checkForUpdates, updateReady, applyUpdate }}
             />
           )}
           <span

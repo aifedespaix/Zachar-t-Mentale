@@ -1,7 +1,7 @@
 import { Sun, Moon, Monitor, type LucideIcon } from 'lucide-react'
 import type { AppearanceSettings, ThemeMode } from '../../types/appearanceSettings'
 import { FONT_OPTIONS } from '../../types/appearanceSettings'
-import type { UpdateCheckStatus } from '../../hooks/useAppUpdater'
+import type { UpdateCheckHandle, UpdateCheckStatus } from '../../hooks/useAppUpdater'
 import { SettingsSection } from './SettingsSection'
 import { Button } from '../ui/button'
 
@@ -20,7 +20,7 @@ const THEME_MODE_OPTIONS: { value: ThemeMode; label: string; icon: LucideIcon }[
 interface GeneralSettingsPanelProps {
   settings: AppearanceSettings
   onChange: (next: AppearanceSettings) => void
-  updateCheck: { status: UpdateCheckStatus; checkNow: () => Promise<void> }
+  updateCheck: Partial<UpdateCheckHandle> & { status: UpdateCheckStatus; checkNow: () => Promise<void> }
 }
 
 /** App-wide choices: the ones that change how everything looks, not just cards. */
@@ -106,22 +106,35 @@ export function GeneralSettingsPanel({ settings, onChange, updateCheck }: Genera
       </SettingsSection>
 
       <SettingsSection title="Mises à jour" description="Vérifie manuellement si une nouvelle version est disponible.">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Button
-            variant="outline"
-            onClick={() => {
-              void updateCheck.checkNow()
-            }}
-            disabled={updateCheck.status === 'checking'}
-          >
-            Rechercher les mises à jour
-          </Button>
-          {UPDATE_STATUS_LABEL[updateCheck.status] && (
-            <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)' }}>
-              {UPDATE_STATUS_LABEL[updateCheck.status]}
-            </span>
-          )}
-        </div>
+        {updateCheck.updateReady ? (
+          <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 12.5 }}>Mise à jour prête</span>
+            <Button
+              onClick={() => {
+                void updateCheck.applyUpdate?.()
+              }}
+            >
+              Redémarrer
+            </Button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                void updateCheck.checkNow()
+              }}
+              disabled={updateCheck.status === 'checking'}
+            >
+              Rechercher les mises à jour
+            </Button>
+            {UPDATE_STATUS_LABEL[updateCheck.status] && (
+              <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)' }}>
+                {UPDATE_STATUS_LABEL[updateCheck.status]}
+              </span>
+            )}
+          </div>
+        )}
       </SettingsSection>
     </div>
   )
