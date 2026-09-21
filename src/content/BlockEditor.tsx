@@ -2128,14 +2128,14 @@ function joinLatexLines(lines: string[]): string {
 /** Ce qu'un champ brut de ligne peut demander — le pendant clavier de `MathFieldEditor`. */
 interface MathLineActions {
   setValue: (next: string) => void
-  /** Entrée seule : une ligne de plus dans le même conteneur. */
-  addLine: () => void
+  /** Entrée : ce qui reste dans la ligne courante, et ce qui part dans une nouvelle ligne après elle. */
+  addLine: (before: string, after: string) => void
   /** Ctrl/Cmd+Entrée : un nouveau bloc. Absent dans une cellule de tableau. */
   addBlock?: () => void
-  /** Retour arrière sur une ligne vide. */
-  backspace: () => void
-  /** Suppr sur une ligne vide. */
-  remove: () => void
+  /** Retour arrière en tout début de ligne : ce qu'elle contient encore, à fusionner avec la précédente. */
+  backspace: (rest: string) => void
+  /** Suppr en toute fin de ligne : ce qu'elle contient encore, à fusionner avec la suivante. */
+  remove: (rest: string) => void
   /** Flèche haut : la ligne de formule PRÉCÉDENTE, dans le même bloc. Absent quand il n'y a qu'une ligne. */
   arrowUp?: () => void
   /** Flèche bas : la ligne de formule SUIVANTE, dans le même bloc. Absent quand il n'y a qu'une ligne. */
@@ -2144,24 +2144,35 @@ interface MathLineActions {
   switchKind?: (direction: 1 | -1) => void
 }
 
-/** Le clavier d'un champ brut de ligne, partagé par le bloc et la cellule. */
+/**
+ * Le clavier d'un champ brut de ligne, partagé par le bloc et la cellule.
+ *
+ * Un vrai `<textarea>`/`<input>` donne toujours `selectionStart`/`selectionEnd`
+ * exacts, contrairement au champ MathLive : pas de repli défensif nécessaire
+ * ici, Entrée/Retour arrière/Suppr lisent directement la position du curseur.
+ */
 function mathLineKeyDown(actions: MathLineActions, value: string) {
-  return (event: React.KeyboardEvent) => {
+  return (event: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+    const field = event.currentTarget
     if (event.key === 'Enter') {
       if (event.shiftKey) return
       event.preventDefault()
-      if ((event.ctrlKey || event.metaKey) && actions.addBlock !== undefined) actions.addBlock()
-      else actions.addLine()
+      if ((event.ctrlKey || event.metaKey) && actions.addBlock !== undefined) {
+        actions.addBlock()
+        return
+      }
+      const at = field.selectionStart ?? value.length
+      actions.addLine(value.slice(0, at), value.slice(field.selectionEnd ?? at))
       return
     }
-    if (event.key === 'Backspace' && value === '') {
+    if (event.key === 'Backspace' && field.selectionStart === 0 && field.selectionEnd === 0) {
       event.preventDefault()
-      actions.backspace()
+      actions.backspace(value)
       return
     }
-    if (event.key === 'Delete' && value === '') {
+    if (event.key === 'Delete' && field.selectionStart === value.length && field.selectionEnd === value.length) {
       event.preventDefault()
-      actions.remove()
+      actions.remove(value)
       return
     }
     if (event.key === 'ArrowUp' && actions.arrowUp !== undefined) {
@@ -2186,10 +2197,14 @@ function mathLineKeyDown(actions: MathLineActions, value: string) {
  * Une suite de lignes de formule éditables, empilées.
  *
  * Le cœur de la « formule multi-ligne » : chaque ligne a SON champ, mais les
- * lignes vivent dans le même bloc (ou la même cellule). Entrée en ajoute une,
- * Retour arrière / Suppr sur une ligne vide la retirent, et le `\n` qui les
- * sépare est exactement ce que la conversion texte ↔ formule fait traverser. Un
- * conteneur à une seule ligne se comporte donc comme l'ancien champ unique.
+ * lignes vivent dans le même bloc (ou la même cellule), et le `\n` qui les
+ * sépare est exactement ce que la conversion texte ↔ formule fait traverser.
+ * Un conteneur à une seule ligne se comporte donc comme l'ancien champ unique.
+ *
+ * Le clavier s'y comporte comme dans un textarea classique : Entrée coupe la
+ * ligne en deux à la position du curseur : Retour arrière en tout début de
+ * ligne la fusionne avec la précédente (curseur à l'ancienne frontière) ; Suppr
+ * en toute fin la fusionne avec la suivante. Voir `actionsFor`.
  */
 function MathLinesField({
   latex,
@@ -2214,7 +2229,7 @@ function MathLinesField({
 }) {
   const lines = latexLines(latex)
   const handles = useRef<(MathFieldHandle | null)[]>([])
-  const pending = useRef<{ line: number; at: 'start' | 'end' } | null>(null)
+  const pending = useRef<{ line: number; at: 'start' | 'end' | 'offset'; offset?: number } | null>(null)
 
   // Le focus est posé APRÈS le rendu qui a ajouté ou retiré la ligne : c'est le
   // seul moment où le handle de la ligne visée existe.
@@ -2225,7 +2240,8 @@ function MathLinesField({
     const handle = handles.current[target.line]
     if (handle === null || handle === undefined) return
     if (target.at === 'end') handle.focusEnd()
-    else handle.focusStart()
+    else if (target.at === 'start') handle.focusStart()
+    else handle.focusAt(target.offset ?? 0)
   })
 
   // Le bandeau cible la ligne FOCALISÉE, jamais une ligne mémorisée : insérer
@@ -2252,28 +2268,42 @@ function MathLinesField({
   function actionsFor(line: number): MathLineActions {
     return {
       setValue: next => write(lines.map((current, i) => (i === line ? next : current))),
-      addLine: () => {
-        write([...lines.slice(0, line + 1), '', ...lines.slice(line + 1)])
+      // Coupe la ligne en deux à la position du curseur — `before` y reste,
+      // `after` part dans une nouvelle ligne juste après, curseur à son début.
+      // Un curseur en bout de ligne donne `after === ''` : l'ancien geste
+      // « une ligne vide de plus ».
+      addLine: (before, after) => {
+        write([...lines.slice(0, line), before, after, ...lines.slice(line + 1)])
         pending.current = { line: line + 1, at: 'start' }
       },
       addBlock: onEnterBlock,
-      backspace: () => {
+      // Retour arrière avec rien avant le curseur : `rest` (tout ce qui suit,
+      // donc toute la ligne) rejoint la fin de la précédente, et le curseur se
+      // pose exactement à l'ancienne frontière entre les deux.
+      backspace: rest => {
         if (line > 0) {
-          write([...lines.slice(0, line), ...lines.slice(line + 1)])
-          pending.current = { line: line - 1, at: 'end' }
+          const previous = lines[line - 1]
+          write([...lines.slice(0, line - 1), previous + rest, ...lines.slice(line + 1)])
+          pending.current = { line: line - 1, at: 'offset', offset: previous.length }
           return
         }
-        // Première ligne : c'est le conteneur (bloc, ou cellule) qui demande à
-        // se retirer — et sans précédent, le conteneur ne fait rien.
-        onEmptyBackspace?.()
+        // Première ligne, rien avant : sans contenu à perdre (`rest === ''`),
+        // c'est le conteneur (bloc, ou cellule) qui demande à se retirer — et
+        // sans précédent, il ne fait rien. Avec du contenu, rien à fusionner
+        // (pas de ligne au-dessus) : comme un textarea en tout début de texte,
+        // la touche ne fait rien.
+        if (rest === '') onEmptyBackspace?.()
       },
-      remove: () => {
+      // Suppr avec rien après le curseur : symétrique, `rest` (toute la ligne)
+      // reçoit le contenu de la suivante, curseur inchangé à l'ancienne fin.
+      remove: rest => {
         if (line < lines.length - 1) {
-          write([...lines.slice(0, line), ...lines.slice(line + 1)])
-          pending.current = { line, at: 'start' }
+          const next = lines[line + 1]
+          write([...lines.slice(0, line), rest + next, ...lines.slice(line + 2)])
+          pending.current = { line, at: 'offset', offset: rest.length }
           return
         }
-        onEmptyDelete?.()
+        if (rest === '') onEmptyDelete?.()
       },
       // Les flèches ne passent d'une ligne à l'autre que s'il y en a
       // PLUSIEURS : une formule mono-ligne les laisse à MathLive, qui s'en sert
@@ -2302,10 +2332,10 @@ function MathLinesField({
               }}
               latex={line}
               onChange={next => actions.setValue(next)}
-              onEnter={() => actions.addLine()}
+              onEnter={actions.addLine}
               onEnterBlock={onEnterBlock}
-              onEmptyBackspace={() => actions.backspace()}
-              onEmptyDelete={() => actions.remove()}
+              onBackspaceAtStart={actions.backspace}
+              onDeleteAtEnd={actions.remove}
               onArrowUp={actions.arrowUp}
               onArrowDown={actions.arrowDown}
               ariaLabel={label(i, lines.length)}

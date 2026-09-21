@@ -38,6 +38,16 @@ export interface MathFieldHandle {
    * `moveToMathfieldStart` ; le repli LaTeX brut pose la sélection à zéro.
    */
   focusStart: () => void
+  /**
+   * Focuses the field with the caret at an exact offset.
+   *
+   * The gesture the line-merge fusion (backspace/suppr joining two formula
+   * lines into one) needs: the caret lands neither at the start nor the end
+   * of the merged line but exactly where the two used to meet, so writing
+   * continues right where it was. MathLive exposes this as a settable
+   * `position`; the raw-LaTeX fallback gets there with `setSelectionRange`.
+   */
+  focusAt: (offset: number) => void
 }
 
 export interface MathFieldEditorProps {
@@ -51,18 +61,32 @@ export interface MathFieldEditorProps {
    * les rangées d'une construction multi-lignes : ajoute une LIGNE dans le
    * même bloc (ou la même cellule). C'est le « retour à la ligne » d'un texte,
    * transposé à une formule dont les lignes vivent côte à côte.
+   *
+   * `before`/`after` sont le contenu de part et d'autre du curseur — comme un
+   * textarea qui coupe la ligne en deux à cet endroit. Une formule mono-ligne
+   * dont le curseur est en bout donne `after === ''`, ce qui revient à
+   * l'ancien comportement (une ligne vide ajoutée après).
    */
-  onEnter?: () => void
+  onEnter?: (before: string, after: string) => void
   /**
    * Ctrl/Cmd+Entrée : un NOUVEAU bloc après celui-ci — le geste « un bloc de
    * plus » de tous les autres champs. Absent dans une cellule de tableau, où
    * il n'y a pas de bloc à créer : `onEnter` prend alors la touche.
    */
   onEnterBlock?: () => void
-  /** Retour arrière sur un champ vide : la ligne (ou le bloc) demande à être supprimée vers le précédent. */
-  onEmptyBackspace?: () => void
-  /** Suppr sur un champ vide : la ligne (ou le bloc) demande à disparaître vers le suivant. */
-  onEmptyDelete?: () => void
+  /**
+   * Retour arrière avec le curseur en tout début de champ (rien avant, que
+   * la ligne soit vide ou non) : `rest` est tout le contenu du champ, à
+   * fusionner dans la ligne (ou le bloc) précédente. Un champ vide en est le
+   * cas particulier où `rest === ''` — le champ n'a rien à fusionner, juste à
+   * disparaître.
+   */
+  onBackspaceAtStart?: (rest: string) => void
+  /**
+   * Suppr avec le curseur en toute fin de champ (rien après) : symétrique de
+   * `onBackspaceAtStart`, vers la ligne (ou le bloc) suivante.
+   */
+  onDeleteAtEnd?: (rest: string) => void
   /**
    * Flèche haut : la ligne de formule PRÉCÉDENTE, dans le même champ. Absent
    * quand il n'y a qu'une ligne — la touche reste alors à MathLive, qui s'en
@@ -86,6 +110,49 @@ export type MathfieldElement = HTMLElement & {
   insert?: (fragment: string, options?: { focus?: boolean }) => void
   /** MathLive's generic command runner — `moveToMathfieldEnd`/`moveToMathfieldStart` (see `MathFieldHandle`). */
   executeCommand?: (command: string) => boolean
+  /** The caret's linear offset, from 0 to `lastOffset`. Settable — MathLive's own `position`. */
+  position?: number
+  /** The largest valid `position` — the end of the field's content. */
+  lastOffset?: number
+  /** `false` while a range is selected; `undefined` on an element that predates this API. */
+  selectionIsCollapsed?: boolean
+  /** MathLive's `getValue(start, end)` — the LaTeX between two offsets, for splitting a line at the caret. */
+  getValue?: (start?: number, end?: number) => string
+}
+
+/**
+ * Le curseur est en tout début de champ (rien avant lui) — la condition qui
+ * arme le retour arrière pour fusionner avec la ligne (ou le bloc)
+ * précédente plutôt que de laisser MathLive effacer un caractère.
+ *
+ * Sans `position` (repli défensif si une future version de MathLive le
+ * retirait), le seul cas qu'on peut encore distinguer avec certitude est un
+ * champ entièrement vide — l'ancien comportement.
+ */
+function caretAtStart(field: MathfieldElement): boolean {
+  if (typeof field.position === 'number') return field.position === 0 && field.selectionIsCollapsed !== false
+  return field.value === ''
+}
+
+/** Symétrique de `caretAtStart`, pour Suppr en toute fin de champ. */
+function caretAtEnd(field: MathfieldElement): boolean {
+  if (typeof field.position === 'number' && typeof field.lastOffset === 'number') {
+    return field.position === field.lastOffset && field.selectionIsCollapsed !== false
+  }
+  return field.value === ''
+}
+
+/**
+ * Coupe le contenu du champ en deux à la position du curseur, pour Entrée au
+ * milieu d'une formule. Sans `position`/`getValue`, tout part dans `before`
+ * et `after` reste vide — l'ancien comportement (une ligne vide ajoutée).
+ */
+function splitAtCaret(field: MathfieldElement): { before: string; after: string } {
+  if (typeof field.position === 'number' && typeof field.getValue === 'function') {
+    const last = typeof field.lastOffset === 'number' ? field.lastOffset : field.position
+    return { before: field.getValue(0, field.position), after: field.getValue(field.position, last) }
+  }
+  return { before: field.value, after: '' }
 }
 
 /** Module-level: the import is shared by every math block and resolves once. */
@@ -146,8 +213,8 @@ function loadMathLive(): Promise<boolean> {
  * its KaTeX preview), which is the right thing to show when MathLive is never
  * arriving and the wrong thing to leave on screen once it has: it is what the
  * user sees as "two fields for one formula". So the block is upgraded to the
- * real editor as soon as the import settles, EXCEPT while the caret is inside
- * it — see `upgradeWhenIdle` in the component.
+ * real editor as soon as the import settles, even mid-edit — see
+ * `upgradeToMathField` in the component.
  */
 export function MathFieldEditor({
   latex,
@@ -156,24 +223,16 @@ export function MathFieldEditor({
   fallback,
   onEnter,
   onEnterBlock,
-  onEmptyBackspace,
-  onEmptyDelete,
+  onBackspaceAtStart,
+  onDeleteAtEnd,
   onArrowUp,
   onArrowDown,
   ref,
 }: MathFieldEditorProps) {
   // Which editor this block shows. It starts on the caller's field whenever
   // MathLive is not already in memory, so the user can type IMMEDIATELY, and it
-  // is upgraded to the real editor once the import settles.
-  //
-  // This used to be decide-once-and-never-revisit, on the reasoning that
-  // swapping mid-sentence destroys the caret and the keystroke in flight. That
-  // reasoning still holds — which is why the upgrade refuses to run while the
-  // caret is inside this field — but making it absolute meant the FIRST formula
-  // of every session kept the degraded pair of boxes (raw LaTeX plus preview)
-  // permanently, reported as "two fields for one formula" and only cleared by a
-  // text→formula round-trip, which remounts this component and re-reads the
-  // flag.
+  // is upgraded to the real editor once the import settles — see
+  // `upgradeToMathField` for how that upgrade keeps the caret alive mid-edit.
   const [showMathField, setShowMathField] = useState(() => loaded)
   const hostRef = useRef<HTMLDivElement>(null)
   // Wraps BOTH branches, so "is the user typing in this field?" is a single
@@ -188,10 +247,10 @@ export function MathFieldEditor({
   onEnterRef.current = onEnter
   const onEnterBlockRef = useRef(onEnterBlock)
   onEnterBlockRef.current = onEnterBlock
-  const onEmptyBackspaceRef = useRef(onEmptyBackspace)
-  onEmptyBackspaceRef.current = onEmptyBackspace
-  const onEmptyDeleteRef = useRef(onEmptyDelete)
-  onEmptyDeleteRef.current = onEmptyDelete
+  const onBackspaceAtStartRef = useRef(onBackspaceAtStart)
+  onBackspaceAtStartRef.current = onBackspaceAtStart
+  const onDeleteAtEndRef = useRef(onDeleteAtEnd)
+  onDeleteAtEndRef.current = onDeleteAtEnd
   const onArrowUpRef = useRef(onArrowUp)
   onArrowUpRef.current = onArrowUp
   const onArrowDownRef = useRef(onArrowDown)
@@ -244,27 +303,60 @@ export function MathFieldEditor({
         raw?.focus()
         raw?.setSelectionRange(0, 0)
       },
+      focusAt(offset) {
+        const field = fieldRef.current
+        if (field !== null) {
+          field.focus()
+          if (typeof field.position === 'number') {
+            const last = typeof field.lastOffset === 'number' ? field.lastOffset : offset
+            field.position = Math.min(offset, last)
+          } else {
+            // No `position` to set — best effort on an element that predates
+            // this API rather than leaving the caret wherever it was.
+            field.executeCommand?.('moveToMathfieldEnd')
+          }
+          return
+        }
+        const raw = rootRef.current?.querySelector<HTMLTextAreaElement | HTMLInputElement>('textarea, input')
+        raw?.focus()
+        raw?.setSelectionRange(offset, offset)
+      },
     }),
     []
   )
 
+  // Carries the raw field's caret across the swap to the real editor, when the
+  // upgrade below happens while the user is mid-edit. `null` means either "not
+  // focused" or "no live element on this session ever knows this element's
+  // caret" — either way, nothing to restore, so the new field is left unfocused
+  // rather than stealing focus from something else.
+  const pendingCaretRef = useRef<number | null>(null)
+
   /**
-   * Moves this block from the caller's raw field to the real editor — but only
-   * when nothing of the user's is at stake.
+   * Moves this block from the caller's raw field to the real editor, as soon
+   * as `loaded` allows it.
    *
-   * Two guards, and both are load-bearing. `loaded` is the module flag, set only
-   * once the import has actually SUCCEEDED: without it, a blur would upgrade a
-   * block whose editor never arrived, replacing the raw LaTeX field the user can
-   * type in with an empty host element they cannot. And if the caret is anywhere
-   * inside this field's own markup they are mid-edit, so replacing the element
-   * under them would throw away the caret, the focus and possibly the keystroke
-   * in flight; `onBlur` below catches that case the moment they look away, so
-   * the upgrade is deferred rather than lost.
+   * `loaded` is the module flag, set only once the import has actually
+   * SUCCEEDED: without it, this would upgrade a block whose editor never
+   * arrived, replacing the raw LaTeX field the user can type in with an empty
+   * host element they cannot.
+   *
+   * This used to also refuse to run while the caret was inside the field, on
+   * the reasoning that swapping mid-sentence destroys the caret and the
+   * keystroke in flight. That left the field the user was actively typing
+   * into — often the FIRST formula of the session, the one most likely to be
+   * touched before the ~5.7 MB import settles — stuck showing the raw LaTeX
+   * pair until they clicked away, which read as "the formula field is
+   * broken" to someone who never asked to see LaTeX source. The caret is
+   * preserved instead: captured here, and restored once the real field mounts
+   * (see the effect below), so the swap happens without interrupting typing.
    */
-  function upgradeWhenIdle() {
+  function upgradeToMathField() {
     if (showMathField || !loaded) return
     const root = rootRef.current
-    if (root !== null && root.contains(document.activeElement)) return
+    const active = root !== null ? (document.activeElement as HTMLTextAreaElement | HTMLInputElement | null) : null
+    const focused = active !== null && root!.contains(active) ? active : null
+    pendingCaretRef.current = focused !== null && typeof focused.selectionStart === 'number' ? focused.selectionStart : null
     setShowMathField(true)
   }
 
@@ -275,7 +367,7 @@ export function MathFieldEditor({
     let cancelled = false
     void loadMathLive().then(available => {
       if (cancelled || !available) return
-      upgradeWhenIdle()
+      upgradeToMathField()
     })
     return () => {
       cancelled = true
@@ -317,27 +409,45 @@ export function MathFieldEditor({
         onArrowDownRef.current()
         return
       }
-      if (event.key === 'Backspace' && field.value === '' && onEmptyBackspaceRef.current !== undefined) {
+      if (event.key === 'Backspace' && caretAtStart(field) && onBackspaceAtStartRef.current !== undefined) {
         event.preventDefault()
-        onEmptyBackspaceRef.current()
+        onBackspaceAtStartRef.current(field.value)
         return
       }
-      if (event.key === 'Delete' && field.value === '' && onEmptyDeleteRef.current !== undefined) {
+      if (event.key === 'Delete' && caretAtEnd(field) && onDeleteAtEndRef.current !== undefined) {
         event.preventDefault()
-        onEmptyDeleteRef.current()
+        onDeleteAtEndRef.current(field.value)
         return
       }
       if (event.key !== 'Enter' || event.shiftKey) return
       event.preventDefault()
-      // Ctrl/Cmd+Entrée demande un NOUVEAU bloc ; Entrée seule une ligne de plus
-      // dans celui-ci. Dans une cellule (pas de `onEnterBlock`), les deux
-      // ajoutent une ligne : il n'y a pas de bloc à créer.
-      if ((event.ctrlKey || event.metaKey) && onEnterBlockRef.current !== undefined) onEnterBlockRef.current()
-      else onEnterRef.current?.()
+      // Ctrl/Cmd+Entrée demande un NOUVEAU bloc ; Entrée seule coupe la ligne
+      // en deux à la position du curseur. Dans une cellule (pas de
+      // `onEnterBlock`), les deux ajoutent une ligne : il n'y a pas de bloc à
+      // créer.
+      if ((event.ctrlKey || event.metaKey) && onEnterBlockRef.current !== undefined) {
+        onEnterBlockRef.current()
+        return
+      }
+      const { before, after } = splitAtCaret(field)
+      onEnterRef.current?.(before, after)
     })
     host.replaceChildren(field)
     fieldRef.current = field
     hideVirtualKeyboardToggle(field)
+
+    // Restores the caret this field is inheriting from the raw fallback it
+    // just replaced — see `upgradeToMathField`. Consumed once: a later remount
+    // (e.g. `ariaLabel` changing) has nothing pending.
+    const caret = pendingCaretRef.current
+    pendingCaretRef.current = null
+    if (caret !== null) {
+      field.focus()
+      if (typeof field.position === 'number') {
+        const last = typeof field.lastOffset === 'number' ? field.lastOffset : caret
+        field.position = Math.min(caret, last)
+      }
+    }
 
     return () => {
       host.replaceChildren()
@@ -358,7 +468,7 @@ export function MathFieldEditor({
   return (
     <div
       ref={rootRef}
-      onBlur={upgradeWhenIdle}
+      onBlur={upgradeToMathField}
       // `flexGrow`/`flexBasis` and `minWidth: 0` are what let a formula CELL
       // fill its column. A table cell lays this out as an item of a flex ROW,
       // where a block element that only sets `width: 100%` still sizes to its
