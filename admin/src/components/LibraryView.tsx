@@ -34,6 +34,7 @@ import { MAP_TYPES, MAP_TYPE_LABELS, mapTypeOf } from '@app/types/mapType'
 import { plural } from '@/lib/format'
 import type { AdminUser } from '@/lib/pb'
 import { withMindMapExtension } from '@app/persistence/paths'
+import { kebabCase } from '@app/utils/kebabCase'
 
 /**
  * L'écran principal : tout le contenu du serveur, et tous les gestes dessus.
@@ -593,16 +594,21 @@ function NewFolderSheet({
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
+  // Toujours kebab-case, quoi que le prof tape : c'est le format que
+  // l'application desktop impose déjà aux FICHIERS (`mindMapFileNameFor`), et
+  // le laisser diverger pour les dossiers est précisément ce qui produit deux
+  // matières qui ne diffèrent que par la casse d'une machine à l'autre.
+  const slug = name.trim() === '' ? '' : kebabCase(name.trim())
+
   async function submit() {
-    const trimmed = name.trim()
-    if (!isValidSegment(trimmed)) {
-      setError('Nom invalide : évitez / \\ : * ? " < > | et les noms « . » ou « .. ».')
+    if (slug === '') {
+      setError('Entrez un nom de dossier.')
       return
     }
     setSaving(true)
     setError(null)
     try {
-      await onSubmit(trimmed)
+      await onSubmit(slug)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'La création a échoué.')
       setSaving(false)
@@ -641,6 +647,11 @@ function NewFolderSheet({
           className={inputClass}
         />
       </Field>
+      {slug !== '' && (
+        <p className="mt-2 text-xs text-ink-500">
+          Sera créé sous <span className="font-mono text-ink-300">{slug}</span>
+        </p>
+      )}
       {/* Dit franchement ce qu'un dossier vide peut et ne peut pas faire, plutôt
           que de laisser découvrir la limite. */}
       <p className="mt-3 text-xs text-ink-500">

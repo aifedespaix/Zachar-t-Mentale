@@ -48,6 +48,39 @@ export async function createSubfolder(folderPath: string, folderName: string): P
 }
 
 /**
+ * `rename`, made safe against a pure case change.
+ *
+ * A case-insensitive, case-PRESERVING filesystem (NTFS is the practical case
+ * this app ships on) can silently no-op a rename that only changes the case
+ * of a path component: both sides resolve to "the same file" before the
+ * case-preserving update ever takes effect, and the directory entry keeps its
+ * old case forever. Going through an unrelated intermediate name forces the
+ * entry to change twice, which reliably sticks. A failure on the second leg
+ * is rolled back to `oldPath` on a best-effort basis, so a rename that fails
+ * still fails AT `oldPath` — never stranded under a throwaway name.
+ */
+async function renameOnDisk(oldPath: string, newPath: string): Promise<void> {
+  if (oldPath === newPath) return
+  if (!isSameFilePath(oldPath, newPath)) {
+    await rename(oldPath, newPath)
+    return
+  }
+  const detour = `${newPath}.zm-recase-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  await rename(oldPath, detour)
+  try {
+    await rename(detour, newPath)
+  } catch (error) {
+    try {
+      await rename(detour, oldPath)
+    } catch {
+      // The detour is the closest thing left to the original: surfacing the
+      // second failure as-is beats masking it behind a failed rollback.
+    }
+    throw error
+  }
+}
+
+/**
  * Renames a path, carrying a mind map's asset sidecar with it.
  *
  * Without this, renaming `chapitre.zmap` orphans `chapitre.assets` and every
@@ -61,13 +94,13 @@ export async function createSubfolder(folderPath: string, folderName: string): P
  * error at all.
  */
 export async function renamePath(oldPath: string, newPath: string): Promise<void> {
-  await rename(oldPath, newPath)
+  await renameOnDisk(oldPath, newPath)
   if (!isMindMapPath(oldPath)) return
 
   try {
     const oldSidecar = sidecarDirOf(oldPath)
     if (!(await exists(oldSidecar))) return
-    await rename(oldSidecar, sidecarDirOf(newPath))
+    await renameOnDisk(oldSidecar, sidecarDirOf(newPath))
   } catch {
     // Genuinely best-effort, as the comment above promises: the map's own
     // rename has already succeeded, so rejecting here would report a failure for an

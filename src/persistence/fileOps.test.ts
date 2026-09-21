@@ -92,11 +92,45 @@ describe('createSubfolder', () => {
 })
 
 describe('renamePath', () => {
-  beforeEach(() => vi.mocked(rename).mockReset())
+  beforeEach(() => {
+    vi.mocked(rename).mockReset().mockResolvedValue(undefined)
+    vi.mocked(exists).mockReset().mockResolvedValue(false)
+  })
 
   it('renames a file or folder', async () => {
     await renamePath('/cours/old.json', '/cours/new.json')
     expect(rename).toHaveBeenCalledWith('/cours/old.json', '/cours/new.json')
+  })
+
+  it('goes through a detour when only the case changes, to survive a case-insensitive filesystem no-op', async () => {
+    await renamePath('/cours/Maths', '/cours/maths')
+
+    const calls = vi.mocked(rename).mock.calls
+    expect(calls).toHaveLength(2)
+    const [[from1, detour], [from2, to2]] = calls
+    expect(from1).toBe('/cours/Maths')
+    expect(from2).toBe(detour)
+    expect(to2).toBe('/cours/maths')
+    expect(detour).not.toBe('/cours/maths')
+  })
+
+  it('does not treat an unrelated rename as a case-only one', async () => {
+    await renamePath('/cours/maths', '/cours/mathematiques')
+    expect(rename).toHaveBeenCalledTimes(1)
+    expect(rename).toHaveBeenCalledWith('/cours/maths', '/cours/mathematiques')
+  })
+
+  it('rolls the detour back to the original name when the final rename fails', async () => {
+    vi.mocked(rename)
+      .mockResolvedValueOnce(undefined) // old -> detour
+      .mockRejectedValueOnce(new Error('disque plein')) // detour -> new
+      .mockResolvedValueOnce(undefined) // detour -> old (rollback)
+
+    await expect(renamePath('/cours/Maths', '/cours/maths')).rejects.toThrow('disque plein')
+
+    const calls = vi.mocked(rename).mock.calls
+    expect(calls).toHaveLength(3)
+    expect(calls[2]).toEqual([calls[0][1], '/cours/Maths'])
   })
 })
 
