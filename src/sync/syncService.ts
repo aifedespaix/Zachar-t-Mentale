@@ -215,6 +215,12 @@ export interface SyncResult {
   merged?: { fileId: string; path: string; floatedCount: number }[]
   /** Combien de dossiers vides décidés ailleurs ont été créés localement. */
   foldersCreated?: number
+  /**
+   * Combien de dossiers locaux ont été renommés pour rejoindre la casse
+   * canonique du serveur — jamais un déplacement, seulement la casse (voir
+   * `reconcileFolderCasing`).
+   */
+  foldersRenamed?: number
   /** Une suppression distante propagée : le fichier local a disparu avec elle. */
   localDeleted?: number
   /** Une tombstone locale appliquée : l'enregistrement distant a disparu avec elle. */
@@ -286,6 +292,97 @@ function collectLocalFolders(root: string, nodes: FileTreeNode[]): Map<string, E
   }
   nodes.forEach(visit)
   return folders
+}
+
+/**
+ * Chaque segment de dossier connu du serveur, en minuscules → sa casse
+ * canonique — tirée à la fois du chemin de chaque carte distante et de
+ * chaque dossier vide, pour retrouver la casse d'une matière même quand elle
+ * n'a jamais eu d'enregistrement `dossiers` : le cas courant, un dossier qui
+ * existe parce qu'il contient des chapitres, pas parce qu'il a été créé vide.
+ *
+ * Quand deux casses coexistent malgré tout — le bug que cette passe corrige
+ * a justement pu laisser des enregistrements sous deux casses différentes —
+ * la forme entièrement en minuscules l'emporte : c'est celle que l'espace
+ * d'administration impose désormais à toute création de dossier, donc la
+ * convergence se fait dans son sens plutôt qu'au hasard de l'ordre du serveur.
+ */
+function collectCanonicalFolderCasing(
+  remoteRecords: Pick<RemoteMindMapRecord, 'path'>[],
+  remoteFolders: Pick<RemoteFolderRecord, 'path'>[]
+): Map<string, string> {
+  const canonical = new Map<string, string>()
+  const register = (relPath: string): void => {
+    const key = relPath.toLocaleLowerCase('fr')
+    const existing = canonical.get(key)
+    if (existing === undefined || (existing !== key && relPath === key)) canonical.set(key, relPath)
+  }
+  const registerPrefixes = (path: string, includeLast: boolean): void => {
+    if (!isSafeRelativePath(path)) return
+    const segments = path.split('/')
+    const upTo = includeLast ? segments.length : segments.length - 1
+    let acc = ''
+    for (let i = 0; i < upTo; i += 1) {
+      acc = acc === '' ? segments[i] : `${acc}/${segments[i]}`
+      register(acc)
+    }
+  }
+  for (const record of remoteRecords) registerPrefixes(record.path, false)
+  for (const folder of remoteFolders) registerPrefixes(folder.path, true)
+  return canonical
+}
+
+/**
+ * Corrige la casse des dossiers LOCAUX pour qu'elle rejoigne la casse
+ * canonique que le serveur connaît déjà — jamais un déplacement : la
+ * correspondance se fait sur la clé en minuscules, donc tout écart trouvé
+ * ici ne peut être qu'une différence de casse, jamais un renommage à
+ * trancher par rôle (`reconcilePath` s'en charge, lui, par fichier).
+ *
+ * Nécessaire séparément de la relocalisation par fichier : `fs.rename` sur
+ * UN FICHIER ne peut pas changer la casse du RÉPERTOIRE qui le contient — la
+ * casse-insensibilité du système de fichiers résout silencieusement le
+ * nouveau chemin vers le même dossier physique, casse d'origine comprise.
+ * Sans cette passe, un dossier « Maths » créé une fois reste « Maths » pour
+ * toujours, même quand tout le reste du serveur est passé à « maths ».
+ */
+async function reconcileFolderCasing(
+  syncFolderPath: string,
+  canonicalCase: Map<string, string>
+): Promise<{ renamed: number; errors: { fileId: string; message: string }[] }> {
+  const tree = await scanFolder(syncFolderPath)
+  const errors: { fileId: string; message: string }[] = []
+  let renamed = 0
+
+  async function visit(nodes: FileTreeNode[], parentAbsolute: string, parentRelative: string): Promise<void> {
+    for (const node of nodes) {
+      if (node.type !== 'folder') continue
+      const relPath = parentRelative === '' ? node.name : `${parentRelative}/${node.name}`
+      // Reconstruit depuis le parent (déjà corrigé au besoin) plutôt que lu
+      // sur `node.path` : ce dernier date du scan d'avant tout renommage
+      // d'ancêtre décidé plus haut dans cette même passe.
+      const actualAbsolute = `${parentAbsolute}${separatorOf(parentAbsolute)}${node.name}`
+      const canonicalPath = canonicalCase.get(relPath.toLocaleLowerCase('fr'))
+      let currentAbsolute = actualAbsolute
+      let currentRelative = relPath
+      if (canonicalPath !== undefined && canonicalPath !== relPath) {
+        const canonicalName = canonicalPath.slice(canonicalPath.lastIndexOf('/') + 1)
+        const target = `${parentAbsolute}${separatorOf(parentAbsolute)}${canonicalName}`
+        try {
+          await renamePath(actualAbsolute, target)
+          currentAbsolute = target
+          currentRelative = canonicalPath
+          renamed += 1
+        } catch (error) {
+          errors.push({ fileId: relPath, message: describeSyncError(error) })
+        }
+      }
+      await visit(node.children, currentAbsolute, currentRelative)
+    }
+  }
+
+  await visit(tree, syncFolderPath, '')
+  return { renamed, errors }
 }
 
 export interface PushPlan {
@@ -698,17 +795,43 @@ export async function sync({
     published: 0,
   }
 
+  const aborted = () => signal?.aborted === true
+
   const remoteRecords = await client.mindMaps.getFullList({ signal })
   const remoteAssets = await client.assets.getFullList({ signal })
   const knownHashes = new Set(remoteAssets.map(asset => asset.hash))
   const remoteByFileId = new Map(remoteRecords.map(record => [record.file_id, record]))
+
+  // ── Passe 0 : casse des dossiers ────────────────────────────────────────
+  //
+  // Avant tout le reste, y compris la Passe 1 : un dossier dont seule la
+  // casse a divergé (le bug Windows évoqué plus haut) doit se réaligner
+  // avant que quoi que ce soit ne lise le `relPath` d'une carte qu'il
+  // contient — sinon chaque carte de ce dossier se verrait pousser un
+  // chemin qui ne fait que suivre une casse locale encore fausse.
+  result.foldersRenamed = 0
+  if (!aborted()) {
+    let remoteFoldersForCasing: RemoteFolderRecord[] = []
+    if (client.folders !== undefined) {
+      try {
+        remoteFoldersForCasing = await client.folders.getFullList({ signal })
+      } catch {
+        // Silencieux par contrat, comme en Passe 4 : collection facultative.
+      }
+    }
+    const canonicalCase = collectCanonicalFolderCasing(remoteRecords, remoteFoldersForCasing)
+    if (canonicalCase.size > 0) {
+      const casing = await reconcileFolderCasing(syncFolderPath, canonicalCase)
+      result.foldersRenamed = casing.renamed
+      result.errors.push(...casing.errors)
+    }
+  }
 
   const server = serverStateOf(state, serverUrl, syncFolderPath)
   const entries = server.entries
   // L'identité complète, pour ce qui dépend du rôle : `planPush` autorise un
   // prof à répercuter le chemin d'une carte d'élève.
   const viewer: SyncUser = { username: currentUser, role: currentRole }
-  const aborted = () => signal?.aborted === true
 
   // ── Passe 1 : réconciliation des chemins ────────────────────────────────
   //

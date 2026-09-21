@@ -1312,7 +1312,14 @@ describe('sync — reconciliation des chemins', () => {
       state: memory({ 'file-1': { lastSyncedModified: AIFE.lastModified, lastSyncedUpdated: 'u0', lastSyncedPath: 'chapitre.zmap' } }),
     })
 
-    expect(rename).toHaveBeenCalledWith('/cours/chapitre.zmap', '/cours/Chapitre.zmap')
+    // Un renommage qui ne change que la casse passe par un détour (voir
+    // `renameOnDisk`) : Windows peut sinon l'ignorer silencieusement. Le
+    // premier appel part donc du chemin d'origine, le dernier arrive au
+    // chemin final — peu importe ce qu'il y a entre les deux.
+    const calls = vi.mocked(rename).mock.calls
+    const first = calls.find(([from]) => from === '/cours/chapitre.zmap')
+    expect(first).toBeDefined()
+    expect(calls).toContainEqual([first?.[1], '/cours/Chapitre.zmap'])
     expect(result.errors).toEqual([])
     expect(result.relocated).toBe(1)
   })
@@ -1862,6 +1869,133 @@ describe('sync — dossiers vides', () => {
 
     expect(result.foldersCreated).toBe(0)
     expect(result.errors).toEqual([])
+  })
+})
+
+/**
+ * La casse des dossiers locaux se réaligne sur celle que le serveur connaît
+ * déjà — jamais un déplacement, seulement la casse. Pour tout le monde, prof
+ * ou élève : contrairement à la symétrie `dossiers` ci-dessous, corriger la
+ * casse locale ne crée ni ne supprime aucun enregistrement distant.
+ */
+describe('sync — casse des dossiers', () => {
+  beforeEach(() => {
+    vi.mocked(exists).mockResolvedValue(true)
+    vi.mocked(loadMindMapMeta).mockResolvedValue(AIFE)
+    vi.mocked(loadMindMap).mockResolvedValue([])
+  })
+
+  it("réaligne un dossier de matière sur la casse d'une carte distante qu'il contient", async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      {
+        type: 'folder',
+        name: 'Maths',
+        path: '/cours/Maths',
+        children: [{ type: 'mindmap', name: 'chapitre1.zmap', path: '/cours/Maths/chapitre1.zmap' }],
+      },
+    ] as any)
+    const remote: RemoteMindMapRecord = {
+      id: 'rec-1',
+      file_id: 'file-1',
+      author: 'aife',
+      path: 'maths/chapitre1.zmap',
+      content: JSON.stringify({ cards: [] }),
+      updated: 'u1',
+      type: '',
+    }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
+
+    const result = await runSync({ client, currentRole: 'eleve', currentUser: 'eleve1', state: memory() })
+
+    const calls = vi.mocked(rename).mock.calls
+    const first = calls.find(([from]) => from === '/cours/Maths')
+    expect(first).toBeDefined()
+    expect(calls).toContainEqual([first?.[1], '/cours/maths'])
+    expect(result.foldersRenamed).toBe(1)
+  })
+
+  it('ne touche à rien quand la casse locale est déjà la bonne', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      {
+        type: 'folder',
+        name: 'maths',
+        path: '/cours/maths',
+        children: [{ type: 'mindmap', name: 'chapitre1.zmap', path: '/cours/maths/chapitre1.zmap' }],
+      },
+    ] as any)
+    const remote: RemoteMindMapRecord = {
+      id: 'rec-1',
+      file_id: 'file-1',
+      author: 'aife',
+      path: 'maths/chapitre1.zmap',
+      content: JSON.stringify({ cards: [] }),
+      updated: 'u1',
+      type: '',
+    }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
+
+    const result = await runSync({ client, currentRole: 'eleve', currentUser: 'eleve1', state: memory() })
+
+    expect(rename).not.toHaveBeenCalled()
+    expect(result.foldersRenamed).toBe(0)
+  })
+
+  it("tire aussi la casse canonique d'un dossier vide `dossiers`, sans carte pour l'impliquer", async () => {
+    vi.mocked(scanFolder).mockResolvedValue([{ type: 'folder', name: 'Chimie', path: '/cours/Chimie', children: [] }] as any)
+    const client = fakeClient({
+      folders: {
+        getFullList: vi.fn().mockResolvedValue([{ id: 'fold-1', path: 'chimie' }]),
+        create: vi.fn(),
+        delete: vi.fn(),
+      },
+    } as any)
+
+    const result = await runSync({ client, currentRole: 'eleve', currentUser: 'eleve1', state: memory() })
+
+    const calls = vi.mocked(rename).mock.calls
+    const first = calls.find(([from]) => from === '/cours/Chimie')
+    expect(first).toBeDefined()
+    expect(calls).toContainEqual([first?.[1], '/cours/chimie'])
+    expect(result.foldersRenamed).toBe(1)
+  })
+
+  it('corrige la casse d’un sous-dossier sans perdre la trace de son propre contenu', async () => {
+    vi.mocked(scanFolder).mockResolvedValue([
+      {
+        type: 'folder',
+        name: 'Maths',
+        path: '/cours/Maths',
+        children: [
+          {
+            type: 'folder',
+            name: 'Algebre',
+            path: '/cours/Maths/Algebre',
+            children: [{ type: 'mindmap', name: 'ch1.zmap', path: '/cours/Maths/Algebre/ch1.zmap' }],
+          },
+        ],
+      },
+    ] as any)
+    const remote: RemoteMindMapRecord = {
+      id: 'rec-1',
+      file_id: 'file-1',
+      author: 'aife',
+      path: 'Maths/algebre/ch1.zmap',
+      content: JSON.stringify({ cards: [] }),
+      updated: 'u1',
+      type: '',
+    }
+    const client = fakeClient({ mindMaps: { getFullList: vi.fn().mockResolvedValue([remote]) } as any })
+
+    const result = await runSync({ client, currentRole: 'eleve', currentUser: 'eleve1', state: memory() })
+
+    // Le dossier parent « Maths » garde sa casse (elle correspond déjà) ;
+    // seul « Algebre » est corrigé, et ce à partir de son chemin RECONSTRUIT
+    // depuis le parent, jamais depuis le `node.path` figé par le scan.
+    const calls = vi.mocked(rename).mock.calls
+    const first = calls.find(([from]) => from === '/cours/Maths/Algebre')
+    expect(first).toBeDefined()
+    expect(calls).toContainEqual([first?.[1], '/cours/Maths/algebre'])
+    expect(result.foldersRenamed).toBe(1)
   })
 })
 
