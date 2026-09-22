@@ -217,6 +217,13 @@ export function DescriptionDialog({
   // What the toggle offers: the width the dialog is NOT wearing. One string
   // for both the tooltip and the accessible name, so the two cannot drift.
   const widthToggleLabel = narrow ? 'Élargir la modale' : 'Rétrécir la modale'
+  // Density follows the WIDE dialog, not the narrow one: the roomy default is
+  // where someone lands to write out something complex — a long formula-heavy
+  // definition, several tables — and there the goal is fitting as much of it
+  // on screen as possible, so the spacing condenses. The narrow dialog is
+  // reached for short, simple text, which was never fighting for vertical
+  // room in the first place, so it keeps the comfortable spacing instead.
+  const condensed = !narrow
   // Its own short-lived draft, same idea as the card's own title field but
   // simpler: this dialog is mounted fresh on every open (see the note above),
   // so there is no external re-render to re-seed against mid-edit.
@@ -508,14 +515,17 @@ export function DescriptionDialog({
           // description's own, and its `stopPropagation` swallowed the local
           // one: the meaning of an undo depended on where focus happened to be.
           data-slot="dialog-content"
-          // The narrow width and the condensed spacing are the SAME choice, made
-          // with the SAME corner button: a small screen is short on both width
-          // AND height, and a dialog that only gave up the first was still too
-          // tall to read without scrolling. `index.css` reads this attribute to
-          // shrink the header, the block list, the symbol band and the footer
-          // together — see the `--dd-*`/`--be-*`/`--sb-*` custom properties it
-          // sets from here down.
-          data-density={narrow ? 'compact' : 'comfortable'}
+          // Tied to the WIDE dialog (`condensed`, i.e. `!narrow`), not the
+          // narrow one: the wide dialog is where complex content — long
+          // formula-heavy definitions, several tables — needs to fit on
+          // screen with as little scrolling as possible, so the spacing
+          // condenses there. The narrow dialog is reached for short, simple
+          // text that was never short on room, so it keeps the comfortable
+          // spacing. `index.css` reads this attribute to shrink the header,
+          // the block list, the symbol band and the footer together — see the
+          // `--dd-*`/`--be-*`/`--sb-*` custom properties it sets from here
+          // down.
+          data-density={condensed ? 'compact' : 'comfortable'}
           aria-label={`Description de « ${cardTitle} »`}
           // The dialog opens ON the field being written in. Radix's default is
           // to focus the first tabbable element, which here is a panel
@@ -607,29 +617,29 @@ export function DescriptionDialog({
             style={{
               padding: 'var(--dd-header-pad, 16px 90px 14px 20px)',
               borderBottom: '1px solid var(--border)',
-              // Compact stacks the breadcrumb ABOVE the title, comfortable's
-              // long-standing layout, and costs its own line of height — the
-              // one thing this dialog has to give up on a short screen. In
-              // compact the breadcrumb moves onto the title's own line
-              // instead, as a small label beside it, saving that line
-              // entirely rather than just shrinking it.
-              display: narrow ? 'flex' : 'block',
-              alignItems: narrow ? 'center' : undefined,
-              gap: narrow ? 10 : undefined,
+              // Comfortable stacks the breadcrumb ABOVE the title — the
+              // long-standing layout, and costs its own line of height. In
+              // condensed (the wide dialog, see `condensed`) the breadcrumb
+              // moves onto the title's own line instead, as a small label
+              // beside it, saving that line entirely rather than just
+              // shrinking it — exactly the line back that dense content needs.
+              display: condensed ? 'flex' : 'block',
+              alignItems: condensed ? 'center' : undefined,
+              gap: condensed ? 10 : undefined,
             }}
           >
             {breadcrumb.length > 0 && (
               <div
                 style={{
-                  flex: narrow ? '0 1 auto' : undefined,
-                  minWidth: narrow ? 0 : undefined,
-                  maxWidth: narrow ? '40%' : undefined,
-                  overflow: narrow ? 'hidden' : undefined,
-                  textOverflow: narrow ? 'ellipsis' : undefined,
+                  flex: condensed ? '0 1 auto' : undefined,
+                  minWidth: condensed ? 0 : undefined,
+                  maxWidth: condensed ? '40%' : undefined,
+                  overflow: condensed ? 'hidden' : undefined,
+                  textOverflow: condensed ? 'ellipsis' : undefined,
                   whiteSpace: 'nowrap',
                   fontSize: 11,
                   opacity: 0.6,
-                  marginBottom: narrow ? 0 : 'var(--dd-breadcrumb-mb, 7px)',
+                  marginBottom: condensed ? 0 : 'var(--dd-breadcrumb-mb, 7px)',
                 }}
               >
                 {breadcrumb.join(' › ')}
@@ -647,9 +657,9 @@ export function DescriptionDialog({
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
-                    width: narrow ? undefined : '100%',
-                    flex: narrow ? '1 1 auto' : undefined,
-                    minWidth: narrow ? 0 : undefined,
+                    width: condensed ? undefined : '100%',
+                    flex: condensed ? '1 1 auto' : undefined,
+                    minWidth: condensed ? 0 : undefined,
                     boxSizing: 'border-box',
                     padding: 'var(--dd-title-pad, 9px 14px)',
                     borderRadius: 9,

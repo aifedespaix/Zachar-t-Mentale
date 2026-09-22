@@ -1646,11 +1646,14 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Condensed mode — the SAME corner button that narrows the description dialog
-   (`data-density="compact"` on `[data-slot="dialog-content"]`, see
-   `DescriptionDialog`) also shrinks it: a small screen is short on height as
-   much as on width, and giving up only the first left the dialog still too
-   tall to read without scrolling.
+   Condensed mode — set by the SAME corner button that widens the description
+   dialog (`data-density="compact"` on `[data-slot="dialog-content"]`, see
+   `condensed` in `DescriptionDialog`), but tied to the WIDE state, not the
+   narrow one: the wide dialog is where someone writes something complex —
+   long formula-heavy definitions, several tables — and needs as much of it
+   on screen as possible, so the spacing shrinks there. The narrow dialog is
+   for short, simple text that was never fighting for room, so it keeps the
+   comfortable spacing instead.
 
    These custom properties are read by inline styles across the dialog, the
    block editor and the symbol band (each site keeps the "comfortable" value
