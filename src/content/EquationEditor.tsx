@@ -18,7 +18,10 @@ const TERM_BOX: CSSProperties = {
   flex: 1,
   minWidth: 96,
   boxSizing: 'border-box',
-  padding: '8px 14px',
+  // Le mode condensé (`data-density="compact"` sur la description, voir
+  // `index.css`) redéfinit cette variable pour une case plus petite — même
+  // convention que `--be-row-pad-*` dans `BlockEditor.tsx`.
+  padding: 'var(--eq-term-pad, 8px 14px)',
   borderRadius: 10,
   border: '1.5px solid var(--border)',
   background: 'transparent',

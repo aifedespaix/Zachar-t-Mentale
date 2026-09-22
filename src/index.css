@@ -1717,6 +1717,10 @@
   --be-text-fs: 13.5px;
   --be-text-min-h: 44px;
 
+  /* Le bloc équation (`EquationEditor.tsx`) a ses propres cases, distinctes
+     des lignes `--be-row-pad-*` ci-dessus. */
+  --eq-term-pad: 4px 8px;
+
   /* The families panel is the tallest part of the band once a tab with many
      families is open, and it stays open on purpose (see `SymbolBand` — which
      tab is open is never touched by density). Every property that adds up
