@@ -150,6 +150,7 @@ export const SymbolBand = memo(function SymbolBand({
           aria-label="Familles de l’onglet ouvert"
           className="symbol-band__panel"
           data-accent={accent}
+          style={{ padding: 'var(--sb-panel-pad, 11px 12px)', gap: 'var(--sb-panel-gap, 6px 14px)' }}
         >
           {families.map(family => {
             const hue = GROUP_TONES[family.hue] ?? GROUP_TONES[0]
@@ -170,7 +171,7 @@ export const SymbolBand = memo(function SymbolBand({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  padding: '4px 9px 4px 8px',
+                  padding: 'var(--sb-family-pad, 4px 9px 4px 8px)',
                   borderRadius: 12,
                   background: tint(hue, 8),
                   border: `1px solid ${tint(hue, 24)}`,
@@ -184,7 +185,7 @@ export const SymbolBand = memo(function SymbolBand({
                 ) : (
                   <span style={familyLabel(hue)}>{family.name}</span>
                 )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sb-symbol-gap, 5px)' }}>
                   {family.symbols.map(symbol => {
                     const unavailable =
                       family.formulaOnly === true
@@ -256,7 +257,7 @@ function keyFace(symbol: PaletteSymbol): string {
  */
 function familyLabel(hue: string): CSSProperties {
   return {
-    fontSize: 10,
+    fontSize: 'var(--sb-family-label-fs, 10px)',
     fontWeight: 700,
     textTransform: 'uppercase',
     letterSpacing: '0.04em',
@@ -267,20 +268,20 @@ function familyLabel(hue: string): CSSProperties {
 
 const TARGET_CHIP: CSSProperties = {
   marginBottom: 8,
-  fontSize: 11.5,
+  fontSize: 'var(--sb-target-fs, 11.5px)',
   fontWeight: 650,
-  padding: '3px 10px',
+  padding: 'var(--sb-target-pad, 3px 10px)',
   borderRadius: 999,
   border: '1px solid var(--ring)',
   whiteSpace: 'nowrap',
 }
 
 const BAND_KEY: CSSProperties = {
-  minWidth: 34,
-  height: 34,
+  minWidth: 'var(--sb-key-min-w, 34px)',
+  height: 'var(--sb-key-h, 34px)',
   padding: '0 6px',
   fontFamily: 'inherit',
-  fontSize: 16,
+  fontSize: 'var(--sb-key-fs, 16px)',
   lineHeight: 1,
   borderRadius: 9,
   cursor: 'pointer',

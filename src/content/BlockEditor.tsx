@@ -1190,7 +1190,7 @@ ull quand l'utilisateur l'a refermé pour
           collant garde sa place dans le flux. */}
       {/* Plus de trait ici : le bandeau dessine son propre cadre — rail et
           panneau — et deux traits collés en feraient un de 2 px. */}
-      <div style={{ flex: '0 0 auto', paddingBottom: 12, marginBottom: 12 }}>
+      <div style={{ flex: '0 0 auto', paddingBottom: 'var(--be-band-wrap-space, 12px)', marginBottom: 'var(--be-band-wrap-space, 12px)' }}>
         <SymbolBand
           targetLabel={`Bloc ${activeIndex + 1} · ${KIND_LABEL[activeKind]}`}
           kind={activeKind}
@@ -1217,12 +1217,12 @@ ull quand l'utilisateur l'a refermé pour
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: 10,
+          gap: 'var(--be-list-gap, 10px)',
           // De l'air pour la croix, qui est posée SUR le coin haut-droit du bloc :
           // la moitié d'elle déborde au-dessus et à droite. Sans ce `padding`,
           // `overflow-y: auto` — qui force aussi l'axe X à `auto` — la rognait à
           // la moitié et faisait apparaître une barre de défilement horizontale.
-          padding: '12px 14px 0',
+          padding: 'var(--be-list-pad, 12px 14px 0)',
         }}
       >
         {blockGroups(blocks).map(group => (
@@ -1232,7 +1232,7 @@ ull quand l'utilisateur l'a refermé pour
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 10,
+              gap: 'var(--be-list-gap, 10px)',
               // Sans ceci, la zone qui défile (un flex-column de hauteur bornée)
               // comprime le groupe au lieu de la faire défiler : le groupe se
               // rogne (`overflow: hidden`) et ses blocs sont coupés.
@@ -1327,7 +1327,7 @@ ull quand l'utilisateur l'a refermé pour
     
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, padding: isHeader ? '10px 12px' : '8px 10px 8px 3px' }}>
+                  <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, padding: isHeader ? 'var(--be-row-pad-header, 10px 12px)' : 'var(--be-row-pad-block, 8px 10px 8px 3px)' }}>
                     {isHeader ? (
                       <QuestionBadge
                         number={questionNumbers[index]}
@@ -2109,7 +2109,15 @@ function AutoGrowTextarea({
           onSwitchKind(event.shiftKey ? -1 : 1)
         }
       }}
-      style={{ ...FIELD_STYLE, fontSize: 14.5, lineHeight: 1.5, minHeight: 60, resize: 'none', overflow: 'hidden', ...style }}
+      style={{
+        ...FIELD_STYLE,
+        fontSize: 'var(--be-text-fs, 14.5px)',
+        lineHeight: 1.5,
+        minHeight: 'var(--be-text-min-h, 60px)',
+        resize: 'none',
+        overflow: 'hidden',
+        ...style,
+      }}
     />
   )
 }
