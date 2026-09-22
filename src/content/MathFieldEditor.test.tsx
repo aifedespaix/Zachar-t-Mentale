@@ -94,30 +94,28 @@ describe('MathFieldEditor', () => {
     expect(screen.queryByRole('textbox', { name: /brut/i })).not.toBeInTheDocument()
   })
 
-  it('never replaces the field the caret is in, and upgrades as soon as it leaves', async () => {
-    // The guarantee the old decide-once rule existed to protect, kept intact:
-    // swapping the element under a typing user would destroy the caret, the
-    // focus and the keystroke in flight. The upgrade waits instead.
+  it('upgrades in place while the caret is inside it, instead of waiting for blur', async () => {
+    // The reported defect this replaces: refusing to swap while focused left
+    // whichever formula the user was actively typing into — often the first
+    // one of the session — stuck showing the raw LaTeX pair until they
+    // clicked away, which read as a broken field to someone who never asked
+    // to see LaTeX source. The caret is carried across the swap instead (see
+    // `mathFieldKeys.test.tsx` for the offset itself being preserved).
     vi.resetModules()
     const { MathFieldEditor: Fresh } = await import('./MathFieldEditor')
 
     render(
-      <Fresh latex="x" onChange={() => {}} ariaLabel="Formule" fallback={<textarea aria-label="Brut" />} />
+      <Fresh latex="x" onChange={() => {}} ariaLabel="Formule" fallback={<textarea aria-label="Brut" defaultValue="x" />} />
     )
-    const raw = screen.getByRole('textbox', { name: /brut/i })
+    const raw = screen.getByRole('textbox', { name: /brut/i }) as HTMLTextAreaElement
     raw.focus()
+    raw.setSelectionRange(1, 1)
 
-    // Long enough for the dynamic import to have resolved several times over.
-    await new Promise(resolve => setTimeout(resolve, 50))
+    // Let the pending import settle inside `act`, exactly as focused as before.
+    await act(async () => {})
 
-    expect(screen.getByRole('textbox', { name: /brut/i })).toBeInTheDocument()
-    expect(screen.queryByTestId('math-field')).not.toBeInTheDocument()
-
-    // Looking away is what unblocks it — deferred, not lost.
-    await act(async () => {
-      raw.blur()
-    })
     expect(screen.getByTestId('math-field')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: /brut/i })).not.toBeInTheDocument()
   })
 
   it('stays on the caller’s field forever when the editor never loads', async () => {
@@ -137,8 +135,8 @@ describe('MathFieldEditor', () => {
     expect(screen.getByRole('textbox', { name: /brut/i })).toBeInTheDocument()
     expect(screen.queryByTestId('math-field')).not.toBeInTheDocument()
 
-    // Including once focus leaves — the guard that blocks the upgrade while the
-    // caret is in the field must NOT be the only thing keeping it there.
+    // Including once focus leaves — `loaded` staying false must be what keeps
+    // the raw field here, not incidentally never running the upgrade path.
     // Otherwise a blur would replace the one field the user can type in with an
     // empty host element they cannot.
     const raw = screen.getByRole('textbox', { name: /brut/i })
