@@ -99,10 +99,12 @@ describe('le bloc équation — clavier', () => {
 
     fireEvent.keyDown(left, { key: 'Enter' })
 
-    // 1 étape → 2, la première gagne son champ d'opération : 3 + 2 = 5 champs.
-    await waitFor(async () => expect(await mathFields()).toHaveLength(5))
+    // 1 étape → 2 : quatre champs FORMULE (gauche/droite de chaque étape) — le
+    // champ opération de la première étape n'en est plus un, voir
+    // `EquationOperationField`.
+    await waitFor(async () => expect(await mathFields()).toHaveLength(4))
     const fields = await mathFields()
-    const newLeft = fields[3] // gauche, droite, opération, [gauche de l'étape 2]
+    const newLeft = fields[2] // gauche, droite, [gauche de l'étape 2]
     await waitFor(() => expect(newLeft.focus).toHaveBeenCalled())
     expect(newLeft.executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
   })
@@ -133,8 +135,8 @@ describe('le bloc équation — clavier', () => {
       />
     )
     const fields = await mathFields()
-    expect(fields).toHaveLength(5) // étape 1 : gauche, droite, opération ; étape 2 : gauche, droite
-    const secondLeft = fields[3]
+    expect(fields).toHaveLength(4) // étape 1 : gauche, droite ; étape 2 : gauche, droite — pas d'opération formule
+    const secondLeft = fields[2]
 
     fireEvent.keyDown(secondLeft, { key: 'Backspace' })
 
@@ -157,7 +159,7 @@ describe('le bloc équation — clavier', () => {
       />
     )
     const fields = await mathFields()
-    const secondLeft = fields[3]
+    const secondLeft = fields[2]
     secondLeft.value = 'x'
     secondLeft.position = 0
 
@@ -165,7 +167,7 @@ describe('le bloc équation — clavier', () => {
 
     // Rien n'a changé : deux étapes toujours là, le contenu de la seconde intact.
     expect(onState).not.toHaveBeenCalled()
-    expect(await mathFields()).toHaveLength(5)
+    expect(await mathFields()).toHaveLength(4)
   })
 
   it('Retour arrière en tout début de bloc — le bloc entier vide demande à disparaître vers le précédent', async () => {
@@ -213,8 +215,9 @@ describe('le bloc équation — clavier', () => {
         onState={onState}
       />
     )
-    const fields = await mathFields()
-    const operationField = fields[2] // gauche, droite, OPÉRATION de l'étape 1
+    // Vide, l'opération de l'étape 1 est un `<input>` normal, pas une formule.
+    const operationField = await screen.findByTestId('equation-op-input-0-0')
+    expect(operationField.tagName).toBe('INPUT')
 
     fireEvent.keyDown(operationField, { key: 'Delete' })
 
@@ -230,22 +233,47 @@ describe('le bloc équation — clavier', () => {
       />
     )
     const fields = await mathFields()
-    // étape 1 : gauche, droite, opération (3) ; étape 2 (résultat) : gauche, droite (2)
-    expect(fields).toHaveLength(5)
+    // étape 1 : gauche, droite (2) ; étape 2 (résultat) : gauche, droite (2) —
+    // l'opération n'est jamais un champ formule, quel que soit son contenu.
+    expect(fields).toHaveLength(4)
   })
 
-  it('l’opération est affichée deux fois — une fois sous chaque membre — mais saisie une seule fois', async () => {
+  it('l’opération est un texte normal, affiché deux fois — une fois sous chaque membre —, éditable au clic', async () => {
+    const onState = vi.fn()
     render(
       <Harness
         initial={[{ kind: 'equation', steps: [{ left: '2x', right: '8', operation: '\\div 2' }, { left: 'x', right: '4' }] }]}
+        onState={onState}
       />
     )
-    // Un seul CHAMP vivant pour l'opération…
-    const fields = await mathFields()
-    const operationField = fields[2]
-    expect(operationField.value).toBe('\\div 2')
-    // …mais deux affichages : le champ lui-même, et son double en lecture seule.
+    // Rempli et non focalisé : un rendu KaTeX, jamais une formule MathLive.
+    const operationDisplay = await screen.findByTestId('equation-op-input-0-0')
+    expect(operationDisplay.tagName).not.toBe('INPUT')
+    expect(operationDisplay.innerHTML).not.toBe('')
+    // …et son double en lecture seule affiche EXACTEMENT le même rendu.
     const mirror = await screen.findByTestId('equation-op-mirror-0-0')
-    expect(mirror.innerHTML).not.toBe('')
+    expect(mirror.innerHTML).toBe(operationDisplay.innerHTML)
+
+    // Cliquer dessus repasse en LaTeX brut éditable.
+    fireEvent.click(operationDisplay)
+    const operationInput = (await screen.findByTestId('equation-op-input-0-0')) as HTMLInputElement
+    expect(operationInput.tagName).toBe('INPUT')
+    expect(operationInput.value).toBe('\\div 2')
+
+    fireEvent.change(operationInput, { target: { value: '\\div 3' } })
+    await waitFor(() =>
+      expect(lastBlocks(onState)[0]).toEqual({
+        kind: 'equation',
+        steps: [{ left: '2x', right: '8', operation: '\\div 3' }, { left: 'x', right: '4' }],
+      })
+    )
+    // Le double se met à jour avec la frappe, sans attendre le blur.
+    await waitFor(() => expect(screen.getByTestId('equation-op-mirror-0-0').innerHTML).toContain('3'))
+
+    // Quitter le champ (blur) réaffiche le rendu — jamais le LaTeX brut.
+    fireEvent.blur(operationInput)
+    const operationDisplayAgain = await screen.findByTestId('equation-op-input-0-0')
+    expect(operationDisplayAgain.tagName).not.toBe('INPUT')
+    expect(operationDisplayAgain.innerHTML).toBe(screen.getByTestId('equation-op-mirror-0-0').innerHTML)
   })
 })

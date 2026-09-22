@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from 'react'
 import type { CardBlock, EquationStep } from '../types/cardBlock'
 import { equationStepIsSolved } from './blocks'
 import { renderMathToHtml } from './renderMath'
@@ -89,6 +89,7 @@ function EquationTermField({
   onDeleteAtEnd,
   onArrowUp,
   onArrowDown,
+  side,
   style,
 }: {
   value: string
@@ -103,10 +104,12 @@ function EquationTermField({
   onDeleteAtEnd: (rest: string) => void
   onArrowUp?: () => void
   onArrowDown?: () => void
+  /** Lequel des deux membres — pilote (via `index.css`) l'alignement du texte vers le « = » et le nettoyage du chrome MathLive (fond, menu ≡), voir `[data-equation-side]`. */
+  side: 'left' | 'right'
   style?: CSSProperties
 }) {
   return (
-    <div onFocus={onFocusHandle} style={style}>
+    <div data-equation-side={side} onFocus={onFocusHandle} style={style}>
       <MathFieldEditor
         latex={value}
         onChange={onChangeValue}
@@ -171,6 +174,183 @@ function EquationTermField({
         }
       />
     </div>
+  )
+}
+
+const OPERATION_INPUT_STYLE: CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  font: 'inherit',
+  padding: 0,
+  border: 'none',
+  outline: 'none',
+  background: 'transparent',
+  color: 'inherit',
+}
+
+/**
+ * Le champ « opération » d'une étape : un texte normal, jamais une formule
+ * MathLive — il n'a besoin d'aucun clavier virtuel, menu ou fond dédié pour
+ * écrire « + 3 » ou « \times 2 ». Vide, c'est un simple `<input>` sur lequel
+ * cliquer. Rempli et non focalisé, il affiche son propre rendu KaTeX — EXACTEMENT
+ * comme son double `OPERATION_MIRROR_STYLE` sous l'autre membre — pour que les
+ * deux côtés se lisent de façon identique ; cliquer dessus repasse en LaTeX
+ * brut éditable, jusqu'au `blur` suivant.
+ */
+function EquationOperationField({
+  value,
+  onChangeValue,
+  ariaLabel,
+  dataTestId,
+  onFocusHandle,
+  onEnter,
+  onEnterBlock,
+  onBackspaceAtStart,
+  onDeleteAtEnd,
+  style,
+  ref,
+}: {
+  value: string
+  onChangeValue: (next: string) => void
+  ariaLabel: string
+  dataTestId?: string
+  onFocusHandle: () => void
+  onEnter: () => void
+  onEnterBlock: () => void
+  onBackspaceAtStart: (rest: string) => void
+  onDeleteAtEnd: (rest: string) => void
+  style?: CSSProperties
+  ref?: React.Ref<MathFieldHandle>
+}) {
+  const [focused, setFocused] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  // Le caret à poser dès que l'`<input>` existe — mis de côté quand
+  // `focusStart`/`focusEnd`/`focusAt`/`insert` sont appelés alors que le champ
+  // montre encore son rendu KaTeX (donc sans `<input>` à qui parler tout de
+  // suite). `null` retombe sur la fin, le geste par défaut d'un clic sur le
+  // rendu — cohérent avec `insert` ailleurs dans l'app quand il n'y a pas de
+  // caret vivant à viser.
+  const pendingCaret = useRef<'start' | 'end' | number | null>(null)
+  // Sans ce garde, TOUT passage en mode `<input>` — y compris celui d'une
+  // étape qu'on vient d'ajouter, dont le champ opération est vide — volerait
+  // le focus posé ailleurs (le membre gauche de l'étape suivante, via
+  // `EquationBlockField`).
+  const shouldFocus = useRef(false)
+  const valueRef = useRef(value)
+  valueRef.current = value
+
+  const showInput = focused || value === ''
+
+  useEffect(() => {
+    if (!showInput || !shouldFocus.current) return
+    const input = inputRef.current
+    if (input === null) return
+    shouldFocus.current = false
+    if (document.activeElement !== input) input.focus()
+    const caret = pendingCaret.current
+    pendingCaret.current = null
+    const offset = caret === 'start' ? 0 : caret === null || caret === 'end' ? input.value.length : caret
+    input.setSelectionRange(offset, offset)
+  }, [showInput])
+
+  function focusAt(caret: 'start' | 'end' | number) {
+    const input = inputRef.current
+    if (input !== null) {
+      input.focus()
+      const offset = caret === 'start' ? 0 : caret === 'end' ? input.value.length : caret
+      input.setSelectionRange(offset, offset)
+      return
+    }
+    pendingCaret.current = caret
+    shouldFocus.current = true
+    setFocused(true)
+  }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      insert(rich, plain = rich) {
+        onChangeValue(valueRef.current + plain)
+        focusAt('end')
+      },
+      focusEnd: () => focusAt('end'),
+      focusStart: () => focusAt('start'),
+      focusAt,
+    }),
+    []
+  )
+
+  if (showInput) {
+    return (
+      <input
+        ref={inputRef}
+        aria-label={ariaLabel}
+        data-testid={dataTestId}
+        value={value}
+        spellCheck={false}
+        onFocus={() => {
+          setFocused(true)
+          onFocusHandle()
+        }}
+        onBlur={() => setFocused(false)}
+        onChange={event => onChangeValue(event.target.value)}
+        onKeyDown={event => {
+          const field = event.currentTarget
+          if (event.key === 'Enter') {
+            if (event.shiftKey) return
+            event.preventDefault()
+            if (event.ctrlKey || event.metaKey) onEnterBlock()
+            else onEnter()
+            return
+          }
+          if (event.key === 'Backspace' && field.selectionStart === 0 && field.selectionEnd === 0) {
+            event.preventDefault()
+            onBackspaceAtStart(field.value)
+            return
+          }
+          if (
+            event.key === 'Delete' &&
+            field.selectionStart === field.value.length &&
+            field.selectionEnd === field.value.length
+          ) {
+            event.preventDefault()
+            onDeleteAtEnd(field.value)
+          }
+        }}
+        style={{ ...style, ...OPERATION_INPUT_STYLE }}
+      />
+    )
+  }
+
+  return (
+    <div
+      role="textbox"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      data-testid={dataTestId}
+      onClick={() => {
+        shouldFocus.current = true
+        setFocused(true)
+      }}
+      onFocus={() => {
+        shouldFocus.current = true
+        setFocused(true)
+        onFocusHandle()
+      }}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          shouldFocus.current = true
+          setFocused(true)
+        }
+      }}
+      style={{ ...style, cursor: 'text' }}
+      // Safe: `renderMathToHtml` escapes the text it emits, and `trust: false`
+      // keeps it from building links or embedding resources (see renderMath
+      // tests) — même garantie que le double en lecture seule sous l'autre
+      // membre.
+      dangerouslySetInnerHTML={{ __html: renderMathToHtml(value, false) }}
+    />
   )
 }
 
@@ -293,6 +473,7 @@ export function EquationBlockField({
                 }}
                 onArrowUp={stepIndex > 0 ? () => focusField(stepIndex - 1, 'left', 'end') : undefined}
                 onArrowDown={!isLast ? () => focusField(stepIndex + 1, 'left', 'start') : undefined}
+                side="left"
                 style={boxStyle ?? LEFT_BOX}
               />
               <div
@@ -330,6 +511,7 @@ export function EquationBlockField({
                 }}
                 onArrowUp={stepIndex > 0 ? () => focusField(stepIndex - 1, 'right', 'end') : undefined}
                 onArrowDown={!isLast ? () => focusField(stepIndex + 1, 'right', 'start') : undefined}
+                side="right"
                 style={boxStyle ?? RIGHT_BOX}
               />
             </div>
@@ -341,11 +523,14 @@ export function EquationBlockField({
               // montrer visuellement qu'elle porte sur les DEUX à la fois.
               // Voir `EquationStep.operation` dans `cardBlock.ts`.
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <EquationTermField
+                <EquationOperationField
                   value={step.operation ?? ''}
                   onChangeValue={value => setField(stepIndex, 'operation', value)}
                   ariaLabel={`Opération après l'étape ${stepIndex + 1} du bloc ${index + 1}`}
-                  registerHandle={handle => handles.current.set(fieldKey(stepIndex, 'operation'), handle)}
+                  dataTestId={`equation-op-input-${index}-${stepIndex}`}
+                  ref={handle => {
+                    handles.current.set(fieldKey(stepIndex, 'operation'), handle)
+                  }}
                   onFocusHandle={() => onFieldChange(handles.current.get(fieldKey(stepIndex, 'operation')) ?? null)}
                   onEnter={() => addStepAfter(stepIndex)}
                   onEnterBlock={onEnterBlock}

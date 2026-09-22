@@ -368,6 +368,29 @@
 }
 
 /*
+ * Le bloc équation (`EquationEditor.tsx`) : le membre gauche épouse le « = »
+ * par la droite, le membre droit par la gauche, et le champ MathLive
+ * lui-même est nettoyé de son propre chrome (fond, menu ≡ « sandwich ») pour
+ * laisser la couleur de la case et le bandeau de symboles faire tout le
+ * travail visuel — MathLive n'est plus là que pour afficher x, ×, les
+ * fractions, etc. `background` et `::part()` sont honorés directement sur le
+ * `<math-field>` hôte (documenté par MathLive), donc pas besoin de percer son
+ * shadow DOM comme `hideVirtualKeyboardToggle` doit le faire pour le clavier
+ * virtuel.
+ */
+[data-equation-side='left'] math-field {
+  background: transparent;
+  text-align: right;
+}
+[data-equation-side='right'] math-field {
+  background: transparent;
+  text-align: left;
+}
+[data-equation-side] math-field::part(menu-toggle) {
+  display: none;
+}
+
+/*
  * The view dock in the bottom-right corner: the zoom / 100 % / fit commands
  * stacked directly over the minimap. They are one flex column, so the buttons
  * always sit exactly above the map whatever its height, rather than two
