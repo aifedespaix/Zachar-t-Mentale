@@ -1644,3 +1644,62 @@
   border-radius: 0 12px 12px 12px;
   background: color-mix(in oklab, var(--band-accent), var(--popover) 96%);
 }
+
+/* ---------------------------------------------------------------------------
+   Condensed mode — the SAME corner button that narrows the description dialog
+   (`data-density="compact"` on `[data-slot="dialog-content"]`, see
+   `DescriptionDialog`) also shrinks it: a small screen is short on height as
+   much as on width, and giving up only the first left the dialog still too
+   tall to read without scrolling.
+
+   These custom properties are read by inline styles across the dialog, the
+   block editor and the symbol band (each site keeps the "comfortable" value
+   as its own `var(..., fallback)`, so this block only has to state what
+   changes). `.symbol-band__tab`/`__head`/`__hide` are plain CSS classes
+   instead, so they are overridden directly rather than through a variable.
+   --------------------------------------------------------------------------- */
+[data-density='compact'] {
+  --dd-header-pad: 8px 84px 8px 14px;
+  --dd-breadcrumb-mb: 3px;
+  --dd-title-pad: 5px 10px;
+  --dd-title-fs: 14.5px;
+  --dd-content-pad: 8px 14px 4px;
+  --dd-footer-pad: 6px 12px;
+  --dd-footer-gap: 6px;
+  --dd-shortcuts-pad: 6px 14px;
+
+  --be-band-wrap-space: 6px;
+  --be-list-pad: 8px 10px 0;
+  --be-list-gap: 6px;
+  --be-row-pad-header: 6px 10px;
+  --be-row-pad-block: 5px 8px 5px 3px;
+  --be-text-fs: 13.5px;
+  --be-text-min-h: 44px;
+
+  --sb-panel-pad: 6px 9px;
+  --sb-panel-gap: 4px 10px;
+  --sb-family-pad: 2px 7px 2px 6px;
+  --sb-key-min-w: 27px;
+  --sb-key-h: 27px;
+  --sb-key-fs: 14px;
+  --sb-target-fs: 10px;
+  --sb-target-pad: 2px 8px;
+}
+
+[data-density='compact'] .symbol-band__head {
+  gap: 5px;
+  padding: 5px 8px 0;
+}
+
+[data-density='compact'] .symbol-band__tab {
+  height: 26px;
+  padding: 0 8px;
+  gap: 4px;
+  font-size: 11px;
+}
+
+[data-density='compact'] .symbol-band__hide {
+  width: 22px;
+  height: 22px;
+  margin-bottom: 4px;
+}

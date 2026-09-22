@@ -508,6 +508,14 @@ export function DescriptionDialog({
           // description's own, and its `stopPropagation` swallowed the local
           // one: the meaning of an undo depended on where focus happened to be.
           data-slot="dialog-content"
+          // The narrow width and the condensed spacing are the SAME choice, made
+          // with the SAME corner button: a small screen is short on both width
+          // AND height, and a dialog that only gave up the first was still too
+          // tall to read without scrolling. `index.css` reads this attribute to
+          // shrink the header, the block list, the symbol band and the footer
+          // together — see the `--dd-*`/`--be-*`/`--sb-*` custom properties it
+          // sets from here down.
+          data-density={narrow ? 'compact' : 'comfortable'}
           aria-label={`Description de « ${cardTitle} »`}
           // The dialog opens ON the field being written in. Radix's default is
           // to focus the first tabbable element, which here is a panel
@@ -595,9 +603,9 @@ export function DescriptionDialog({
             </Hint>
           </div>
 
-          <header style={{ padding: '16px 90px 14px 20px', borderBottom: '1px solid var(--border)' }}>
+          <header style={{ padding: 'var(--dd-header-pad, 16px 90px 14px 20px)', borderBottom: '1px solid var(--border)' }}>
             {breadcrumb.length > 0 && (
-              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 7 }}>{breadcrumb.join(' › ')}</div>
+              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 'var(--dd-breadcrumb-mb, 7px)' }}>{breadcrumb.join(' › ')}</div>
             )}
             <DialogPrimitive.Title asChild>
               <div
@@ -613,7 +621,7 @@ export function DescriptionDialog({
                     gap: 10,
                     width: '100%',
                     boxSizing: 'border-box',
-                    padding: '9px 14px',
+                    padding: 'var(--dd-title-pad, 9px 14px)',
                     borderRadius: 9,
                     border: `2px solid ${titleColors?.border ?? 'var(--border)'}`,
                     background: titleColors?.bg ?? 'var(--muted)',
@@ -654,7 +662,7 @@ export function DescriptionDialog({
                     background: 'transparent',
                     color: 'inherit',
                     font: 'inherit',
-                    fontSize: 17,
+                    fontSize: 'var(--dd-title-fs, 17px)',
                     fontWeight: 650,
                     outline: 'none',
                     cursor: onRenameTitle ? 'text' : 'default',
@@ -665,7 +673,7 @@ export function DescriptionDialog({
             </DialogPrimitive.Title>
           </header>
 
-          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '14px 20px 6px' }}>
+          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: 'var(--dd-content-pad, 14px 20px 6px)' }}>
             {/* A readable measure, not the full width of a 1600px dialog: the
                 side panel that used to hold this column back is gone, and
                 prose across the whole modal would run to ~180 characters a
@@ -713,8 +721,8 @@ export function DescriptionDialog({
               display: 'flex',
               justifyContent: 'flex-end',
               alignItems: 'center',
-              gap: 8,
-              padding: '10px 16px',
+              gap: 'var(--dd-footer-gap, 8px)',
+              padding: 'var(--dd-footer-pad, 10px 16px)',
               borderTop: '1px solid var(--border)',
             }}
           >
@@ -1119,7 +1127,7 @@ function ShortcutsPanel({
         flexWrap: 'wrap',
         gap: '6px 22px',
         alignItems: 'center',
-        padding: '9px 20px',
+        padding: 'var(--dd-shortcuts-pad, 9px 20px)',
         borderTop: '1px solid var(--border)',
         background: 'color-mix(in oklch, var(--border), transparent 70%)',
       }}
