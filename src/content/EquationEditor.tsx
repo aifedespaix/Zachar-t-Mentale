@@ -40,11 +40,24 @@ const RIGHT_BOX: CSSProperties = {
   background: 'color-mix(in oklch, #b8791f, transparent 92%)',
 }
 
-const SOLVED_BOX: CSSProperties = {
-  ...TERM_BOX,
+// Une étape résolue (la variable isolée) n'est jamais deux cases côte à côte
+// comme les autres — un seul bloc vert qui engloutit le « = » entre les deux,
+// pour que l'œil lise « c'est fini » d'un coup plutôt que deux cases de plus
+// à comparer. Voir le rendu dans `EquationBlockField` : c'est LA RANGÉE
+// entière qui porte cette bordure, les deux membres eux-mêmes redeviennent
+// plats — `SOLVED_TERM`, pas `LEFT_BOX`/`RIGHT_BOX`.
+const SOLVED_ROW: CSSProperties = {
   borderWidth: 2,
+  borderStyle: 'solid',
   borderColor: 'color-mix(in oklch, #2f8f5b, transparent 25%)',
   background: 'color-mix(in oklch, #2f8f5b, transparent 93%)',
+  borderRadius: 10,
+  padding: 'var(--eq-term-pad, 8px 14px)',
+}
+
+const SOLVED_TERM: CSSProperties = {
+  flex: 1,
+  minWidth: 96,
   color: '#1f6a3f',
 }
 
@@ -505,10 +518,9 @@ export function EquationBlockField({
         const isFirst = stepIndex === 0
         const isLast = stepIndex === steps.length - 1
         const solved = equationStepIsSolved(steps, stepIndex)
-        const boxStyle = solved ? SOLVED_BOX : undefined
         return (
           <div key={stepIndex} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'stretch', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 10, ...(solved ? SOLVED_ROW : null) }}>
               <EquationTermField
                 value={step.left}
                 onChangeValue={value => setField(stepIndex, 'left', value)}
@@ -533,7 +545,7 @@ export function EquationBlockField({
                 onArrowUp={stepIndex > 0 ? () => focusField(stepIndex - 1, 'left', 'end') : undefined}
                 onArrowDown={!isLast ? () => focusField(stepIndex + 1, 'left', 'start') : undefined}
                 side="left"
-                style={boxStyle ?? LEFT_BOX}
+                style={solved ? SOLVED_TERM : LEFT_BOX}
               />
               <div
                 aria-hidden
@@ -543,7 +555,8 @@ export function EquationBlockField({
                   alignItems: 'center',
                   fontSize: 18,
                   fontWeight: 700,
-                  opacity: 0.75,
+                  opacity: solved ? 1 : 0.75,
+                  color: solved ? '#1f6a3f' : undefined,
                 }}
               >
                 =
@@ -571,7 +584,7 @@ export function EquationBlockField({
                 onArrowUp={stepIndex > 0 ? () => focusField(stepIndex - 1, 'right', 'end') : undefined}
                 onArrowDown={!isLast ? () => focusField(stepIndex + 1, 'right', 'start') : undefined}
                 side="right"
-                style={boxStyle ?? RIGHT_BOX}
+                style={solved ? SOLVED_TERM : RIGHT_BOX}
               />
             </div>
 

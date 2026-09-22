@@ -163,9 +163,33 @@ const BlockItem = memo(function BlockItem({
             const operation = (step.operation ?? '').trim()
             return (
               <Fragment key={stepIndex}>
-                <div style={{ display: 'flex', alignItems: 'stretch', gap: '0.6rem' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    gap: '0.6rem',
+                    ...(solved
+                      ? {
+                          borderRadius: 10,
+                          border: '2px solid color-mix(in oklch, #2f8f5b, transparent 25%)',
+                          background: 'color-mix(in oklch, #2f8f5b, transparent 93%)',
+                          padding: '0.3rem 0.7rem',
+                        }
+                      : null),
+                  }}
+                >
                   <EquationTermView latex={step.left} solved={solved} side="left" />
-                  <span style={{ display: 'flex', alignItems: 'center', fontWeight: 700, opacity: 0.75 }}>=</span>
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      fontWeight: 700,
+                      opacity: solved ? 1 : 0.75,
+                      color: solved ? '#2f8f5b' : undefined,
+                    }}
+                  >
+                    =
+                  </span>
                   <EquationTermView latex={step.right} solved={solved} side="right" />
                 </div>
                 {!isLast && operation !== '' && (
@@ -291,25 +315,30 @@ function OperationView({ latex }: { latex: string }) {
 
 /**
  * Un membre d'équation dans sa case colorée — bleue à gauche, orange à
- * droite, verte des deux côtés une fois la variable isolée (voir
- * `equationStepIsSolved`). Les deux couleurs restent les MÊMES d'une étape à
- * l'autre : c'est ce qui laisse l'œil suivre une colonne tout au long de la
- * résolution plutôt que de redécouvrir le sens de chaque case.
+ * droite. Une fois la variable isolée (voir `equationStepIsSolved`), la
+ * paire n'a plus chacune sa propre case : c'est la RANGÉE entière (voir
+ * l'appelant) qui porte la bordure verte, pour que le « = » entre les deux
+ * en fasse visuellement partie — ce membre redevient alors plat, sans
+ * bordure ni fond à lui.
  */
 function EquationTermView({ latex, solved, side }: { latex: string; solved: boolean; side: 'left' | 'right' }) {
-  const tint = solved ? '#2f8f5b' : side === 'left' ? '#3a6bb0' : '#b8791f'
+  const tint = side === 'left' ? '#3a6bb0' : '#b8791f'
   const html = renderMathToHtml(latex, false)
   const style: CSSProperties = {
     flex: 1,
     minWidth: 0,
     boxSizing: 'border-box',
     padding: '0.3rem 0.7rem',
-    borderRadius: 10,
-    border: `${solved ? 2 : 1.5}px solid color-mix(in oklch, ${tint}, transparent 30%)`,
-    background: `color-mix(in oklch, ${tint}, transparent 92%)`,
-    color: solved ? tint : 'inherit',
     textAlign: 'center',
     overflowX: 'auto',
+    ...(solved
+      ? { color: '#2f8f5b' }
+      : {
+          borderRadius: 10,
+          border: `1.5px solid color-mix(in oklch, ${tint}, transparent 30%)`,
+          background: `color-mix(in oklch, ${tint}, transparent 92%)`,
+          color: 'inherit',
+        }),
   }
   // Safe: `renderMathToHtml` escapes the text it emits, and `trust: false`
   // keeps it from building links or embedding resources (see renderMath tests).
