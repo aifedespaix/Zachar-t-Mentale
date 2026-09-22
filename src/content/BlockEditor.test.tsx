@@ -98,6 +98,33 @@ describe('convertBlock', () => {
     expect(asQuestion).toEqual({ kind: 'question', text: 'Quel est le coefficient directeur ?' })
     expect(convertBlock(asQuestion, 'text')).toEqual(text)
   })
+
+  it('coupe chaque ligne au premier « = » pour construire les étapes d’une équation', () => {
+    const text: CardBlock = { kind: 'text', text: '2x + 3 = 11\n2x = 8' }
+    expect(convertBlock(text, 'equation')).toEqual({
+      kind: 'equation',
+      steps: [
+        { left: '2x + 3', right: '11' },
+        { left: '2x', right: '8' },
+      ],
+    })
+  })
+
+  it('une ligne sans « = » devient un membre gauche au membre droit vide, jamais une équation inventée', () => {
+    const text: CardBlock = { kind: 'text', text: '2x + 3' }
+    expect(convertBlock(text, 'equation')).toEqual({ kind: 'equation', steps: [{ left: '2x + 3', right: '' }] })
+  })
+
+  it('round-trips une équation vers le texte : « gauche = droite » par étape', () => {
+    const equation: CardBlock = {
+      kind: 'equation',
+      steps: [
+        { left: '2x + 3', right: '11', operation: '- 3' },
+        { left: '2x', right: '8' },
+      ],
+    }
+    expect(convertBlock(equation, 'text')).toEqual({ kind: 'text', text: '2x + 3 = 11\n(- 3)\n2x = 8' })
+  })
 })
 
 describe('la « zone formule » (texte ↔ formule multi-ligne)', () => {

@@ -199,7 +199,7 @@ export const SymbolBand = memo(function SymbolBand({
                           // Dire ce que la touche écrira ICI : c'est ce qui rend
                           // l'adaptation au type de champ lisible plutôt que
                           // magique.
-                          symbol.latex !== undefined && kind === 'math'
+                          symbol.latex !== undefined && (kind === 'math' || kind === 'equation')
                             ? `${symbol.label} — écrit ${symbol.latex}`
                             : `${symbol.label} — écrit ${keyFace(symbol)}`
                         }

@@ -1,0 +1,388 @@
+import { useEffect, useRef, type CSSProperties } from 'react'
+import type { CardBlock, EquationStep } from '../types/cardBlock'
+import { equationStepIsSolved } from './blocks'
+import { renderMathToHtml } from './renderMath'
+import { MathFieldEditor, type MathFieldHandle } from './MathFieldEditor'
+
+type StepField = 'left' | 'right' | 'operation'
+
+function isStepEmpty(step: EquationStep): boolean {
+  return step.left.trim() === '' && step.right.trim() === '' && (step.operation ?? '').trim() === ''
+}
+
+function fieldKey(step: number, field: StepField): string {
+  return `${step}:${field}`
+}
+
+const TERM_BOX: CSSProperties = {
+  flex: 1,
+  minWidth: 96,
+  boxSizing: 'border-box',
+  padding: '8px 14px',
+  borderRadius: 10,
+  border: '1.5px solid var(--border)',
+  background: 'transparent',
+}
+
+const LEFT_BOX: CSSProperties = {
+  ...TERM_BOX,
+  borderColor: 'color-mix(in oklch, #3a6bb0, transparent 30%)',
+  background: 'color-mix(in oklch, #3a6bb0, transparent 92%)',
+}
+
+const RIGHT_BOX: CSSProperties = {
+  ...TERM_BOX,
+  borderColor: 'color-mix(in oklch, #b8791f, transparent 30%)',
+  background: 'color-mix(in oklch, #b8791f, transparent 92%)',
+}
+
+const SOLVED_BOX: CSSProperties = {
+  ...TERM_BOX,
+  borderWidth: 2,
+  borderColor: 'color-mix(in oklch, #2f8f5b, transparent 25%)',
+  background: 'color-mix(in oklch, #2f8f5b, transparent 93%)',
+  color: '#1f6a3f',
+}
+
+const OPERATION_FIELD_STYLE: CSSProperties = {
+  flex: 1,
+  textAlign: 'center',
+  fontSize: 12.5,
+  fontWeight: 800,
+  color: 'var(--destructive)',
+}
+
+const OPERATION_MIRROR_STYLE: CSSProperties = {
+  ...OPERATION_FIELD_STYLE,
+  minHeight: 20,
+  overflowX: 'auto',
+}
+
+const RAW_FIELD_STYLE: CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  font: 'inherit',
+  fontSize: 14,
+  padding: '4px 6px',
+  borderRadius: 6,
+  border: '1px solid var(--border)',
+  background: 'transparent',
+  color: 'inherit',
+}
+
+/**
+ * Un des trois champs d'une étape (membre gauche, membre droit, ou
+ * l'opération qui suit) — le même contrat clavier que `MathFieldEditor`
+ * offre déjà à une formule (Entrée, Retour arrière, Suppr, flèches), avec un
+ * repli LaTeX brut qui l'honore À L'IDENTIQUE : voir `MathFieldEditor` et
+ * `MathBlockField`, dont ce composant reprend la même logique de repli.
+ */
+function EquationTermField({
+  value,
+  onChangeValue,
+  ariaLabel,
+  registerHandle,
+  onFocusHandle,
+  onEnter,
+  onEnterBlock,
+  onBackspaceAtStart,
+  onDeleteAtEnd,
+  onArrowUp,
+  onArrowDown,
+  style,
+}: {
+  value: string
+  onChangeValue: (next: string) => void
+  ariaLabel: string
+  registerHandle: (handle: MathFieldHandle | null) => void
+  onFocusHandle: () => void
+  /** Entrée (sans Ctrl/Cmd) : toujours « nouvelle étape », jamais une coupure au curseur — une étape n'a rien à couper. */
+  onEnter: () => void
+  onEnterBlock: () => void
+  onBackspaceAtStart: (rest: string) => void
+  onDeleteAtEnd: (rest: string) => void
+  onArrowUp?: () => void
+  onArrowDown?: () => void
+  style?: CSSProperties
+}) {
+  return (
+    <div onFocus={onFocusHandle} style={style}>
+      <MathFieldEditor
+        latex={value}
+        onChange={onChangeValue}
+        ariaLabel={ariaLabel}
+        ref={registerHandle}
+        onEnter={onEnter}
+        onEnterBlock={onEnterBlock}
+        onBackspaceAtStart={onBackspaceAtStart}
+        onDeleteAtEnd={onDeleteAtEnd}
+        onArrowUp={onArrowUp}
+        onArrowDown={onArrowDown}
+        fallback={
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <input
+              aria-label={`${ariaLabel} (LaTeX)`}
+              value={value}
+              spellCheck={false}
+              onChange={event => onChangeValue(event.target.value)}
+              onKeyDown={event => {
+                const field = event.currentTarget
+                if (event.key === 'Enter') {
+                  if (event.shiftKey) return
+                  event.preventDefault()
+                  if (event.ctrlKey || event.metaKey) onEnterBlock()
+                  else onEnter()
+                  return
+                }
+                if (event.key === 'Backspace' && field.selectionStart === 0 && field.selectionEnd === 0) {
+                  event.preventDefault()
+                  onBackspaceAtStart(field.value)
+                  return
+                }
+                if (
+                  event.key === 'Delete' &&
+                  field.selectionStart === field.value.length &&
+                  field.selectionEnd === field.value.length
+                ) {
+                  event.preventDefault()
+                  onDeleteAtEnd(field.value)
+                  return
+                }
+                if (event.key === 'ArrowUp' && onArrowUp !== undefined) {
+                  event.preventDefault()
+                  onArrowUp()
+                  return
+                }
+                if (event.key === 'ArrowDown' && onArrowDown !== undefined) {
+                  event.preventDefault()
+                  onArrowDown()
+                }
+              }}
+              style={RAW_FIELD_STYLE}
+            />
+            <div
+              style={{ minHeight: 18, overflowX: 'auto' }}
+              // Safe: `renderMathToHtml` escapes the text it emits, and
+              // `trust: false` keeps it from building links or embedding
+              // resources (see renderMath tests).
+              dangerouslySetInnerHTML={{ __html: renderMathToHtml(value, false) }}
+            />
+          </div>
+        }
+      />
+    </div>
+  )
+}
+
+export interface EquationBlockFieldProps {
+  block: Extract<CardBlock, { kind: 'equation' }>
+  index: number
+  onChange: (block: CardBlock) => void
+  /** Ctrl+Entrée : un nouveau bloc après celui-ci. */
+  onEnterBlock: () => void
+  /** Retour arrière tout en début du bloc, quand il est vide : il demande à disparaître vers le précédent. */
+  onDeleteEmpty: () => void
+  /** Suppr tout en fin du bloc, quand il est vide : il demande à disparaître vers le suivant. */
+  onDeleteForward: () => void
+  /** Le champ vivant du membre focalisé, pour les touches du bandeau de symboles. */
+  onFieldChange: (handle: MathFieldHandle | null) => void
+}
+
+/**
+ * L'éditeur d'un bloc équation : une suite d'étapes, chacune un membre gauche
+ * et un membre droit dans des cases de couleur, séparées par « = », et
+ * l'opération qui mène à l'étape suivante — sauf sur la dernière, qui n'en a
+ * pas (voir `equationStepIsSolved`).
+ *
+ * Entrée (dans n'importe lequel des trois champs d'une étape) ajoute une
+ * étape après celle-ci — le geste « aller à la ligne » demandé pour une
+ * équation, symétrique de la LIGNE qu'Entrée ajoute dans une formule
+ * (`MathLinesField`). Retour arrière en tout début du membre gauche d'une
+ * étape VIDE la fusionne avec la précédente (ou, sur la première étape,
+ * demande la disparition du bloc) ; Suppr en toute fin du membre droit fait
+ * de même vers la suivante — jamais quand l'étape porte encore du contenu,
+ * pour ne jamais effacer en silence ce que l'élève vient d'écrire.
+ */
+export function EquationBlockField({
+  block,
+  index,
+  onChange,
+  onEnterBlock,
+  onDeleteEmpty,
+  onDeleteForward,
+  onFieldChange,
+}: EquationBlockFieldProps) {
+  // Un bloc équation a toujours au moins une étape à l'écran, même si son
+  // contenu sur disque est un `steps: []` malformé (voir `sanitizeBlock`) —
+  // le premier changement réécrit alors ce repli dans le bloc lui-même.
+  const steps = block.steps.length > 0 ? block.steps : [{ left: '', right: '' }]
+  const handles = useRef(new Map<string, MathFieldHandle | null>())
+  const pending = useRef<{ step: number; field: StepField; at: 'start' | 'end' } | null>(null)
+
+  // Le focus est posé APRÈS le rendu qui a ajouté ou retiré une étape : c'est
+  // le seul moment où le handle de l'étape visée existe — même couture que
+  // `MathLinesField`.
+  useEffect(() => {
+    const target = pending.current
+    if (target === null) return
+    pending.current = null
+    const handle = handles.current.get(fieldKey(target.step, target.field))
+    if (handle === null || handle === undefined) return
+    if (target.at === 'end') handle.focusEnd()
+    else handle.focusStart()
+  })
+
+  function write(next: EquationStep[]) {
+    onChange({ kind: 'equation', steps: next, ...(block.standalone === true ? { standalone: true } : {}) })
+  }
+
+  function setField(stepIndex: number, field: 'left' | 'right' | 'operation', value: string) {
+    write(steps.map((step, i) => (i === stepIndex ? { ...step, [field]: value } : step)))
+  }
+
+  /** Focus DIRECT sur une étape déjà montée — pas de `pending` : un simple déplacement ne change pas le contenu, donc ne provoque aucun rendu. */
+  function focusField(stepIndex: number, field: StepField, at: 'start' | 'end') {
+    const handle = handles.current.get(fieldKey(stepIndex, field))
+    if (handle === null || handle === undefined) return
+    if (at === 'end') handle.focusEnd()
+    else handle.focusStart()
+  }
+
+  function addStepAfter(stepIndex: number) {
+    const next = [...steps]
+    next.splice(stepIndex + 1, 0, { left: '', right: '' })
+    write(next)
+    pending.current = { step: stepIndex + 1, field: 'left', at: 'start' }
+  }
+
+  function removeStep(stepIndex: number, focus: { step: number; field: StepField; at: 'start' | 'end' }) {
+    write(steps.filter((_, i) => i !== stepIndex))
+    pending.current = focus
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {steps.map((step, stepIndex) => {
+        const isFirst = stepIndex === 0
+        const isLast = stepIndex === steps.length - 1
+        const solved = equationStepIsSolved(steps, stepIndex)
+        const boxStyle = solved ? SOLVED_BOX : undefined
+        return (
+          <div key={stepIndex} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 10 }}>
+              <EquationTermField
+                value={step.left}
+                onChangeValue={value => setField(stepIndex, 'left', value)}
+                ariaLabel={`Membre gauche de l'étape ${stepIndex + 1} du bloc ${index + 1}`}
+                registerHandle={handle => handles.current.set(fieldKey(stepIndex, 'left'), handle)}
+                onFocusHandle={() => onFieldChange(handles.current.get(fieldKey(stepIndex, 'left')) ?? null)}
+                onEnter={() => addStepAfter(stepIndex)}
+                onEnterBlock={onEnterBlock}
+                onBackspaceAtStart={rest => {
+                  if (rest !== '') return
+                  if (isFirst) {
+                    if (steps.length === 1 && isStepEmpty(step)) onDeleteEmpty()
+                    return
+                  }
+                  if (!isStepEmpty(step)) return
+                  removeStep(stepIndex, { step: stepIndex - 1, field: 'right', at: 'end' })
+                }}
+                onDeleteAtEnd={rest => {
+                  if (rest !== '') return
+                  focusField(stepIndex, 'right', 'start')
+                }}
+                onArrowUp={stepIndex > 0 ? () => focusField(stepIndex - 1, 'left', 'end') : undefined}
+                onArrowDown={!isLast ? () => focusField(stepIndex + 1, 'left', 'start') : undefined}
+                style={boxStyle ?? LEFT_BOX}
+              />
+              <div
+                aria-hidden
+                style={{
+                  flex: '0 0 auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  fontSize: 18,
+                  fontWeight: 700,
+                  opacity: 0.75,
+                }}
+              >
+                =
+              </div>
+              <EquationTermField
+                value={step.right}
+                onChangeValue={value => setField(stepIndex, 'right', value)}
+                ariaLabel={`Membre droit de l'étape ${stepIndex + 1} du bloc ${index + 1}`}
+                registerHandle={handle => handles.current.set(fieldKey(stepIndex, 'right'), handle)}
+                onFocusHandle={() => onFieldChange(handles.current.get(fieldKey(stepIndex, 'right')) ?? null)}
+                onEnter={() => addStepAfter(stepIndex)}
+                onEnterBlock={onEnterBlock}
+                onBackspaceAtStart={rest => {
+                  if (rest !== '') return
+                  focusField(stepIndex, 'left', 'end')
+                }}
+                onDeleteAtEnd={rest => {
+                  if (rest !== '') return
+                  if (isLast) {
+                    if (steps.length === 1 && isStepEmpty(step)) onDeleteForward()
+                    return
+                  }
+                  focusField(stepIndex, 'operation', 'start')
+                }}
+                onArrowUp={stepIndex > 0 ? () => focusField(stepIndex - 1, 'right', 'end') : undefined}
+                onArrowDown={!isLast ? () => focusField(stepIndex + 1, 'right', 'start') : undefined}
+                style={boxStyle ?? RIGHT_BOX}
+              />
+            </div>
+
+            {!isLast && (
+              // L'opération n'est SAISIE qu'une fois (un seul champ vivant,
+              // sous le membre gauche) mais AFFICHÉE deux fois — une fois
+              // sous chaque membre, chacune centrée sous sa case — pour bien
+              // montrer visuellement qu'elle porte sur les DEUX à la fois.
+              // Voir `EquationStep.operation` dans `cardBlock.ts`.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <EquationTermField
+                  value={step.operation ?? ''}
+                  onChangeValue={value => setField(stepIndex, 'operation', value)}
+                  ariaLabel={`Opération après l'étape ${stepIndex + 1} du bloc ${index + 1}`}
+                  registerHandle={handle => handles.current.set(fieldKey(stepIndex, 'operation'), handle)}
+                  onFocusHandle={() => onFieldChange(handles.current.get(fieldKey(stepIndex, 'operation')) ?? null)}
+                  onEnter={() => addStepAfter(stepIndex)}
+                  onEnterBlock={onEnterBlock}
+                  onBackspaceAtStart={rest => {
+                    if (rest !== '') return
+                    focusField(stepIndex, 'right', 'end')
+                  }}
+                  onDeleteAtEnd={rest => {
+                    if (rest !== '') return
+                    const nextStep = steps[stepIndex + 1]
+                    if (nextStep !== undefined && isStepEmpty(nextStep)) {
+                      removeStep(stepIndex + 1, { step: stepIndex, field: 'operation', at: 'end' })
+                      return
+                    }
+                    focusField(stepIndex + 1, 'left', 'start')
+                  }}
+                  style={OPERATION_FIELD_STYLE}
+                />
+                {/* La même largeur que le « = » de la ligne au-dessus : sans
+                    elle, les deux moitiés de cette ligne se rapprocheraient
+                    l'une de l'autre et ne resteraient plus sous leurs cases. */}
+                <div aria-hidden style={{ flex: '0 0 auto', width: 18 }} />
+                {/* Le double affiché à droite : purement visuel, jamais un
+                    second champ — taper à gauche le met à jour comme le
+                    reste du rendu. `aria-hidden` pour ne pas faire lire le
+                    même texte deux fois. */}
+                <div
+                  aria-hidden
+                  data-testid={`equation-op-mirror-${index}-${stepIndex}`}
+                  style={OPERATION_MIRROR_STYLE}
+                  dangerouslySetInnerHTML={{ __html: renderMathToHtml(step.operation ?? '', false) }}
+                />
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
