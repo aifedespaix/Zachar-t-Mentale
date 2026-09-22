@@ -1676,30 +1676,37 @@
   --be-text-fs: 13.5px;
   --be-text-min-h: 44px;
 
-  --sb-panel-pad: 6px 9px;
-  --sb-panel-gap: 4px 10px;
-  --sb-family-pad: 2px 7px 2px 6px;
-  --sb-key-min-w: 27px;
-  --sb-key-h: 27px;
-  --sb-key-fs: 14px;
+  /* The families panel is the tallest part of the band once a tab with many
+     families is open, and it stays open on purpose (see `SymbolBand` — which
+     tab is open is never touched by density). Every property that adds up
+     across its several wrapped rows is trimmed here, since a couple of
+     pixels per row is the only lever left that doesn't mean fewer symbols. */
+  --sb-panel-pad: 4px 8px;
+  --sb-panel-gap: 3px 8px;
+  --sb-family-pad: 1px 6px 1px 5px;
+  --sb-key-min-w: 24px;
+  --sb-key-h: 24px;
+  --sb-key-fs: 13px;
+  --sb-symbol-gap: 4px;
+  --sb-family-label-fs: 9px;
   --sb-target-fs: 10px;
   --sb-target-pad: 2px 8px;
 }
 
 [data-density='compact'] .symbol-band__head {
-  gap: 5px;
-  padding: 5px 8px 0;
+  gap: 4px;
+  padding: 4px 8px 0;
 }
 
 [data-density='compact'] .symbol-band__tab {
-  height: 26px;
-  padding: 0 8px;
+  height: 24px;
+  padding: 0 7px;
   gap: 4px;
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 [data-density='compact'] .symbol-band__hide {
-  width: 22px;
-  height: 22px;
-  margin-bottom: 4px;
+  width: 20px;
+  height: 20px;
+  margin-bottom: 3px;
 }

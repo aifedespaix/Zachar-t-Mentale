@@ -185,7 +185,7 @@ export const SymbolBand = memo(function SymbolBand({
                 ) : (
                   <span style={familyLabel(hue)}>{family.name}</span>
                 )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sb-symbol-gap, 5px)' }}>
                   {family.symbols.map(symbol => {
                     const unavailable =
                       family.formulaOnly === true
@@ -257,7 +257,7 @@ function keyFace(symbol: PaletteSymbol): string {
  */
 function familyLabel(hue: string): CSSProperties {
   return {
-    fontSize: 10,
+    fontSize: 'var(--sb-family-label-fs, 10px)',
     fontWeight: 700,
     textTransform: 'uppercase',
     letterSpacing: '0.04em',

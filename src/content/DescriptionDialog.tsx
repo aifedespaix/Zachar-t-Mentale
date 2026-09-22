@@ -556,10 +556,10 @@ export function DescriptionDialog({
             outline: 'none',
           }}
         >
-          <NavArrow side="top" target={prevSibling} create={onCreate?.top} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} />
-          <NavArrow side="bottom" target={nextSibling} create={onCreate?.bottom} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} />
-          <NavArrow side="left" target={parentTarget} create={onCreate?.left} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} />
-          <NavArrow side="right" target={childTarget} create={onCreate?.right} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} />
+          <NavArrow side="top" target={prevSibling} create={onCreate?.top} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
+          <NavArrow side="bottom" target={nextSibling} create={onCreate?.bottom} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
+          <NavArrow side="left" target={parentTarget} create={onCreate?.left} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
+          <NavArrow side="right" target={childTarget} create={onCreate?.right} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
 
           {/* The two chrome controls of the top-right corner, in ONE
               absolutely-positioned row: the width toggle and the cross. The row
@@ -603,9 +603,37 @@ export function DescriptionDialog({
             </Hint>
           </div>
 
-          <header style={{ padding: 'var(--dd-header-pad, 16px 90px 14px 20px)', borderBottom: '1px solid var(--border)' }}>
+          <header
+            style={{
+              padding: 'var(--dd-header-pad, 16px 90px 14px 20px)',
+              borderBottom: '1px solid var(--border)',
+              // Compact stacks the breadcrumb ABOVE the title, comfortable's
+              // long-standing layout, and costs its own line of height — the
+              // one thing this dialog has to give up on a short screen. In
+              // compact the breadcrumb moves onto the title's own line
+              // instead, as a small label beside it, saving that line
+              // entirely rather than just shrinking it.
+              display: narrow ? 'flex' : 'block',
+              alignItems: narrow ? 'center' : undefined,
+              gap: narrow ? 10 : undefined,
+            }}
+          >
             {breadcrumb.length > 0 && (
-              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 'var(--dd-breadcrumb-mb, 7px)' }}>{breadcrumb.join(' › ')}</div>
+              <div
+                style={{
+                  flex: narrow ? '0 1 auto' : undefined,
+                  minWidth: narrow ? 0 : undefined,
+                  maxWidth: narrow ? '40%' : undefined,
+                  overflow: narrow ? 'hidden' : undefined,
+                  textOverflow: narrow ? 'ellipsis' : undefined,
+                  whiteSpace: 'nowrap',
+                  fontSize: 11,
+                  opacity: 0.6,
+                  marginBottom: narrow ? 0 : 'var(--dd-breadcrumb-mb, 7px)',
+                }}
+              >
+                {breadcrumb.join(' › ')}
+              </div>
             )}
             <DialogPrimitive.Title asChild>
               <div
@@ -619,7 +647,9 @@ export function DescriptionDialog({
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
-                    width: '100%',
+                    width: narrow ? undefined : '100%',
+                    flex: narrow ? '1 1 auto' : undefined,
+                    minWidth: narrow ? 0 : undefined,
                     boxSizing: 'border-box',
                     padding: 'var(--dd-title-pad, 9px 14px)',
                     borderRadius: 9,
@@ -889,11 +919,26 @@ const ARROW_SIDE: Record<string, NavSide> = {
  * visibly jump off its edge. `CardNode`'s `EdgeButton` documents the same trap.
  */
 type NavPosition = CSSProperties & { x?: string; y?: string }
-const NAV_POSITION: Record<NavSide, NavPosition> = {
-  top: { top: -18, left: '50%', x: '-50%' },
-  bottom: { bottom: -18, left: '50%', x: '-50%' },
-  left: { left: -18, top: '50%', y: '-50%' },
-  right: { right: -18, top: '50%', y: '-50%' },
+/**
+ * `narrow` pushes the button further OUTSIDE the dialog's border instead of
+ * shrinking it: the button already sits more outside than in at the default
+ * offset (30px wide, so -18 leaves 18px outside against 12px overlapping the
+ * content), and moving it out further is what actually gives the content
+ * back the few pixels it was losing to the overlap, rather than making the
+ * button itself harder to hit.
+ */
+function navPosition(side: NavSide, narrow: boolean): NavPosition {
+  const offset = narrow ? -22 : -18
+  switch (side) {
+    case 'top':
+      return { top: offset, left: '50%', x: '-50%' }
+    case 'bottom':
+      return { bottom: offset, left: '50%', x: '-50%' }
+    case 'left':
+      return { left: offset, top: '50%', y: '-50%' }
+    case 'right':
+      return { right: offset, top: '50%', y: '-50%' }
+  }
 }
 
 /** What each edge leads to, in one word, so the arrow does not have to be decoded. */
@@ -958,6 +1003,7 @@ function NavArrow({
   create,
   onNavigate,
   onOpenCreatePrompt,
+  narrow,
 }: {
   side: NavSide
   target?: DescriptionNavTarget
@@ -965,6 +1011,8 @@ function NavArrow({
   onNavigate?: (id: string) => void
   /** Opens the title prompt instead of creating blind — see `createPrompt` on the dialog. */
   onOpenCreatePrompt: (side: NavSide) => void
+  /** Pushes the button further outside the dialog's border — see `navPosition`. */
+  narrow: boolean
 }) {
   const Icon = NAV_ICON[side]
 
@@ -976,6 +1024,7 @@ function NavArrow({
     return (
       <EdgeButton
         side={side}
+        narrow={narrow}
         colors={target.colors}
         ariaLabel={`Aller à « ${target.title} »`}
         onActivate={() => onNavigate(target.id)}
@@ -999,6 +1048,7 @@ function NavArrow({
     return (
       <EdgeButton
         side={side}
+        narrow={narrow}
         colors={create.colors}
         ariaLabel={NAV_CREATE_LABEL[side]}
         onActivate={() => onOpenCreatePrompt(side)}
@@ -1023,6 +1073,7 @@ function NavArrow({
  */
 function EdgeButton({
   side,
+  narrow,
   colors,
   ariaLabel,
   onActivate,
@@ -1030,6 +1081,7 @@ function EdgeButton({
   children,
 }: {
   side: NavSide
+  narrow: boolean
   colors?: TitleChipColors
   ariaLabel: string
   onActivate: () => void
@@ -1071,7 +1123,7 @@ function EdgeButton({
             color: colors?.text ?? 'inherit',
             boxShadow: '0 4px 14px rgba(0, 0, 0, 0.2)',
             cursor: 'pointer',
-            ...NAV_POSITION[side],
+            ...navPosition(side, narrow),
           }}
         >
           {children}
