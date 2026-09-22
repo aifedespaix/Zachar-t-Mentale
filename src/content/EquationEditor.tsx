@@ -318,6 +318,25 @@ function EquationOperationField({
         onChange={event => onChangeValue(event.target.value)}
         onKeyDown={event => {
           const field = event.currentTarget
+          // Le clavier physique tape « * » et « / » pour multiplier et
+          // diviser, mais ce champ est du LaTeX brut : sans ça, KaTeX les
+          // rendrait tels quels au lieu des vrais signes × et ÷. On
+          // remplace donc la frappe elle-même, comme `pasteInto` dans
+          // `FieldContextMenu.tsx` — via le setter natif, pour que React
+          // voie le changement par son propre `onChange`.
+          if ((event.key === '*' || event.key === '/') && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            event.preventDefault()
+            const replacement = event.key === '*' ? '\\times ' : '\\div '
+            const start = field.selectionStart ?? field.value.length
+            const end = field.selectionEnd ?? start
+            const nextValue = field.value.slice(0, start) + replacement + field.value.slice(end)
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+            setter?.call(field, nextValue)
+            field.dispatchEvent(new Event('input', { bubbles: true }))
+            const caret = start + replacement.length
+            field.setSelectionRange(caret, caret)
+            return
+          }
           if (event.key === 'Enter') {
             if (event.shiftKey) return
             event.preventDefault()

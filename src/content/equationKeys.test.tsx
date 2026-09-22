@@ -280,4 +280,29 @@ describe('le bloc équation — clavier', () => {
     expect(operationDisplayAgain.tagName).not.toBe('INPUT')
     expect(operationDisplayAgain.innerHTML).toBe(screen.getByTestId('equation-op-mirror-0-0').innerHTML)
   })
+
+  it('dans le champ opération, « * » écrit un signe multiplié et « / » un signe divisé', async () => {
+    const onState = vi.fn()
+    render(
+      <Harness
+        initial={[{ kind: 'equation', steps: [{ left: '2x', right: '8' }, { left: 'x', right: '4' }] }]}
+        onState={onState}
+      />
+    )
+    const operationButton = await screen.findByTestId('equation-op-input-0-0')
+    fireEvent.click(operationButton)
+    const operationInput = (await screen.findByTestId('equation-op-input-0-0')) as HTMLInputElement
+
+    fireEvent.keyDown(operationInput, { key: '*' })
+    await waitFor(() => expect(lastBlocks(onState)[0]).toEqual({
+      kind: 'equation',
+      steps: [{ left: '2x', right: '8', operation: '\\times ' }, { left: 'x', right: '4' }],
+    }))
+
+    fireEvent.keyDown(operationInput, { key: '/' })
+    await waitFor(() => expect(lastBlocks(onState)[0]).toEqual({
+      kind: 'equation',
+      steps: [{ left: '2x', right: '8', operation: '\\times \\div ' }, { left: 'x', right: '4' }],
+    }))
+  })
 })
