@@ -358,6 +358,7 @@ function DescriptionAction({
 const MEDIA_TITLE_HEADINGS: Record<Exclude<CardBlockKind, 'text' | 'question'>, string> = {
   table: 'À quel titre correspond ce tableau ?',
   math: 'À quel titre correspond cette formule ?',
+  equation: 'À quel titre correspond cette équation ?',
   image: 'À quel titre correspond cette image ?',
 }
 

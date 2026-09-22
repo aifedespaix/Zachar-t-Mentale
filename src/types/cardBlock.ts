@@ -25,6 +25,22 @@
  */
 export type TableCell = string | { latex: string }
 
+/**
+ * Une étape d'une équation : ses deux membres, et l'opération qui mène à
+ * l'étape SUIVANTE — absente sur la dernière, qui n'en a pas.
+ *
+ * Une seule `operation`, jamais deux : le principe même d'une équation est
+ * qu'on applique la MÊME chose des deux côtés, donc un champ par membre
+ * romprait cette contrainte pédagogique au lieu de la montrer. Elle est
+ * affichée deux fois côté rendu (une fois sous chaque membre), mais n'est
+ * saisie qu'une fois ici.
+ */
+export interface EquationStep {
+  left: string
+  right: string
+  operation?: string
+}
+
 type CardBlockShape =
   | { kind: 'text'; text: string }
   /**
@@ -34,6 +50,16 @@ type CardBlockShape =
    * `kind` : la chaîne traverse telle quelle, lignes comprises.
    */
   | { kind: 'math'; latex: string }
+  /**
+   * Un bloc équation : une suite d'étapes de résolution, membre gauche et
+   * membre droit alignés, une opération entre deux étapes consécutives.
+   *
+   * Une liste plutôt qu'un `latex` unique parce que la structure (deux
+   * membres distincts, plus l'opération qui les relie) n'a pas d'équivalent
+   * dans une chaîne LaTeX — contrairement à `math`, où un `\n` suffit à
+   * séparer des lignes qui restent chacune une formule complète.
+   */
+  | { kind: 'equation'; steps: EquationStep[] }
   /**
    * `asset` is a file name inside the map's sidecar folder, never an absolute
    * path — an absolute path breaks the moment the workspace is moved or the

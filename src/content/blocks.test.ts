@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest'
 import {
   blockGroups,
   blocksToPlainText,
+  equationStepIsSolved,
+  equationToPlainText,
+  isBareVariable,
   latexToPlainText,
   nonTextKinds,
   normalizeContent,
@@ -9,7 +12,7 @@ import {
   reconcileCards,
   sanitizeBlocks,
 } from './blocks'
-import type { CardBlock } from '../types/cardBlock'
+import type { CardBlock, EquationStep } from '../types/cardBlock'
 import type { Card } from '../types/card'
 
 describe('latexToPlainText', () => {
@@ -428,5 +431,104 @@ describe('nonTextKinds — a header is structure, not content', () => {
         { kind: 'math', latex: 'x' },
       ])
     ).toEqual(['math', 'table'])
+  })
+
+  it('places equation between math and image', () => {
+    expect(
+      nonTextKinds([
+        { kind: 'image', asset: 'a.png', alt: '', width: 1, height: 1 },
+        { kind: 'equation', steps: [{ left: 'x', right: '4' }] },
+        { kind: 'math', latex: 'x' },
+      ])
+    ).toEqual(['math', 'equation', 'image'])
+  })
+})
+
+describe('isBareVariable — la variable isolée qui déclenche le résultat', () => {
+  it('reconnaît une lettre seule, avec ou sans indice', () => {
+    expect(isBareVariable('x')).toBe(true)
+    expect(isBareVariable(' x ')).toBe(true)
+    expect(isBareVariable('x_1')).toBe(true)
+    expect(isBareVariable('n_{max}')).toBe(true)
+    expect(isBareVariable('\\alpha')).toBe(true)
+  })
+
+  it('refuse tout ce qui porte une opération ou plus d’un terme', () => {
+    expect(isBareVariable('2x')).toBe(false)
+    expect(isBareVariable('x + 1')).toBe(false)
+    expect(isBareVariable('')).toBe(false)
+    expect(isBareVariable('11')).toBe(false)
+  })
+})
+
+describe('equationStepIsSolved — jamais saisi, toujours déduit', () => {
+  it('ne marque que la DERNIÈRE étape, et seulement si un membre est une variable seule', () => {
+    const steps: EquationStep[] = [
+      { left: '2x + 3', right: '11', operation: '- 3' },
+      { left: '2x', right: '8', operation: '\\div 2' },
+      { left: 'x', right: '4' },
+    ]
+    expect(equationStepIsSolved(steps, 0)).toBe(false)
+    expect(equationStepIsSolved(steps, 1)).toBe(false)
+    expect(equationStepIsSolved(steps, 2)).toBe(true)
+  })
+
+  it('marque aussi quand la variable seule est à DROITE', () => {
+    const steps: EquationStep[] = [{ left: '4', right: 'x' }]
+    expect(equationStepIsSolved(steps, 0)).toBe(true)
+  })
+
+  it('une variable isolée qui n’est pas la dernière étape ne compte pas comme résultat', () => {
+    const steps: EquationStep[] = [{ left: 'x', right: '4', operation: '\\times 2' }, { left: '2x', right: '8' }]
+    expect(equationStepIsSolved(steps, 0)).toBe(false)
+  })
+})
+
+describe('equationToPlainText — le miroir texte d’un bloc équation', () => {
+  it('une ligne « gauche = droite » par étape, l’opération entre parenthèses entre deux étapes', () => {
+    const steps: EquationStep[] = [
+      { left: '2x + 3', right: '11', operation: '- 3' },
+      { left: '2x', right: '8', operation: '\\div 2' },
+      { left: 'x', right: '4' },
+    ]
+    expect(equationToPlainText(steps)).toBe('2x + 3 = 11\n(- 3)\n2x = 8\n(÷ 2)\nx = 4')
+  })
+
+  it('omet une opération vide plutôt que d’écrire des parenthèses vides', () => {
+    const steps: EquationStep[] = [{ left: 'x', right: '1' }, { left: 'x', right: '2' }]
+    expect(equationToPlainText(steps)).toBe('x = 1\nx = 2')
+  })
+})
+
+describe('un bloc équation traverse normalizeContent/sanitizeBlocks sans perte', () => {
+  it('round-trip', () => {
+    const blocks: CardBlock[] = [
+      {
+        kind: 'equation',
+        steps: [
+          { left: '2x + 3', right: '11', operation: '- 3' },
+          { left: '2x', right: '8' },
+        ],
+      },
+    ]
+    const { content, definition } = normalizeContent(blocks)
+    expect(content).toEqual(blocks)
+    expect(definition).toBe('2x + 3 = 11\n(- 3)\n2x = 8')
+    expect(sanitizeBlocks(content)).toEqual(blocks)
+  })
+
+  it('un bloc dont toutes les étapes sont vides disparaît, comme un texte ou une formule vides', () => {
+    const blocks: CardBlock[] = [{ kind: 'equation', steps: [{ left: '', right: '' }, { left: '', right: '  ' }] }]
+    expect(normalizeContent(blocks)).toEqual({})
+  })
+
+  it('une opération faite de blancs ne survit pas à sanitizeBlocks (repli sur "absente")', () => {
+    const raw = [{ kind: 'equation', steps: [{ left: 'x', right: '4', operation: '   ' }] }]
+    expect(sanitizeBlocks(raw)).toEqual([{ kind: 'equation', steps: [{ left: 'x', right: '4' }] }])
+  })
+
+  it('une étape malformée (membre manquant) fait tomber tout le bloc plutôt que de la deviner', () => {
+    const raw = [{ kind: 'equation', steps: [{ left: 'x' }] }]
+    expect(sanitizeBlocks(raw)).toEqual([])
   })
 })

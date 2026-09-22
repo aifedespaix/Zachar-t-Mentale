@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Equal,
   Heading1,
   ImagePlus,
   MessageCircleQuestion,
@@ -14,8 +15,9 @@ import {
   Type,
   X,
 } from 'lucide-react'
-import type { CardBlock, CardBlockKind, TableCell } from '../types/cardBlock'
-import { blockGroups, questionLabels } from './blocks'
+import type { CardBlock, CardBlockKind, EquationStep, TableCell } from '../types/cardBlock'
+import { blockGroups, equationToPlainText, questionLabels } from './blocks'
+import { EquationBlockField } from './EquationEditor'
 import { canMoveBlock, movePlan } from './blockMove'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle, type MathfieldElement } from './MathFieldEditor'
@@ -52,6 +54,7 @@ export type SwitchableKind = 'text' | 'math'
 export const KIND_LABEL: Record<CardBlockKind, string> = {
   text: 'Texte',
   math: 'Formule',
+  equation: 'Équation',
   table: 'Tableau',
   image: 'Image',
   question: 'Question',
@@ -82,6 +85,8 @@ function sourceOf(block: CardBlock): string {
       return block.text
     case 'math':
       return block.latex
+    case 'equation':
+      return equationToPlainText(block.steps)
     case 'image':
       return block.alt
     case 'question':
@@ -95,6 +100,23 @@ function sourceOf(block: CardBlock): string {
         .map(row => row.join('\t'))
         .join('\n')
   }
+}
+
+/**
+ * Une étape par ligne de `source` (même convention que texte ↔ formule : un
+ * saut de ligne EST une ligne), coupée au premier « = » quand il y en a un.
+ *
+ * Repli honnête plutôt que magique : une ligne sans « = » devient un membre
+ * gauche avec un membre droit vide, jamais une équation inventée.
+ */
+function equationStepsFromSource(source: string): EquationStep[] {
+  const lines = source === '' ? [''] : source.split('\n')
+  return lines.map(line => {
+    const at = line.indexOf('=')
+    return at === -1
+      ? { left: line, right: '' }
+      : { left: line.slice(0, at).trim(), right: line.slice(at + 1).trim() }
+  })
 }
 
 /**
@@ -122,6 +144,8 @@ export function convertBlock(block: CardBlock, kind: CardBlockKind): CardBlock {
       return { kind: 'text', text: source, ...standalone }
     case 'math':
       return { kind: 'math', latex: source, ...standalone }
+    case 'equation':
+      return { kind: 'equation', steps: equationStepsFromSource(source), ...standalone }
     case 'question':
       // Marking a sentence as a header, and un-marking it, is the same
       // reversible gesture as text ↔ formula: the string crosses untouched.
@@ -774,11 +798,14 @@ export function BlockEditor({
       })
       return
     }
-    if (block?.kind === 'math') {
+    if (block?.kind === 'math' || block?.kind === 'equation') {
       // Le champ VIVANT quand il est là : lui seul sait où est le caret.
       // Un caractère de langue n'a pas de forme LaTeX : sa touche est grisée
       // dans une formule, donc ce repli est une ceinture et non un chemin — il
       // écrit le glyphe plutôt que rien.
+      //
+      // Pour une équation, `activeField` est celui des TROIS champs de
+      // l'étape qui a le focus — voir `onFieldChange` dans `EquationBlockField`.
       const latex = symbol.latex ?? symbol.glyph
       activeField?.insert(latex, symbol.plain ?? latex)
     }
@@ -1051,7 +1078,8 @@ export function BlockEditor({
   // Une famille « formule seulement » vaut dans une formule, et dans une
   // cellule de formule d'un tableau — pas dans un texte, où `\frac{}{}`  n'a
   // aucun sens.
-  const structuresApply = activeKind === 'math' || (activeKind === 'table' && focusedFieldKind === 'math')
+  const structuresApply =
+    activeKind === 'math' || activeKind === 'equation' || (activeKind === 'table' && focusedFieldKind === 'math')
   // L'inverse exact : la cible accepte-t-elle du TEXTE simple ? C'est ce qui
   // décide si les familles de langue (à venir) s'appliquent.
   const textApply =
@@ -1834,7 +1862,19 @@ function BlockKindMenu({
           }
           style={{ ...GHOST_BUTTON, opacity: disabled ? 0.4 : 0.85, cursor: disabled ? 'default' : 'pointer' }}
         >
-          {kind === 'math' ? <Sigma size={13} /> : kind === 'table' ? <Table2 size={13} /> : kind === 'image' ? <ImagePlus size={13} /> : kind === 'question' ? <Heading1 size={13} /> : <Type size={13} />}
+          {kind === 'math' ? (
+            <Sigma size={13} />
+          ) : kind === 'equation' ? (
+            <Equal size={13} />
+          ) : kind === 'table' ? (
+            <Table2 size={13} />
+          ) : kind === 'image' ? (
+            <ImagePlus size={13} />
+          ) : kind === 'question' ? (
+            <Heading1 size={13} />
+          ) : (
+            <Type size={13} />
+          )}
           {current}
           <ChevronDown size={12} />
         </button>
@@ -1866,6 +1906,21 @@ function BlockKindMenu({
           <Sigma size={14} />
           Formule
           <span style={{ marginLeft: 'auto', opacity: 0.8 }}>{kind === 'math' && <Check size={13} />}</span>
+        </DropdownMenuItem>
+        {/* « Équation » suit exactement la même règle que « Tableau » juste en
+            dessous : ce n'est pas un mode réversible comme texte ↔ formule,
+            c'est une structure qu'on fait grandir depuis le bloc courant (voir
+            `equationStepsFromSource` dans `convertBlock`). */}
+        <DropdownMenuItem
+          onSelect={() => {
+            pickedType.current = true
+            onChange('equation')
+          }}
+          disabled={kind === 'equation'}
+        >
+          <Equal size={14} />
+          Équation
+          <span style={{ marginLeft: 'auto', opacity: 0.8 }}>{kind === 'equation' && <Check size={13} />}</span>
         </DropdownMenuItem>
         {/* « Tableau » est revenu dans le sélecteur de type. Il en était sorti
             quand un bloc est devenu « un tableau 1×1 qui grandit », mais c'est le
@@ -2010,6 +2065,21 @@ function BlockField({
           onChange={onChange}
           onEnterBlock={onEnterBlock}
           onSwitchKind={onSwitchKind}
+          onDeleteEmpty={onDeleteEmpty}
+          onDeleteForward={onDeleteForward}
+          onFieldChange={onFieldChange}
+        />
+        </FieldContextMenu>
+      )
+
+    case 'equation':
+      return (
+        <FieldContextMenu kind="math" onError={onError}>
+        <EquationBlockField
+          block={block}
+          index={index}
+          onChange={onChange}
+          onEnterBlock={onEnterBlock}
           onDeleteEmpty={onDeleteEmpty}
           onDeleteForward={onDeleteForward}
           onFieldChange={onFieldChange}

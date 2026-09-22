@@ -4,6 +4,7 @@ import {
   ArrowUp,
   Check,
   CopyPlus,
+  Equal,
   MessageCircleQuestion,
   Sigma,
   Table2,
@@ -100,7 +101,15 @@ export function BlockContextMenu({
 
         <ContextMenuSub>
           <ContextMenuSubTrigger disabled={!canChangeKind}>
-            {kind === 'math' ? <Sigma size={14} /> : kind === 'table' ? <Table2 size={14} /> : <Type size={14} />}
+            {kind === 'math' ? (
+              <Sigma size={14} />
+            ) : kind === 'equation' ? (
+              <Equal size={14} />
+            ) : kind === 'table' ? (
+              <Table2 size={14} />
+            ) : (
+              <Type size={14} />
+            )}
             Changer de type
           </ContextMenuSubTrigger>
           <ContextMenuSubContent>
@@ -113,6 +122,11 @@ export function BlockContextMenu({
               <Sigma size={14} />
               <span style={{ flex: 1 }}>Formule</span>
               {kind === 'math' && <Check size={13} />}
+            </ContextMenuItem>
+            <ContextMenuItem disabled={kind === 'equation'} onSelect={() => onChangeKind('equation')}>
+              <Equal size={14} />
+              <span style={{ flex: 1 }}>Équation</span>
+              {kind === 'equation' && <Check size={13} />}
             </ContextMenuItem>
             <ContextMenuItem disabled={kind === 'table'} onSelect={() => onChangeKind('table')}>
               <Table2 size={14} />

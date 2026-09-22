@@ -1,5 +1,5 @@
 import type { Card } from '../types/card'
-import type { CardBlock, CardBlockKind, TableCell } from '../types/cardBlock'
+import type { CardBlock, CardBlockKind, EquationStep, TableCell } from '../types/cardBlock'
 
 function cellText(cell: TableCell): string {
   return typeof cell === 'string' ? cell : latexToPlainText(cell.latex)
@@ -112,12 +112,62 @@ function oneLatexLineToPlainText(latex: string): string {
   return out.replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * Un identifiant seul — une lettre, ou une commande LaTeX de lettre grecque,
+ * éventuellement indicée (`x`, `\alpha`, `x_1`, `n_{max}`) — et rien d'autre.
+ *
+ * C'est le test qui détecte « la variable est isolée » sur un membre
+ * d'équation : voir `equationStepIsSolved`.
+ */
+const BARE_VARIABLE = /^(?:[a-zA-Z]|\\[a-zA-Z]+)(?:_(?:\{[^{}]*\}|[a-zA-Z0-9]))?$/
+
+export function isBareVariable(latex: string): boolean {
+  return BARE_VARIABLE.test(latex.trim())
+}
+
+/**
+ * Si l'étape `index` d'une équation EST le résultat — détecté, jamais saisi.
+ *
+ * Seule la DERNIÈRE étape peut l'être : une variable isolée au milieu d'une
+ * résolution n'est qu'une étape comme une autre, avec d'autres après elle.
+ * Le rendu s'en sert pour passer la ligne en vert et masquer l'opération qui
+ * suivrait — voir `BlockView` et l'éditeur.
+ */
+export function equationStepIsSolved(steps: EquationStep[], index: number): boolean {
+  if (index !== steps.length - 1) return false
+  const step = steps[index]
+  return step !== undefined && (isBareVariable(step.left) || isBareVariable(step.right))
+}
+
+/**
+ * Le miroir texte d'une équation : une ligne « gauche = droite » par étape,
+ * l'opération entre parenthèses entre deux étapes qui en ont une.
+ *
+ * Exportée : c'est aussi ce que `BlockEditor` lit comme `source` d'un bloc
+ * équation quand on le convertit vers un autre type (voir `sourceOf`).
+ */
+export function equationToPlainText(steps: EquationStep[]): string {
+  const lines: string[] = []
+  steps.forEach((step, index) => {
+    const left = latexToPlainText(step.left)
+    const right = latexToPlainText(step.right)
+    if (left !== '' || right !== '') lines.push(`${left} = ${right}`)
+    if (index < steps.length - 1) {
+      const operation = latexToPlainText(step.operation ?? '')
+      if (operation !== '') lines.push(`(${operation})`)
+    }
+  })
+  return lines.join('\n')
+}
+
 function blockToPlainText(block: CardBlock): string {
   switch (block.kind) {
     case 'text':
       return block.text.trim()
     case 'math':
       return latexToPlainText(block.latex)
+    case 'equation':
+      return equationToPlainText(block.steps)
     case 'image':
       // Named, never silent: this marker is what stops an image from vanishing
       // without trace from an XMind note or a QCM option.
@@ -143,6 +193,10 @@ function isEmptyBlock(block: CardBlock): boolean {
       return block.text.trim() === ''
     case 'math':
       return block.latex.trim() === ''
+    case 'equation':
+      return block.steps.every(
+        step => step.left.trim() === '' && step.right.trim() === '' && (step.operation ?? '').trim() === ''
+      )
     case 'image':
       // No asset is a broken reference, not an image; non-finite dimensions
       // would serialize to `null` and be dropped on the next load, leaving the
@@ -187,12 +241,17 @@ export function blocksToPlainText(blocks: CardBlock[]): string {
  * it — so `definition` and `content` would silently drift apart.
  */
 function cloneBlock(block: CardBlock): CardBlock {
-  // Recopié à la main dans la branche `table`, qui reconstruit ses champs un
-  // par un ; l'autre branche l'emporte par le spread.
+  // Recopiés à la main dans les branches `table` et `equation`, qui
+  // reconstruisent leurs champs un par un ; l'autre branche l'emporte par le
+  // spread.
   const standalone = block.standalone === true ? { standalone: true } : {}
-  return block.kind === 'table'
-    ? { kind: 'table', header: [...block.header], rows: block.rows.map(row => row.map(cloneCell)), ...standalone }
-    : { ...block }
+  if (block.kind === 'table') {
+    return { kind: 'table', header: [...block.header], rows: block.rows.map(row => row.map(cloneCell)), ...standalone }
+  }
+  if (block.kind === 'equation') {
+    return { kind: 'equation', steps: block.steps.map(step => ({ ...step })), ...standalone }
+  }
+  return { ...block }
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -226,6 +285,21 @@ function sanitizeBlock(raw: unknown): CardBlock | null {
       // line), but an older file may still carry it — dropped silently rather
       // than rejecting the block over a field that no longer means anything.
       return typeof block.latex === 'string' ? { kind: 'math', latex: block.latex, ...standalone } : null
+    case 'equation': {
+      if (!Array.isArray(block.steps)) return null
+      const steps: EquationStep[] = []
+      for (const rawStep of block.steps as unknown[]) {
+        if (typeof rawStep !== 'object' || rawStep === null) return null
+        const step = rawStep as Record<string, unknown>
+        if (typeof step.left !== 'string' || typeof step.right !== 'string') return null
+        // Une opération vide n'est pas stockée : elle veut dire « rien de saisi »,
+        // pas « une chaîne vide qui compte comme une opération ».
+        const operation =
+          typeof step.operation === 'string' && step.operation.trim() !== '' ? { operation: step.operation } : {}
+        steps.push({ left: step.left, right: step.right, ...operation })
+      }
+      return { kind: 'equation', steps, ...standalone }
+    }
     case 'image':
       return typeof block.asset === 'string' &&
         typeof block.alt === 'string' &&
@@ -331,7 +405,7 @@ export function contentOf(card: Card): CardBlock[] {
  * as content — and would demand a heading neither record has an entry for.
  */
 export function nonTextKinds(blocks: CardBlock[]): Exclude<CardBlockKind, 'text' | 'question'>[] {
-  const order: Exclude<CardBlockKind, 'text' | 'question'>[] = ['math', 'image', 'table']
+  const order: Exclude<CardBlockKind, 'text' | 'question'>[] = ['math', 'equation', 'image', 'table']
   return order.filter(kind => blocks.some(block => block.kind === kind))
 }
 

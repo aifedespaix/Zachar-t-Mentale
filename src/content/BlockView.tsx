@@ -1,6 +1,6 @@
-import { Fragment, memo } from 'react'
+import { Fragment, memo, type CSSProperties } from 'react'
 import type { CardBlock, TableCell } from '../types/cardBlock'
-import { blockGroups } from './blocks'
+import { blockGroups, equationStepIsSolved } from './blocks'
 import { renderMathToHtml } from './renderMath'
 import { renderHighlighted, stripHighlightMarkers } from './highlight'
 
@@ -152,6 +152,39 @@ const BlockItem = memo(function BlockItem({
       )
     }
 
+    case 'equation': {
+      const { steps } = block
+      if (steps.length === 0) return null
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+          {steps.map((step, stepIndex) => {
+            const isLast = stepIndex === steps.length - 1
+            const solved = equationStepIsSolved(steps, stepIndex)
+            const operation = (step.operation ?? '').trim()
+            return (
+              <Fragment key={stepIndex}>
+                <div style={{ display: 'flex', alignItems: 'stretch', gap: '0.6rem' }}>
+                  <EquationTermView latex={step.left} solved={solved} side="left" />
+                  <span style={{ display: 'flex', alignItems: 'center', fontWeight: 700, opacity: 0.75 }}>=</span>
+                  <EquationTermView latex={step.right} solved={solved} side="right" />
+                </div>
+                {!isLast && operation !== '' && (
+                  // Affichée deux fois, une fois sous chaque membre — jamais
+                  // une seule fois centrée : c'est elle qui montre qu'elle
+                  // porte sur les DEUX à la fois. Voir `EquationStep.operation`.
+                  <div style={{ display: 'flex', alignItems: 'stretch', gap: '0.6rem' }}>
+                    <OperationView latex={operation} />
+                    <span aria-hidden style={{ flex: '0 0 auto', width: '1.1rem' }} />
+                    <OperationView latex={operation} />
+                  </div>
+                )}
+              </Fragment>
+            )
+          })}
+        </div>
+      )
+    }
+
     case 'image': {
       const src = resolveAsset(block.asset)
       const ratio = usableRatio(block.width, block.height)
@@ -239,6 +272,49 @@ const BlockItem = memo(function BlockItem({
       )
   }
 })
+
+/** Une des deux occurrences de l'opération d'une étape — voir l'appelant. */
+function OperationView({ latex }: { latex: string }) {
+  const style: CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    textAlign: 'center',
+    fontSize: '0.75em',
+    fontWeight: 800,
+    color: 'var(--destructive, #c8402f)',
+    overflowX: 'auto',
+  }
+  // Safe: `renderMathToHtml` escapes the text it emits, and `trust: false`
+  // keeps it from building links or embedding resources (see renderMath tests).
+  return <div style={style} dangerouslySetInnerHTML={{ __html: renderMathToHtml(latex, false) }} />
+}
+
+/**
+ * Un membre d'équation dans sa case colorée — bleue à gauche, orange à
+ * droite, verte des deux côtés une fois la variable isolée (voir
+ * `equationStepIsSolved`). Les deux couleurs restent les MÊMES d'une étape à
+ * l'autre : c'est ce qui laisse l'œil suivre une colonne tout au long de la
+ * résolution plutôt que de redécouvrir le sens de chaque case.
+ */
+function EquationTermView({ latex, solved, side }: { latex: string; solved: boolean; side: 'left' | 'right' }) {
+  const tint = solved ? '#2f8f5b' : side === 'left' ? '#3a6bb0' : '#b8791f'
+  const html = renderMathToHtml(latex, false)
+  const style: CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    boxSizing: 'border-box',
+    padding: '0.3rem 0.7rem',
+    borderRadius: 10,
+    border: `${solved ? 2 : 1.5}px solid color-mix(in oklch, ${tint}, transparent 30%)`,
+    background: `color-mix(in oklch, ${tint}, transparent 92%)`,
+    color: solved ? tint : 'inherit',
+    textAlign: 'center',
+    overflowX: 'auto',
+  }
+  // Safe: `renderMathToHtml` escapes the text it emits, and `trust: false`
+  // keeps it from building links or embedding resources (see renderMath tests).
+  return <div style={style} dangerouslySetInnerHTML={{ __html: html !== '' ? html : '&nbsp;' }} />
+}
 
 /** A table cell in either of its two modes — a formula typesets inline, never centred on its own line the way a standalone math block does: a cell is part of a row, not a paragraph. */
 function TableCellView({ cell }: { cell: TableCell }) {
