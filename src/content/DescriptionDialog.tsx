@@ -3,8 +3,8 @@ import { motion, useReducedMotion } from 'motion/react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Keyboard, LayoutGrid, Maximize2, Minimize2, Pencil, Plus, Redo2, Trash2, Undo2, X } from 'lucide-react'
 import type { CardBlock } from '../types/cardBlock'
-import { blocksDiffer } from './blocks'
-import { BlockEditor, type BlockEditorProps } from './BlockEditor'
+import { blockGroups, blocksDiffer, questionLabels } from './blocks'
+import { BlockEditor, KIND_LABEL, type BlockEditorProps } from './BlockEditor'
 import { BandOptionsOverlay } from './BandOptionsOverlay'
 import { loadHiddenFamilies, saveHiddenFamilies } from '../persistence/bandFamilies'
 import { loadDescriptionNarrow, saveDescriptionNarrow } from '../persistence/descriptionNarrow'
@@ -28,6 +28,54 @@ import { useDescriptionHistory } from './useDescriptionHistory'
  */
 function seedFrom(blocks: CardBlock[]): CardBlock[] {
   return blocks.length > 0 ? blocks : [{ kind: 'text', text: '' }]
+}
+
+/** One row of the compact-mode sidebar's « Sommaire » — a block to jump to, or a whole question group. */
+interface OutlineEntry {
+  /** The block index `jumpToBlock` scrolls to and focuses — the group's header for a question. */
+  index: number
+  isQuestion: boolean
+  /** The question's own badge text (see `questionLabels`) — absent for a plain block. */
+  questionLabel?: string
+  /** A question's own text, cut short (see `previewTitle`); a plain block's « Bloc N · Type ». */
+  label: string
+  /** For a question: how many blocks it owns besides its own header row. */
+  blockCount?: number
+}
+
+const EMPTY_OUTLINE: OutlineEntry[] = []
+
+/**
+ * The sidebar's « Sommaire » : one row per block, except a question group,
+ * which collapses to ONE row (its header) so the list stays a map of the
+ * fiche rather than a second copy of it. Built from `blockGroups`, the same
+ * partition the editor paints its tinted ranges from.
+ */
+function buildOutline(blocks: CardBlock[]): OutlineEntry[] {
+  const labels = questionLabels(blocks)
+  const entries: OutlineEntry[] = []
+  for (const group of blockGroups(blocks)) {
+    if (group.headerIndex === null) {
+      for (const index of group.indexes) {
+        // No leading « Bloc » here — unlike the band's own target chip, which
+        // reads fine as a floating label but would collide, word for word,
+        // with this row and turn a `getByText` query in two places into an
+        // ambiguous one.
+        entries.push({ index, isQuestion: false, label: `${index + 1} · ${KIND_LABEL[blocks[index].kind]}` })
+      }
+      continue
+    }
+    const header = blocks[group.headerIndex]
+    const text = header.kind === 'question' ? header.text.trim() : ''
+    entries.push({
+      index: group.headerIndex,
+      isQuestion: true,
+      questionLabel: labels[group.headerIndex] || String(group.headerIndex + 1),
+      label: text === '' ? 'Question' : previewTitle(text),
+      blockCount: group.indexes.length - 1,
+    })
+  }
+  return entries
 }
 
 /** The title field's colours — the card's own level palette, resolved to CSS by the caller. */
@@ -299,10 +347,11 @@ export function DescriptionDialog({
 
   /**
    * Le réglage des familles de signes vit ICI, et pas dans l'éditeur, parce que
-   * le bouton qui l'ouvre est dans le pied de la modale : le réglage et sa
-   * commande doivent être au même endroit. Le pied est aussi un support plus
-   * stable que le bandeau, qui se replie sur deux ou trois lignes — une commande
-   * posée en fin de bandeau atterrit sur la dernière ligne, souvent hors de vue.
+   * le bouton qui l'ouvre est dans le pied de la modale (ou, en largeur, dans sa
+   * barre latérale — voir `DescriptionSidebar`) : le réglage et sa commande
+   * doivent être au même endroit. C'est aussi un support plus stable que le
+   * bandeau, qui se replie sur deux ou trois lignes — une commande posée en fin
+   * de bandeau atterrit sur la dernière ligne, souvent hors de vue.
    *
    * Lu SYNCHRONEMENT à l'initialisation, pas dans un effet : un effet ferait
    * peindre le bandeau complet, puis le réduirait — exactement le saut visuel que
@@ -328,6 +377,30 @@ export function DescriptionDialog({
   draftRef.current = draft
   const lastSavedRef = useRef(initial.current)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  // The dialog's own DOM node — read only by `jumpToBlock`, to find the row a
+  // sidebar « Sommaire » entry names. A ref rather than `document.querySelector`
+  // because nothing here needs to reach outside this dialog's own subtree.
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  // Recomputed on every render rather than memoised: description lists are
+  // short (a handful to a few dozen blocks), and memoising would need `draft`
+  // in its dependency array anyway — the same work, with more bookkeeping.
+  const outline = condensed ? buildOutline(draft) : EMPTY_OUTLINE
+
+  /**
+   * What the compact-mode sidebar's « Sommaire » jumps to: scrolls the named
+   * block's row into view, then focuses its field. `preventScroll` on the
+   * focus call is deliberate — `scrollIntoView` already animates the trip;
+   * letting focus ALSO jump the viewport would fight it and land the page one
+   * frame short of where the smooth scroll was headed.
+   */
+  function jumpToBlock(index: number) {
+    const row = contentRef.current?.querySelector<HTMLElement>(`[data-row-index="${index}"]`)
+    if (row === null || row === undefined) return
+    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    row.querySelector<HTMLElement>('textarea, input, math-field, [contenteditable="true"]')?.focus({ preventScroll: true })
+  }
 
   useEffect(() => {
     ensureDescriptionHistory(cardId, initial.current)
@@ -502,6 +575,7 @@ export function DescriptionDialog({
             instant tooltips flicker as the pointer crosses it. */}
         <TooltipProvider>
         <DialogPrimitive.Content
+          ref={contentRef}
           // `data-slot` is not decoration: `isModalOpen` (see
           // `hooks/useGlobalShortcuts`) recognises an open modal by
           // `[data-slot="dialog-content"][data-state="open"]`, and the shared
@@ -566,10 +640,18 @@ export function DescriptionDialog({
             outline: 'none',
           }}
         >
-          <NavArrow side="top" target={prevSibling} create={onCreate?.top} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
-          <NavArrow side="bottom" target={nextSibling} create={onCreate?.bottom} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
-          <NavArrow side="left" target={parentTarget} create={onCreate?.left} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
-          <NavArrow side="right" target={childTarget} create={onCreate?.right} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
+          {/* Floating edge arrows: the narrow dialog's own navigation. The wide
+              (condensed) dialog moves the same four relations into the sidebar's
+              « Naviguer » section instead — see `DescriptionSidebar` — so they
+              never render twice at once. */}
+          {!condensed && (
+            <>
+              <NavArrow side="top" target={prevSibling} create={onCreate?.top} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
+              <NavArrow side="bottom" target={nextSibling} create={onCreate?.bottom} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
+              <NavArrow side="left" target={parentTarget} create={onCreate?.left} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
+              <NavArrow side="right" target={childTarget} create={onCreate?.right} onNavigate={onNavigate && navigate} onOpenCreatePrompt={openCreatePrompt} narrow={narrow} />
+            </>
+          )}
 
           {/* The two chrome controls of the top-right corner, in ONE
               absolutely-positioned row: the width toggle and the cross. The row
@@ -713,39 +795,73 @@ export function DescriptionDialog({
             </DialogPrimitive.Title>
           </header>
 
-          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: 'var(--dd-content-pad, 14px 20px 6px)' }}>
-            {/* A readable measure, not the full width of a 1600px dialog: the
-                side panel that used to hold this column back is gone, and
-                prose across the whole modal would run to ~180 characters a
-                line. Tables and formulas have room to spare at this width. */}
-            <div style={{ height: '100%', maxWidth: 1080, margin: '0 auto' }}>
-              <BlockEditor
-                blocks={draft}
-                onChange={setDraft}
-                resolveAsset={resolveAsset}
-                onInsertImage={onInsertImage}
-                onPickImage={onPickImage}
-                onError={onError}
-                autoFocusField={!autoFocusTitle}
-                hiddenFamilies={hiddenFamilies}
-                dialogMenuActions={{
-                  // La même confirmation que le bouton du pied : une
-                  // suppression totale n'est jamais à un seul clic droit
-                  // malencontreux de distance.
-                  onDeleteDescription: () => setConfirmingDelete(true),
-                  onOpenBandOptions: () => setBandOptionsOpen(open => !open),
-                  narrow,
-                  onToggleNarrow: toggleWidth,
-                  shortcutsOpen,
-                  onToggleShortcuts: () => setShortcutsOpen(open => !open),
-                  canUndo,
-                  canRedo,
-                  onUndo: undo,
-                  onRedo: redo,
-                  onClose: close,
-                }}
-              />
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', padding: 'var(--dd-content-pad, 14px 20px 6px)' }}>
+              {/* A readable measure, not the full width of a 1600px dialog: the
+                  side panel that used to hold this column back is gone, and
+                  prose across the whole modal would run to ~180 characters a
+                  line. Tables and formulas have room to spare at this width. */}
+              <div style={{ height: '100%', maxWidth: 1080, margin: '0 auto' }}>
+                <BlockEditor
+                  blocks={draft}
+                  onChange={setDraft}
+                  resolveAsset={resolveAsset}
+                  onInsertImage={onInsertImage}
+                  onPickImage={onPickImage}
+                  onError={onError}
+                  autoFocusField={!autoFocusTitle}
+                  hiddenFamilies={hiddenFamilies}
+                  dialogMenuActions={{
+                    // La même confirmation que le bouton de suppression, pied
+                    // ou pied de rechange (la sidebar) : une suppression totale
+                    // n'est jamais à un seul clic droit malencontreux de distance.
+                    onDeleteDescription: () => setConfirmingDelete(true),
+                    onOpenBandOptions: () => setBandOptionsOpen(open => !open),
+                    narrow,
+                    onToggleNarrow: toggleWidth,
+                    shortcutsOpen,
+                    onToggleShortcuts: () => setShortcutsOpen(open => !open),
+                    canUndo,
+                    canRedo,
+                    onUndo: undo,
+                    onRedo: redo,
+                    onClose: close,
+                  }}
+                />
+              </div>
             </div>
+
+            {/* The wide dialog's sidebar: the four edge relations, a jump list
+                of the fiche's own blocks, and every action the narrow dialog's
+                footer carries — see `DescriptionSidebar`. Trading a strip of
+                the modal's WIDTH (which the wide dialog has to spare) for the
+                footer's and the floating arrows' HEIGHT, which every block
+                pays for on every screen. The narrow dialog keeps the footer:
+                it has no width to spare, and was never short on height. */}
+            {condensed && (
+              <DescriptionSidebar
+                parentTarget={parentTarget}
+                childTarget={childTarget}
+                prevSibling={prevSibling}
+                nextSibling={nextSibling}
+                onNavigate={onNavigate && navigate}
+                onCreate={onCreate}
+                onOpenCreatePrompt={openCreatePrompt}
+                outline={outline}
+                onJump={jumpToBlock}
+                bandOptionsOpen={bandOptionsOpen}
+                onOpenBandOptions={() => setBandOptionsOpen(open => !open)}
+                canUndo={canUndo}
+                canRedo={canRedo}
+                onUndo={undo}
+                onRedo={redo}
+                showDelete={blocks.length > 0}
+                onDelete={() => setConfirmingDelete(true)}
+                shortcutsOpen={shortcutsOpen}
+                onToggleShortcuts={() => setShortcutsOpen(open => !open)}
+                onClose={close}
+              />
+            )}
           </div>
 
           {shortcutsOpen && (
@@ -756,90 +872,92 @@ export function DescriptionDialog({
             />
           )}
 
-          <footer
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              alignItems: 'center',
-              gap: 'var(--dd-footer-gap, 8px)',
-              padding: 'var(--dd-footer-pad, 10px 16px)',
-              borderTop: '1px solid var(--border)',
-            }}
-          >
-            {/* Icon-only, et à gauche de « Supprimer » : c'est un réglage
-                d'affichage, pas une action sur la fiche, donc il ne doit pas se
-                mêler au groupe d'actions de droite (Raccourcis, Fermer) ni
-                concurrencer la seule action destructive. */}
-            <Hint label="Choisir les familles de symboles affichées">
+          {!condensed && (
+            <footer
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                alignItems: 'center',
+                gap: 'var(--dd-footer-gap, 8px)',
+                padding: 'var(--dd-footer-pad, 10px 16px)',
+                borderTop: '1px solid var(--border)',
+              }}
+            >
+              {/* Icon-only, et à gauche de « Supprimer » : c'est un réglage
+                  d'affichage, pas une action sur la fiche, donc il ne doit pas se
+                  mêler au groupe d'actions de droite (Raccourcis, Fermer) ni
+                  concurrencer la seule action destructive. */}
+              <Hint label="Choisir les familles de symboles affichées">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Choisir les familles de symboles affichées"
+                  aria-expanded={bandOptionsOpen}
+                  onClick={() => setBandOptionsOpen(open => !open)}
+                >
+                  <LayoutGrid />
+                </Button>
+              </Hint>
+              {blocks.length > 0 && (
+                <Button variant="destructive" onClick={() => setConfirmingDelete(true)}>
+                  <Trash2 />
+                  Supprimer
+                </Button>
+              )}
+              {/* Beside the destructive action rather than beside "Fermer": these
+                  are edits to the description, which is what "Supprimer" acts on
+                  too. `disabled` is a real attribute, not a dimmed style — the
+                  hook can answer "is there anything to walk back to?" because
+                  `canUndoDescription` reads the history instead of consuming it,
+                  and a greyed-out button that is still clickable would be a lie
+                  to a screen reader. */}
+              <Hint label="Annuler (Ctrl+Z)">
               <Button
                 variant="outline"
                 size="icon"
-                aria-label="Choisir les familles de symboles affichées"
-                aria-expanded={bandOptionsOpen}
-                onClick={() => setBandOptionsOpen(open => !open)}
+                aria-label="Annuler la dernière modification de la description"
+                disabled={!canUndo}
+                onClick={undo}
               >
-                <LayoutGrid />
+                <Undo2 />
               </Button>
-            </Hint>
-            {blocks.length > 0 && (
-              <Button variant="destructive" onClick={() => setConfirmingDelete(true)}>
-                <Trash2 />
-                Supprimer
+              </Hint>
+              <Hint label="Rétablir (Ctrl+Maj+Z)">
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Rétablir la modification annulée"
+                disabled={!canRedo}
+                onClick={redo}
+              >
+                <Redo2 />
               </Button>
-            )}
-            {/* Beside the destructive action rather than beside "Fermer": these
-                are edits to the description, which is what "Supprimer" acts on
-                too. `disabled` is a real attribute, not a dimmed style — the
-                hook can answer "is there anything to walk back to?" because
-                `canUndoDescription` reads the history instead of consuming it,
-                and a greyed-out button that is still clickable would be a lie
-                to a screen reader. */}
-            <Hint label="Annuler (Ctrl+Z)">
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label="Annuler la dernière modification de la description"
-              disabled={!canUndo}
-              onClick={undo}
-            >
-              <Undo2 />
-            </Button>
-            </Hint>
-            <Hint label="Rétablir (Ctrl+Maj+Z)">
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label="Rétablir la modification annulée"
-              disabled={!canRedo}
-              onClick={redo}
-            >
-              <Redo2 />
-            </Button>
-            </Hint>
-            <span
-              aria-hidden
-              style={{
-                marginRight: 'auto',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 12,
-                opacity: 0.55,
-              }}
-            >
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', opacity: 0.7 }} />
-              Enregistré automatiquement
-            </span>
-            {/* Kept where the side panel's shortcut list used to be: the panel
-                is gone (its tools moved onto the blocks themselves), but the
-                keyboard is still the fastest way to write a definition, and a
-                shortcut nobody can look up is a shortcut nobody uses. */}
-            <Button variant="outline" aria-expanded={shortcutsOpen} onClick={() => setShortcutsOpen(open => !open)}>
-              <Keyboard />
-              Raccourcis
-            </Button>
-            <Button onClick={close}>Fermer</Button>
-          </footer>
+              </Hint>
+              <span
+                aria-hidden
+                style={{
+                  marginRight: 'auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  opacity: 0.55,
+                }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', opacity: 0.7 }} />
+                Enregistré automatiquement
+              </span>
+              {/* Kept where the side panel's shortcut list used to be: the panel
+                  is gone (its tools moved onto the blocks themselves), but the
+                  keyboard is still the fastest way to write a definition, and a
+                  shortcut nobody can look up is a shortcut nobody uses. */}
+              <Button variant="outline" aria-expanded={shortcutsOpen} onClick={() => setShortcutsOpen(open => !open)}>
+                <Keyboard />
+                Raccourcis
+              </Button>
+              <Button onClick={close}>Fermer</Button>
+            </footer>
+          )}
 
           {confirmingDelete && (
             <ConfirmOverlay
@@ -1014,6 +1132,7 @@ function NavArrow({
   onNavigate,
   onOpenCreatePrompt,
   narrow,
+  layout = 'floating',
 }: {
   side: NavSide
   target?: DescriptionNavTarget
@@ -1021,8 +1140,15 @@ function NavArrow({
   onNavigate?: (id: string) => void
   /** Opens the title prompt instead of creating blind — see `createPrompt` on the dialog. */
   onOpenCreatePrompt: (side: NavSide) => void
-  /** Pushes the button further outside the dialog's border — see `navPosition`. */
+  /** Pushes the button further outside the dialog's border — see `navPosition`. Unused in `'row'`. */
   narrow: boolean
+  /**
+   * `'floating'` (the default) is the narrow dialog's circular edge button.
+   * `'row'` is the wide dialog's sidebar: a full-width row, its relation and
+   * destination spelled out instead of left for the hover card alone — see
+   * `DescriptionSidebar`.
+   */
+  layout?: 'floating' | 'row'
 }) {
   const Icon = NAV_ICON[side]
 
@@ -1031,23 +1157,24 @@ function NavArrow({
     // the hover card says how many there are instead — and then the count IS the
     // label, leaving no room for one title among several.
     const manyChildren = side === 'right' && target.count !== undefined && target.count > 1
+    const label = manyChildren ? (
+      <span style={NAV_TIP_LABEL}>{target.count} sous-parties</span>
+    ) : (
+      <>
+        <span style={NAV_TIP_LABEL}>{NAV_RELATION[side]}</span>
+        <span style={NAV_TIP_TITLE}>{previewTitle(target.title)}</span>
+      </>
+    )
     return (
       <EdgeButton
         side={side}
         narrow={narrow}
+        layout={layout}
         colors={target.colors}
         ariaLabel={`Aller à « ${target.title} »`}
         onActivate={() => onNavigate(target.id)}
-        tip={
-          manyChildren ? (
-            <span style={NAV_TIP_LABEL}>{target.count} sous-parties</span>
-          ) : (
-            <>
-              <span style={NAV_TIP_LABEL}>{NAV_RELATION[side]}</span>
-              <span style={NAV_TIP_TITLE}>{previewTitle(target.title)}</span>
-            </>
-          )
-        }
+        tip={label}
+        rowLabel={label}
       >
         <Icon size={16} />
       </EdgeButton>
@@ -1055,14 +1182,17 @@ function NavArrow({
   }
 
   if (create !== undefined) {
+    const label = <span style={NAV_TIP_LABEL}>{NAV_CREATE_LABEL[side]}</span>
     return (
       <EdgeButton
         side={side}
         narrow={narrow}
+        layout={layout}
         colors={create.colors}
         ariaLabel={NAV_CREATE_LABEL[side]}
         onActivate={() => onOpenCreatePrompt(side)}
-        tip={<span style={NAV_TIP_LABEL}>{NAV_CREATE_LABEL[side]}</span>}
+        tip={label}
+        rowLabel={label}
       >
         <Plus size={16} />
       </EdgeButton>
@@ -1084,18 +1214,23 @@ function NavArrow({
 function EdgeButton({
   side,
   narrow,
+  layout = 'floating',
   colors,
   ariaLabel,
   onActivate,
   tip,
+  rowLabel,
   children,
 }: {
   side: NavSide
   narrow: boolean
+  layout?: 'floating' | 'row'
   colors?: TitleChipColors
   ariaLabel: string
   onActivate: () => void
   tip: ReactNode
+  /** What a `'row'` layout writes out next to the icon — see `NavArrow`. Ignored when floating. */
+  rowLabel?: ReactNode
   children: ReactNode
 }) {
   // `reduceMotion ? undefined` is load-bearing: motion does NOT consult
@@ -1103,6 +1238,7 @@ function EdgeButton({
   // `"never"`), so without the gate this would animate for the users who asked
   // it not to.
   const reduceMotion = useReducedMotion()
+  const isRow = layout === 'row'
 
   return (
     <Tooltip>
@@ -1115,28 +1251,47 @@ function EdgeButton({
           // own keys did — so the four controls that move you around the map were
           // the only ones that did not look clickable. This is the app's existing
           // feel for a small action chip (the spring `CardNode`'s edge buttons
-          // use), with a slightly firmer scale now that the chip is round.
-          whileHover={reduceMotion ? undefined : { scale: 1.12 }}
-          whileTap={reduceMotion ? undefined : { scale: 0.94 }}
+          // use), with a slightly firmer scale now that the chip is round. A row
+          // never grows on hover — scaling a full-width sidebar row reads as a
+          // glitch, not as feedback — but it still dips on press.
+          whileHover={reduceMotion || isRow ? undefined : { scale: 1.12 }}
+          whileTap={reduceMotion ? undefined : { scale: isRow ? 0.98 : 0.94 }}
           transition={{ type: 'spring', stiffness: 500, damping: 25 }}
-          style={{
-            position: 'absolute',
-            zIndex: 2,
-            display: 'grid',
-            placeItems: 'center',
-            width: 30,
-            height: 30,
-            padding: 0,
-            borderRadius: 999,
-            border: `2px solid ${colors?.border ?? 'var(--border)'}`,
-            background: colors?.bg ?? 'var(--popover)',
-            color: colors?.text ?? 'inherit',
-            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.2)',
-            cursor: 'pointer',
-            ...navPosition(side, narrow),
-          }}
+          style={
+            isRow
+              ? {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 8,
+                  border: `1px solid ${colors?.border ?? 'var(--border)'}`,
+                  background: colors?.bg ?? 'var(--popover)',
+                  color: colors?.text ?? 'inherit',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }
+              : {
+                  position: 'absolute',
+                  zIndex: 2,
+                  display: 'grid',
+                  placeItems: 'center',
+                  width: 30,
+                  height: 30,
+                  padding: 0,
+                  borderRadius: 999,
+                  border: `2px solid ${colors?.border ?? 'var(--border)'}`,
+                  background: colors?.bg ?? 'var(--popover)',
+                  color: colors?.text ?? 'inherit',
+                  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.2)',
+                  cursor: 'pointer',
+                  ...navPosition(side, narrow),
+                }
+          }
         >
           {children}
+          {isRow && rowLabel}
         </motion.button>
       </TooltipTrigger>
       <TooltipContent
@@ -1154,6 +1309,225 @@ function EdgeButton({
         {tip}
       </TooltipContent>
     </Tooltip>
+  )
+}
+
+/**
+ * The wide dialog's sidebar — everything the narrow dialog's floating arrows
+ * and footer carry, laid out as a column instead: trading the modal's spare
+ * WIDTH for the HEIGHT those two used to cost on every screen. See the
+ * comment where this is mounted, in the main component.
+ */
+function DescriptionSidebar({
+  parentTarget,
+  childTarget,
+  prevSibling,
+  nextSibling,
+  onNavigate,
+  onCreate,
+  onOpenCreatePrompt,
+  outline,
+  onJump,
+  bandOptionsOpen,
+  onOpenBandOptions,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  showDelete,
+  onDelete,
+  shortcutsOpen,
+  onToggleShortcuts,
+  onClose,
+}: {
+  parentTarget?: DescriptionNavTarget
+  childTarget?: DescriptionNavTarget
+  prevSibling?: DescriptionNavTarget
+  nextSibling?: DescriptionNavTarget
+  onNavigate?: (id: string) => void
+  onCreate?: Partial<Record<NavSide, DescriptionCreateTarget>>
+  onOpenCreatePrompt: (side: NavSide) => void
+  outline: OutlineEntry[]
+  onJump: (index: number) => void
+  bandOptionsOpen: boolean
+  onOpenBandOptions: () => void
+  canUndo: boolean
+  canRedo: boolean
+  onUndo: () => void
+  onRedo: () => void
+  showDelete: boolean
+  onDelete: () => void
+  shortcutsOpen: boolean
+  onToggleShortcuts: () => void
+  onClose: () => void
+}) {
+  // Whether there is anything at all to put under « Naviguer » — a floating
+  // root card with no siblings and nothing creatable has none, and a heading
+  // over an empty section would be worse than no heading.
+  const hasNav =
+    (onNavigate !== undefined &&
+      (parentTarget !== undefined || childTarget !== undefined || prevSibling !== undefined || nextSibling !== undefined)) ||
+    (onCreate !== undefined && Object.values(onCreate).some(target => target !== undefined))
+
+  return (
+    <aside
+      aria-label="Navigation et actions de la description"
+      style={{
+        flex: '0 0 auto',
+        width: 216,
+        borderLeft: '1px solid var(--border)',
+        background: 'color-mix(in oklch, var(--muted), transparent 55%)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+        padding: '10px 10px 8px',
+        overflowY: 'auto',
+      }}
+    >
+      {hasNav && (
+        <div>
+          <SidebarHeading>Naviguer</SidebarHeading>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <NavArrow layout="row" side="left" target={parentTarget} create={onCreate?.left} onNavigate={onNavigate} onOpenCreatePrompt={onOpenCreatePrompt} narrow={false} />
+            <NavArrow layout="row" side="right" target={childTarget} create={onCreate?.right} onNavigate={onNavigate} onOpenCreatePrompt={onOpenCreatePrompt} narrow={false} />
+            <NavArrow layout="row" side="top" target={prevSibling} create={onCreate?.top} onNavigate={onNavigate} onOpenCreatePrompt={onOpenCreatePrompt} narrow={false} />
+            <NavArrow layout="row" side="bottom" target={nextSibling} create={onCreate?.bottom} onNavigate={onNavigate} onOpenCreatePrompt={onOpenCreatePrompt} narrow={false} />
+          </div>
+        </div>
+      )}
+
+      {outline.length > 0 && (
+        <div style={{ minHeight: 0 }}>
+          <SidebarHeading>Sommaire</SidebarHeading>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {outline.map(entry => (
+              <button
+                key={entry.index}
+                type="button"
+                onClick={() => onJump(entry.index)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  minWidth: 0,
+                  padding: '4px 6px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: entry.isQuestion ? 'color-mix(in oklch, var(--info-bg), transparent 25%)' : 'transparent',
+                  color: entry.isQuestion ? 'var(--info-fg)' : 'inherit',
+                  font: 'inherit',
+                  fontSize: 11,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                {entry.isQuestion && (
+                  <span
+                    aria-hidden
+                    style={{
+                      flex: '0 0 auto',
+                      fontSize: 9.5,
+                      fontWeight: 800,
+                      color: 'var(--popover)',
+                      background: 'var(--info-border)',
+                      borderRadius: 999,
+                      padding: '1px 6px',
+                    }}
+                  >
+                    {entry.questionLabel}
+                  </span>
+                )}
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {entry.label}
+                </span>
+                {entry.blockCount !== undefined && entry.blockCount > 0 && (
+                  <span style={{ flex: '0 0 auto', fontSize: 9.5, opacity: 0.6 }}>
+                    {entry.blockCount} bloc{entry.blockCount > 1 ? 's' : ''}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Every action the narrow dialog's footer carries, moved here rather
+          than duplicated: exactly one of the two exists at a time (see
+          `condensed` at the call site), so a query for any of these by its
+          accessible name still finds one match, never two. */}
+      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span
+          aria-hidden
+          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, opacity: 0.55 }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', opacity: 0.7 }} />
+          Enregistré automatiquement
+        </span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <Hint label="Choisir les familles de symboles affichées">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Choisir les familles de symboles affichées"
+              aria-expanded={bandOptionsOpen}
+              onClick={onOpenBandOptions}
+            >
+              <LayoutGrid />
+            </Button>
+          </Hint>
+          <Hint label="Annuler (Ctrl+Z)">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Annuler la dernière modification de la description"
+              disabled={!canUndo}
+              onClick={onUndo}
+            >
+              <Undo2 />
+            </Button>
+          </Hint>
+          <Hint label="Rétablir (Ctrl+Maj+Z)">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Rétablir la modification annulée"
+              disabled={!canRedo}
+              onClick={onRedo}
+            >
+              <Redo2 />
+            </Button>
+          </Hint>
+        </div>
+        <Button variant="outline" aria-expanded={shortcutsOpen} onClick={onToggleShortcuts}>
+          <Keyboard />
+          Raccourcis
+        </Button>
+        {showDelete && (
+          <Button variant="destructive" onClick={onDelete}>
+            <Trash2 />
+            Supprimer
+          </Button>
+        )}
+        <Button onClick={onClose}>Fermer</Button>
+      </div>
+    </aside>
+  )
+}
+
+function SidebarHeading({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        opacity: 0.5,
+        marginBottom: 5,
+      }}
+    >
+      {children}
+    </div>
   )
 }
 
