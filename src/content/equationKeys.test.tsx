@@ -215,7 +215,11 @@ describe('le bloc équation — clavier', () => {
         onState={onState}
       />
     )
-    // Vide, l'opération de l'étape 1 est un `<input>` normal, pas une formule.
+    // Vide et non focalisée, l'opération de l'étape 1 est un bouton « + Opération » ;
+    // cliquer dessus fait place à un `<input>` normal, pas une formule.
+    const operationButton = await screen.findByTestId('equation-op-input-0-0')
+    expect(operationButton.tagName).toBe('BUTTON')
+    fireEvent.click(operationButton)
     const operationField = await screen.findByTestId('equation-op-input-0-0')
     expect(operationField.tagName).toBe('INPUT')
 

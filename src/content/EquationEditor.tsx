@@ -1,4 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from 'react'
+import { Plus } from 'lucide-react'
 import type { CardBlock, EquationStep } from '../types/cardBlock'
 import { equationStepIsSolved } from './blocks'
 import { renderMathToHtml } from './renderMath'
@@ -59,6 +60,22 @@ const OPERATION_MIRROR_STYLE: CSSProperties = {
   ...OPERATION_FIELD_STYLE,
   minHeight: 20,
   overflowX: 'auto',
+}
+
+const OPERATION_ADD_BUTTON_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 4,
+  width: '100%',
+  padding: '2px 6px',
+  border: '1px dashed color-mix(in oklch, var(--destructive), transparent 50%)',
+  borderRadius: 6,
+  background: 'transparent',
+  color: 'var(--destructive)',
+  fontSize: 11.5,
+  fontWeight: 700,
+  cursor: 'pointer',
 }
 
 const RAW_FIELD_STYLE: CSSProperties = {
@@ -194,11 +211,13 @@ const OPERATION_INPUT_STYLE: CSSProperties = {
 /**
  * Le champ « opération » d'une étape : un texte normal, jamais une formule
  * MathLive — il n'a besoin d'aucun clavier virtuel, menu ou fond dédié pour
- * écrire « + 3 » ou « \times 2 ». Vide, c'est un simple `<input>` sur lequel
- * cliquer. Rempli et non focalisé, il affiche son propre rendu KaTeX — EXACTEMENT
- * comme son double `OPERATION_MIRROR_STYLE` sous l'autre membre — pour que les
- * deux côtés se lisent de façon identique ; cliquer dessus repasse en LaTeX
- * brut éditable, jusqu'au `blur` suivant.
+ * écrire « + 3 » ou « \times 2 ». Vide et non focalisé, c'est un petit bouton
+ * « + Opération » — un `<input>` vide sans bordure ni placeholder ne se voyait
+ * pas, donc rien ne disait qu'on pouvait cliquer là. Rempli et non focalisé,
+ * il affiche son propre rendu KaTeX — EXACTEMENT comme son double
+ * `OPERATION_MIRROR_STYLE` sous l'autre membre, lui aussi cliquable — pour que
+ * les deux côtés se lisent ET s'éditent de façon identique ; cliquer dessus
+ * repasse en LaTeX brut éditable, jusqu'au `blur` suivant.
  */
 function EquationOperationField({
   value,
@@ -242,7 +261,7 @@ function EquationOperationField({
   const valueRef = useRef(value)
   valueRef.current = value
 
-  const showInput = focused || value === ''
+  const showInput = focused
 
   useEffect(() => {
     if (!showInput || !shouldFocus.current) return
@@ -322,6 +341,24 @@ function EquationOperationField({
         }}
         style={{ ...style, ...OPERATION_INPUT_STYLE }}
       />
+    )
+  }
+
+  if (value === '') {
+    return (
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        data-testid={dataTestId}
+        onClick={() => {
+          shouldFocus.current = true
+          setFocused(true)
+        }}
+        style={{ ...style, ...OPERATION_ADD_BUTTON_STYLE }}
+      >
+        <Plus size={12} />
+        Opération
+      </button>
     )
   }
 
@@ -556,14 +593,17 @@ export function EquationBlockField({
                     elle, les deux moitiés de cette ligne se rapprocheraient
                     l'une de l'autre et ne resteraient plus sous leurs cases. */}
                 <div aria-hidden style={{ flex: '0 0 auto', width: 18 }} />
-                {/* Le double affiché à droite : purement visuel, jamais un
-                    second champ — taper à gauche le met à jour comme le
-                    reste du rendu. `aria-hidden` pour ne pas faire lire le
-                    même texte deux fois. */}
+                {/* Le double affiché à droite : jamais un second CHAMP — taper
+                    à gauche le met à jour comme le reste du rendu — mais
+                    cliquable comme lui, pour éditer la même opération sans
+                    devoir viser précisément le membre gauche. `aria-hidden`
+                    pour ne pas faire lire le même texte deux fois : le
+                    membre gauche reste le seul exposé aux lecteurs d'écran. */}
                 <div
                   aria-hidden
                   data-testid={`equation-op-mirror-${index}-${stepIndex}`}
-                  style={OPERATION_MIRROR_STYLE}
+                  onClick={() => handles.current.get(fieldKey(stepIndex, 'operation'))?.focusEnd()}
+                  style={{ ...OPERATION_MIRROR_STYLE, cursor: 'text' }}
                   dangerouslySetInnerHTML={{ __html: renderMathToHtml(step.operation ?? '', false) }}
                 />
               </div>

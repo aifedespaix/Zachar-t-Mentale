@@ -395,43 +395,59 @@ export function MathFieldEditor({
     field.style.width = '100%'
     field.value = latex
     field.addEventListener('input', () => onChangeRef.current(field.value))
-    field.addEventListener('keydown', event => {
-      // ↑/↓ ne changent de ligne que si le bloc en a PLUSIEURS : une formule
-      // mono-ligne laisse la touche à MathLive, qui s'en sert dans une fraction.
-      // Voir `MathLinesField`.
-      if (event.key === 'ArrowUp' && onArrowUpRef.current !== undefined) {
+    // Capture, pas bulle : MathLive écoute lui-même `keydown` en phase de
+    // capture sur un élément INTERNE à son shadow DOM (`.ML__keyboard-sink`,
+    // voir `delegateKeyboardEvents` dans la lib) et y traite déjà la touche —
+    // suppression du caractère comprise — avant qu'un écouteur posé ici en
+    // phase de bulle ne s'exécute. `caretAtStart`/`caretAtEnd` liraient alors
+    // la position APRÈS coup (un champ à un seul caractère y semble déjà
+    // « vide » une fois Retour arrière traité), et `preventDefault()`
+    // arriverait trop tard pour empêcher MathLive d'agir : MathLive vérifie
+    // `evt.defaultPrevented` en tout DÉBUT de son propre traitement, donc
+    // seule une interception antérieure — la phase de capture, ici — permet
+    // de gagner la course et d'empêcher la suppression normale d'un
+    // caractère de fusionner ou supprimer la ligne/étape en plus.
+    field.addEventListener(
+      'keydown',
+      event => {
+        // ↑/↓ ne changent de ligne que si le bloc en a PLUSIEURS : une formule
+        // mono-ligne laisse la touche à MathLive, qui s'en sert dans une fraction.
+        // Voir `MathLinesField`.
+        if (event.key === 'ArrowUp' && onArrowUpRef.current !== undefined) {
+          event.preventDefault()
+          onArrowUpRef.current()
+          return
+        }
+        if (event.key === 'ArrowDown' && onArrowDownRef.current !== undefined) {
+          event.preventDefault()
+          onArrowDownRef.current()
+          return
+        }
+        if (event.key === 'Backspace' && caretAtStart(field) && onBackspaceAtStartRef.current !== undefined) {
+          event.preventDefault()
+          onBackspaceAtStartRef.current(field.value)
+          return
+        }
+        if (event.key === 'Delete' && caretAtEnd(field) && onDeleteAtEndRef.current !== undefined) {
+          event.preventDefault()
+          onDeleteAtEndRef.current(field.value)
+          return
+        }
+        if (event.key !== 'Enter' || event.shiftKey) return
         event.preventDefault()
-        onArrowUpRef.current()
-        return
-      }
-      if (event.key === 'ArrowDown' && onArrowDownRef.current !== undefined) {
-        event.preventDefault()
-        onArrowDownRef.current()
-        return
-      }
-      if (event.key === 'Backspace' && caretAtStart(field) && onBackspaceAtStartRef.current !== undefined) {
-        event.preventDefault()
-        onBackspaceAtStartRef.current(field.value)
-        return
-      }
-      if (event.key === 'Delete' && caretAtEnd(field) && onDeleteAtEndRef.current !== undefined) {
-        event.preventDefault()
-        onDeleteAtEndRef.current(field.value)
-        return
-      }
-      if (event.key !== 'Enter' || event.shiftKey) return
-      event.preventDefault()
-      // Ctrl/Cmd+Entrée demande un NOUVEAU bloc ; Entrée seule coupe la ligne
-      // en deux à la position du curseur. Dans une cellule (pas de
-      // `onEnterBlock`), les deux ajoutent une ligne : il n'y a pas de bloc à
-      // créer.
-      if ((event.ctrlKey || event.metaKey) && onEnterBlockRef.current !== undefined) {
-        onEnterBlockRef.current()
-        return
-      }
-      const { before, after } = splitAtCaret(field)
-      onEnterRef.current?.(before, after)
-    })
+        // Ctrl/Cmd+Entrée demande un NOUVEAU bloc ; Entrée seule coupe la ligne
+        // en deux à la position du curseur. Dans une cellule (pas de
+        // `onEnterBlock`), les deux ajoutent une ligne : il n'y a pas de bloc à
+        // créer.
+        if ((event.ctrlKey || event.metaKey) && onEnterBlockRef.current !== undefined) {
+          onEnterBlockRef.current()
+          return
+        }
+        const { before, after } = splitAtCaret(field)
+        onEnterRef.current?.(before, after)
+      },
+      { capture: true }
+    )
     host.replaceChildren(field)
     fieldRef.current = field
     hideVirtualKeyboardToggle(field)
