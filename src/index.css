@@ -377,13 +377,31 @@
  * `<math-field>` hôte (documenté par MathLive), donc pas besoin de percer son
  * shadow DOM comme `hideVirtualKeyboardToggle` doit le faire pour le clavier
  * virtuel.
+ *
+ * L'alignement n'est PAS un `text-align` sur le champ lui-même : la formule
+ * vit dans `::part(content)`, un conteneur `display: flex` interne à MathLive
+ * — `text-align` n'a donc aucune prise sur elle (vérifié dans un vrai
+ * navigateur), seul `justify-content` sur cette part déplace le rendu. Gardé
+ * quand même sur `input` : c'est le repli LaTeX brut avant que MathLive ne
+ * charge (voir `EquationTermField`), un vrai champ de formulaire où
+ * `text-align` fonctionne normalement.
  */
 [data-equation-side='left'] math-field {
   background: transparent;
+}
+[data-equation-side='left'] math-field::part(content) {
+  justify-content: flex-end;
+}
+[data-equation-side='left'] input {
   text-align: right;
 }
 [data-equation-side='right'] math-field {
   background: transparent;
+}
+[data-equation-side='right'] math-field::part(content) {
+  justify-content: flex-start;
+}
+[data-equation-side='right'] input {
   text-align: left;
 }
 [data-equation-side] math-field::part(menu-toggle) {
