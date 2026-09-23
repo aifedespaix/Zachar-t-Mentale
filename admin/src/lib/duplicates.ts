@@ -1,4 +1,5 @@
 import type { Card } from '@app/types/card'
+import { stripCopySuffix } from '@app/sync/copyLink'
 import { parseMindMapText } from './quality'
 
 /**
@@ -170,4 +171,155 @@ export function findDuplicateGroups(files: readonly DuplicateFile[]): DuplicateG
     (a, b) => b.files.length - a.files.length || a.files[0].path.localeCompare(b.files[0].path)
   )
   return groups
+}
+
+// ---------------------------------------------------------------------------
+// Les copies de synchronisation, et le grand nettoyage
+// ---------------------------------------------------------------------------
+
+/**
+ * Les anciennes versions de l'application résolvaient un conflit en rangeant
+ * la version perdante dans « <original> (copie).zmap », à côté de l'original.
+ * Ces fichiers n'ont PAS le même contenu que l'original — c'est justement
+ * pourquoi ils existent — et `findDuplicateGroups` ne les voit donc pas. Ils
+ * se reconnaissent à leur nom : même dossier, même racine, suffixe « (copie) ».
+ */
+export interface CopyGroup {
+  /** Le chemin que le groupe doit finir par occuper : celui de l'original. */
+  path: string
+  /** L'original, s'il est encore sur le serveur. */
+  original: DuplicateFile | null
+  /** Tous les membres, le plus récemment modifié d'abord : c'est celui qu'on garde. */
+  files: DuplicateFile[]
+}
+
+function splitExtension(name: string): { stem: string; extension: string } {
+  const dot = name.lastIndexOf('.')
+  return dot <= 0 ? { stem: name, extension: '' } : { stem: name.slice(0, dot), extension: name.slice(dot) }
+}
+
+function parentOf(path: string): string {
+  const cut = path.lastIndexOf('/')
+  return cut === -1 ? '' : path.slice(0, cut)
+}
+
+function nameOf(path: string): string {
+  const cut = path.lastIndexOf('/')
+  return cut === -1 ? path : path.slice(cut + 1)
+}
+
+/**
+ * Le chemin de l'original dont `path` est une copie, ou `null` si ce n'est pas
+ * une copie. La règle de nommage est celle de l'application (`copyLink.ts`).
+ */
+export function originalPathOf(path: string): string | null {
+  const { stem, extension } = splitExtension(nameOf(path))
+  const base = stripCopySuffix(stem)
+  if (base === stem || base.trim() === '') return null
+  const parent = parentOf(path)
+  const name = `${base}${extension}`
+  return parent === '' ? name : `${parent}/${name}`
+}
+
+/**
+ * L'instant de la dernière ÉDITION d'un fichier : la `meta.lastModified` de son
+ * contenu, et `updated` seulement en repli — le serveur bumpe `updated` sur un
+ * simple déplacement, qui n'est pas une modification.
+ */
+export function modifiedAt(file: DuplicateFile): number {
+  const meta = parseMindMapText(file.content).meta
+  const edited = meta === null ? Number.NaN : Date.parse(meta.lastModified)
+  if (!Number.isNaN(edited)) return edited
+  const updated = Date.parse(file.updated.replace(' ', 'T'))
+  return Number.isNaN(updated) ? 0 : updated
+}
+
+function byMostRecent(a: DuplicateFile, b: DuplicateFile): number {
+  return modifiedAt(b) - modifiedAt(a) || b.updated.localeCompare(a.updated)
+}
+
+/** Les groupes « original + ses copies », ou « plusieurs copies » quand l'original a disparu. */
+export function findCopyGroups(files: readonly DuplicateFile[]): CopyGroup[] {
+  const byPath = new Map<string, DuplicateFile>()
+  for (const file of files) byPath.set(file.path, file)
+
+  const copiesByOriginal = new Map<string, DuplicateFile[]>()
+  for (const file of files) {
+    const original = originalPathOf(file.path)
+    if (original === null) continue
+    const group = copiesByOriginal.get(original)
+    if (group === undefined) copiesByOriginal.set(original, [file])
+    else group.push(file)
+  }
+
+  const groups: CopyGroup[] = []
+  for (const [path, copies] of copiesByOriginal) {
+    const original = byPath.get(path) ?? null
+    const members = original === null ? copies : [original, ...copies]
+    // Une copie seule, sans original, n'est le doublon de rien.
+    if (members.length < 2) continue
+    groups.push({ path, original, files: [...members].sort(byMostRecent) })
+  }
+  return groups.sort((a, b) => a.path.localeCompare(b.path))
+}
+
+/**
+ * Ce que le grand nettoyage fera, décidé sans toucher au serveur.
+ *
+ * - `remove` : les fichiers supprimés.
+ * - `rewrite` : l'original garde sa place et son identité (celle que les
+ *   appareils connaissent), mais reçoit les cartes de la copie plus récente.
+ * - `rename` : une copie restée seule reprend le nom de l'original disparu.
+ */
+export interface CleanupPlan {
+  remove: DuplicateFile[]
+  rewrite: { target: DuplicateFile; source: DuplicateFile }[]
+  rename: { file: DuplicateFile; path: string }[]
+}
+
+/**
+ * Une seule version par fichier, la plus récemment modifiée.
+ *
+ * D'abord les doublons de contenu (on garde le plus récent de chaque groupe),
+ * puis, parmi ce qui reste, les copies de synchronisation. L'ordre compte : un
+ * fichier déjà promis à la suppression ne doit pas être choisi ensuite comme
+ * la version à garder d'un groupe de copies.
+ */
+export function planCleanup(files: readonly DuplicateFile[]): CleanupPlan {
+  const removed = new Set<string>()
+  const plan: CleanupPlan = { remove: [], rewrite: [], rename: [] }
+
+  for (const group of findDuplicateGroups(files)) {
+    const [kept, ...others] = [...group.files].sort(byMostRecent)
+    for (const file of others) {
+      if (file.id === kept.id || removed.has(file.id)) continue
+      removed.add(file.id)
+      plan.remove.push(file)
+    }
+  }
+
+  const remaining = files.filter(file => !removed.has(file.id))
+  for (const group of findCopyGroups(remaining)) {
+    const [newest, ...others] = group.files
+    if (group.original === null) {
+      // Plus d'original : la copie la plus récente reprend son nom — libre par
+      // construction, puisqu'aucun fichier restant ne l'occupe.
+      plan.rename.push({ file: newest, path: group.path })
+      for (const file of others) plan.remove.push(file)
+      continue
+    }
+    if (newest.id !== group.original.id) {
+      plan.rewrite.push({ target: group.original, source: newest })
+    }
+    for (const file of group.files) {
+      if (file.id !== group.original.id) plan.remove.push(file)
+    }
+  }
+
+  return plan
+}
+
+/** Les cartes d'un contenu, telles quelles — ce qu'une réécriture recopie. */
+export function cardsOfContent(content: string): Card[] | null {
+  return cardsOf(content)
 }

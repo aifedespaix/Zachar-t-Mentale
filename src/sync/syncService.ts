@@ -3,7 +3,7 @@ import { join } from '@tauri-apps/api/path'
 import { loadMindMap, loadMindMapMeta, setMindMapType, stampMindMapSyncMeta } from '../persistence/fileStore'
 import { scanFolder } from '../persistence/fileTree'
 import { deletePath, renamePath } from '../persistence/fileOps'
-import { archiveRemoteAsLinkedCopy, createLinkedCopy, unlinkIfAlone } from '../persistence/copyLinkOps'
+import { unlinkIfAlone } from '../persistence/copyLinkOps'
 import { readAssetBytes, writeAsset, sidecarDirOf } from '../persistence/assets'
 import { serializeMindMap, deserializeMindMap } from '../persistence/serialization'
 import { fileNameOf, isInsideFolder, isSameFilePath, parentDirOf, separatorOf } from '../persistence/paths'
@@ -484,6 +484,41 @@ export function isConflict(
   if (meta.lastModified <= stateEntry.lastSyncedModified) return false
   if (stateEntry.lastSyncedContentHash === undefined) return remote.updated > stateEntry.lastSyncedUpdated
   return stateEntry.lastSyncedContentHash !== remoteContentHash
+}
+
+/**
+ * L'instant de la dernière modification d'un enregistrement distant.
+ *
+ * C'est la `meta.lastModified` écrite dans son contenu — la date de
+ * l'ÉDITION, posée par l'appareil qui a modifié la carte, comparable à la
+ * nôtre. `updated` (la révision du serveur) ne sert qu'en repli, pour un
+ * contenu sans enveloppe : il bouge aussi sur un simple déplacement.
+ */
+function remoteModifiedAt(remote: RemoteMindMapRecord): number {
+  try {
+    const { meta } = deserializeMindMap(remote.content)
+    const at = meta === null ? Number.NaN : Date.parse(meta.lastModified)
+    if (!Number.isNaN(at)) return at
+  } catch {
+    // Contenu illisible : on retombe sur la révision du serveur.
+  }
+  return Date.parse(remote.updated.replace(' ', 'T'))
+}
+
+/**
+ * Qui gagne un conflit de contenu : la version modifiée le PLUS RÉCEMMENT, et
+ * elle seule. L'autre est remplacée, jamais mise de côté dans une copie — une
+ * pile de « (copie) » à chaque synchronisation n'aide personne.
+ *
+ * À égalité (ou date illisible côté serveur), la version locale gagne : c'est
+ * celle qu'on a sous les yeux.
+ */
+export function localWinsConflict(meta: MindMapMeta, remote: RemoteMindMapRecord): boolean {
+  const local = Date.parse(meta.lastModified)
+  const distant = remoteModifiedAt(remote)
+  if (Number.isNaN(distant)) return true
+  if (Number.isNaN(local)) return false
+  return local >= distant
 }
 
 export interface SyncSurvey {
@@ -993,7 +1028,7 @@ export async function sync({
   // distante a été supprimé — par son auteur, par un prof, ou depuis
   // l'administration. Propager est le cas normal. Un désaccord réel (le
   // fichier a changé ici depuis, ou est ouvert) devient un conflit tranché
-  // par rôle, jamais par un dialogue — voir
+  // sans copie ni dialogue — voir
   // `2026-09-15-autorite-prof-conflits-design.md`.
   const locallyDeletedFileIds = new Set<string>()
 
@@ -1034,9 +1069,12 @@ export async function sync({
       localModified: localScan.meta.lastModified,
       remoteUpdated: entry.lastSyncedUpdated,
     })
-    if (currentRole === 'prof') {
-      // Le prof a le dernier mot : rien n'est touché ici, sa version repart
-      // au serveur par le push normal qui suit (`remote` absent → `create`).
+    // La modification locale est postérieure à ce qu'on avait vu : c'est la
+    // version la plus récente qu'on connaisse, elle est gardée et repart au
+    // serveur par le push normal qui suit (`remote` absent → `create`). Jamais
+    // de copie. Seul qui a le droit d'écrire ce contenu peut le republier :
+    // pour les autres, la suppression du serveur s'applique.
+    if (canEditContent(localScan.meta, viewer)) {
       result.notices.push({
         fileId,
         message: `« ${relPath} » avait été supprimé côté serveur, mais votre version a changé depuis — elle repart au serveur`,
@@ -1044,15 +1082,13 @@ export async function sync({
       return
     }
     try {
-      const archived = await createLinkedCopy({ sourcePath: localScan.path, author: viewer.username, role: viewer.role })
+      const link = localScan.meta.copyLink
       await deletePath(localScan.path, false)
+      if (link !== undefined) await unlinkIfAlone(parentDirOf(localScan.path), link.groupId).catch(() => {})
       delete entries[fileId]
       locallyDeletedFileIds.add(fileId)
       result.localDeleted += 1
-      result.notices.push({
-        fileId,
-        message: `« ${relPath} » a été supprimé côté serveur — votre version, qui avait changé, a été gardée dans « ${fileNameOf(archived.path)} »`,
-      })
+      result.notices.push({ fileId, message: `« ${relPath} » a été supprimé côté serveur` })
     } catch (error) {
       result.errors.push({ fileId, message: describeSyncError(error) })
     }
@@ -1210,10 +1246,9 @@ export async function sync({
     const remoteContentHash = plan.content && remote !== undefined ? await hashContent(remote.content) : ''
     if (plan.content && isConflict(meta, known, remote, remoteContentHash)) {
       // Signalé pour le journal et le rapport à l'administration (voir
-      // `syncReporting.ts`), mais TRANCHÉ ici même — le prof a le dernier mot,
-      // voir `2026-09-15-autorite-prof-conflits-design.md`. Rien n'est perdu :
-      // la version qui cède est mise à l'abri dans une copie liée avant d'être
-      // remplacée.
+      // `syncReporting.ts`), mais TRANCHÉ ici même : la version modifiée le
+      // plus récemment gagne (`localWinsConflict`), l'autre est remplacée. Pas
+      // de copie — le détail joint au conflit garde de quoi comparer.
       const relPath = relativeTo(syncFolderPath, scan.path)
       result.conflicts.push({
         fileId: meta.id,
@@ -1226,46 +1261,24 @@ export async function sync({
         detail: await conflictDetailOf({ localPath: scan.path, meta, remote, remoteContentHash }),
       })
 
-      if (currentRole !== 'prof') {
-        // L'élève cède : sa version locale part dans une copie liée, et cette
-        // fonction s'arrête là — le tirage qui suit dans ce même passage écrira
-        // la version du prof à sa place, exactement comme il le ferait pour
-        // n'importe quel enregistrement plus récent que ce qu'on a vu.
-        try {
-          const archived = await createLinkedCopy({ sourcePath: scan.path, author: viewer.username, role: viewer.role })
-          result.notices.push({
-            fileId: meta.id,
-            message: `« ${relPath} » : modifié des deux côtés — le prof a le dernier mot, votre version a été gardée dans « ${fileNameOf(archived.path)} »`,
-          })
-        } catch (error) {
-          result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
-        }
+      if (!localWinsConflict(meta, remote)) {
+        // La version du serveur est la plus récente : la nôtre cède, et cette
+        // fonction s'arrête là — le tirage qui suit dans ce même passage écrit
+        // la version distante à sa place, sans copie.
+        result.notices.push({
+          fileId: meta.id,
+          message: `« ${relPath} » : modifié des deux côtés — la version du serveur, plus récente, a été gardée`,
+        })
         return
       }
 
-      // Le prof gagne : sa version locale part au serveur comme n'importe quel
-      // push de contenu (la suite de la fonction s'en charge) — mais d'abord,
-      // la version distante qu'elle remplace est mise à l'abri.
-      try {
-        const archived = await archiveRemoteAsLinkedCopy({
-          anchorPath: scan.path,
-          remoteContent: remote.content,
-          author: viewer.username,
-          role: viewer.role,
-        })
-        if (archived !== null) {
-          // Les images que ce contenu référence ne sont pas encore sur cette
-          // machine : sans ce tirage, la copie archivée aurait des images
-          // cassées alors qu'elles existent bel et bien sur le serveur.
-          await pullAssetsFor(client, archived.path, referencedAssets(remote.content, remoteAssets), { signal })
-          result.notices.push({
-            fileId: meta.id,
-            message: `« ${relPath} » : modifié des deux côtés — vous avez le dernier mot, l'autre version a été gardée dans « ${fileNameOf(archived.path)} »`,
-          })
-        }
-      } catch (error) {
-        result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
-      }
+      // La nôtre est la plus récente : elle part au serveur comme n'importe
+      // quel push de contenu (la suite de la fonction s'en charge) et remplace
+      // la version distante, sans copie.
+      result.notices.push({
+        fileId: meta.id,
+        message: `« ${relPath} » : modifié des deux côtés — votre version, plus récente, a été gardée`,
+      })
     }
 
     try {
@@ -1639,7 +1652,7 @@ export interface SyncOneFileParams {
 
 /**
  * Le même raisonnement que `sync()` — réconciliation, publication
- * automatique, conflit tranché par rôle — pour UN SEUL fichier : celui qu'on
+ * automatique, conflit tranché par date — pour UN SEUL fichier : celui qu'on
  * vient de refermer. Voir la décision de cadrage n°4 de
  * `2026-09-15-suppression-publication-auto-sync-ciblee-design.md`.
  *
@@ -1776,35 +1789,16 @@ export async function syncOneFile(params: SyncOneFileParams): Promise<SyncResult
       remoteUpdated: remote.updated,
       detail: await conflictDetailOf({ localPath: currentPath, meta, remote, remoteContentHash }),
     })
-    if (iAmProf) {
-      try {
-        const archived = await archiveRemoteAsLinkedCopy({
-          anchorPath: currentPath,
-          remoteContent: remote.content,
-          author: viewer.username,
-          role: viewer.role,
-        })
-        if (archived !== null) {
-          const remoteAssets = await client.assets.getFullList({ signal })
-          await pullAssetsFor(client, archived.path, referencedAssets(remote.content, remoteAssets), { signal })
-          result.notices.push({
-            fileId: meta.id,
-            message: `« ${relPath} » : modifié des deux côtés — vous avez le dernier mot, l'autre version a été gardée dans « ${fileNameOf(archived.path)} »`,
-          })
-        }
-      } catch (error) {
-        result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
-      }
+    if (localWinsConflict(meta, remote)) {
+      result.notices.push({
+        fileId: meta.id,
+        message: `« ${relPath} » : modifié des deux côtés — votre version, plus récente, a été gardée`,
+      })
     } else {
-      try {
-        const archived = await createLinkedCopy({ sourcePath: currentPath, author: viewer.username, role: viewer.role })
-        result.notices.push({
-          fileId: meta.id,
-          message: `« ${relPath} » : modifié des deux côtés — le prof a le dernier mot, votre version a été gardée dans « ${fileNameOf(archived.path)} »`,
-        })
-      } catch (error) {
-        result.errors.push({ fileId: meta.id, message: describeSyncError(error) })
-      }
+      result.notices.push({
+        fileId: meta.id,
+        message: `« ${relPath} » : modifié des deux côtés — la version du serveur, plus récente, a été gardée`,
+      })
       skipPush = true
     }
   }

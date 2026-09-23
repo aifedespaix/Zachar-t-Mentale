@@ -1,6 +1,6 @@
 ---
 name: transformer-cours-en-carte-mentale
-description: Use when converting a course PDF (or any raw course material — worksheet, fill-in-the-blank sheet, existing but poorly-structured mind map) into a mind map file for the Zachar't Mentale app, or when correcting a student's already-filled `.zmap` as a teacher — producing Card JSON data, not application code.
+description: Use when converting a course PDF (or any raw course material — worksheet, fill-in-the-blank sheet, existing but poorly-structured mind map) into a mind map file for the Zachar't Mentale app, or when correcting a student's already-filled `.zmap` as a teacher (correcting an `exo` CREATES a new `corrections` file; correcting a `prise de notes` CREATES a new `cours` file) — producing Card JSON data, not application code.
 ---
 
 # Transformer un cours en carte mentale
@@ -48,10 +48,12 @@ type CardBlock =
 - `type` appartient à
   `"cours" | "exo" | "prise de notes" | "corrections" | "corrigé" | "default"` :
   `cours` pour un contenu de référence, `exo` pour un entraînement,
-  `prise de notes` pour des notes à compléter, `corrections` pour un corrigé de
-  référence écrit pour tout le monde, `corrigé` pour la copie d’un élève
-  reprise par son prof (voir « Corriger le fichier d’un élève » plus bas),
-  `default` si le document ne relève clairement d’aucun.
+  `prise de notes` pour des notes à compléter, `corrections` pour le corrigé
+  d’un exo, `default` si le document ne relève clairement d’aucun. Corriger
+  le travail d’un élève produit TOUJOURS un fichier neuf : un `corrections`
+  pour un exo, un `cours` pour une prise de notes (voir « Corriger le fichier
+  d’un élève » plus bas). `corrigé` existe dans l’app mais cette skill ne
+  l’écrit plus.
 - Extension : `.zmap` — c'est celle que l'installeur associe à l'app, donc la
   carte s'ouvre d'un double-clic depuis l'explorateur. Le contenu reste du JSON.
   Les anciens `.json` continuent de s'ouvrir, mais rien de neuf n'en écrit.
@@ -78,14 +80,17 @@ L'arborescence de `.cartes-mentales/` est : `<matière>/<chapitre>/<fichier>.zma
   trop gros ») les regroupe tous dans le MÊME dossier de chapitre.
   - **Exception : fichier `corrections` d'un exercice existant.** Un
     `meta.type: "corrections"` (voir « Corriger le fichier d'un élève » plus
-    bas pour la distinction avec `corrigé`) partage forcément le sous-thème
+    bas) partage forcément le sous-thème
     de l'exercice qu'il corrige et doit coexister avec lui dans le même
     dossier de chapitre — deux fichiers ne peuvent pas porter le même nom. Le
     suffixe `-corrections` est alors la seule exception à la règle
     ci-dessus : `influences.zmap` (exo) → `influences-corrections.zmap`.
-    N'utiliser ce suffixe que dans ce cas précis ; il reste interdit pour
-    tout autre type (`cours`, `prise de notes`, `default`…) puisque ceux-là
-    n'ont pas ce problème de collision de nom.
+    N'utiliser ce suffixe que dans ce cas précis (et le suivant) ; il reste
+    interdit pour tout autre type puisque ceux-là n'ont pas ce problème de
+    collision de nom.
+  - **Exception : fichier `cours` tiré d'une prise de notes.** Même
+    collision, même solution : `seance-3.zmap` (prise de notes) →
+    `seance-3-cours.zmap` (cours), dans le même dossier de chapitre.
 - **Jamais de PDF ni de support brut sous `.cartes-mentales/`** : les sources
   restent dans `.cours/`. `.cartes-mentales/` ne contient que des `.zmap`
   (et leurs `.assets/` générés par l'app elle-même).
@@ -297,42 +302,51 @@ Son frère niveau 3 "Même signe" reçoit une `definition` de longueur et de
 registre comparables, pas deux fois plus courte — sinon un QCM les
 distinguerait trivialement.
 
-## Corriger le fichier d’un élève — le type `corrigé`
+## Corriger le fichier d’un élève — TOUJOURS un fichier NEUF
 
 Cas d’entrée différent de tous les autres : l’invocation ne donne pas un
-support de cours à structurer mais un `.zmap` DÉJÀ REMPLI par un élève (une
-fiche de questions, des réponses, une prise de notes), et demande de le
-corriger en tant que prof. Le résultat est le MÊME fichier, repris — jamais
-un fichier neuf à côté.
+support de cours à structurer mais un `.zmap` DÉJÀ REMPLI par un élève, et
+demande de le corriger en tant que prof.
 
-**`corrections` et `corrigé` ne sont pas le même type** :
+**Règle absolue : le fichier de l’élève n’est JAMAIS modifié.** La
+correction est un fichier NOUVEAU, à côté, dont le type dépend UNIQUEMENT du
+`meta.type` du fichier corrigé :
 
-| Type | Ce que c’est | Qui l’écrit |
+| On corrige un… | On CRÉE un… | Nom du nouveau fichier |
 |---|---|---|
-| `corrections` | le corrigé de référence d’un exercice ou d’une évaluation, indépendant de toute copie | le prof, pour toute la classe |
-| `corrigé` | la copie d’UN élève, reprise et rectifiée, son travail conservé | le prof, dans le fichier de l’élève |
+| `exo` | fichier `corrections` | `<nom-de-l-exo>-corrections.zmap` |
+| `prise de notes` | fichier `cours` | `<nom-des-notes>-cours.zmap` |
 
-### Ce qui change dans `meta`
+Aucun autre choix : corriger un exo produit une **correction**, corriger une
+prise de notes produit un **cours**. Pas de `corrigé`, pas de réécriture en
+place, pas de changement de type du fichier de l’élève. Si le fichier à
+corriger n’est ni un `exo` ni une `prise de notes`, DEMANDER quel type
+produire avant d’écrire quoi que ce soit.
 
-Seulement `type` → `"corrigé"` et `lastModified` → l’instant de la correction.
+Pourquoi : réécrire le fichier de l’élève pendant qu’il le modifie aussi de
+son côté crée un conflit de synchronisation, et l’une des deux versions est
+perdue (la synchro ne garde que la plus récente). Un fichier neuf n’entre en
+conflit avec rien.
 
-**`id`, `author` et `role` ne changent pas.** Le fichier reste celui de
-l’élève : l’app autorise explicitement un prof à écrire le contenu d’une
-carte dont il n’est pas l’auteur (`canEditContent` dans
-`src/sync/permissions.ts`), et la synchro repousse la carte sous son auteur
-d’origine. Recréer un fichier avec un nouvel `id` ferait un doublon côté
-serveur et sortirait l’élève de sa propre carte.
+### Le `meta` du nouveau fichier
 
-Le fichier garde aussi son chemin et son nom : le renommer ou le déplacer
-n’apporte rien et se lit comme un déplacement côté synchro.
+- `id` : un uuid NEUF — jamais celui du fichier de l’élève.
+- `author` / `role` : ceux du prof qui corrige (à demander s’ils ne sont pas
+  fournis), pas ceux de l’élève.
+- `lastModified` : l’instant de la correction.
+- `type` : `"corrections"` pour un exo, `"cours"` pour une prise de notes.
+- Pour un `corrections` seulement : `correctsId` et `correctsSnapshot`,
+  exactement comme décrit dans « Fraîcheur d'un fichier `corrections` ».
 
-### Ce qu’on ne touche jamais
+Le nouveau fichier va dans le MÊME dossier de chapitre que le fichier de
+l’élève (voir les exceptions de nommage dans « Où écrire le fichier »).
 
-- **Aucun `id` de carte réécrit, aucune carte supprimée, aucun `parentId` ni
-  `order` remanié.** La structure de l’élève FAIT PARTIE de son travail :
-  la remanier lui rend une carte qu’il ne reconnaît plus.
-- **Une réponse juste reste telle quelle**, même mal tournée. Corriger le
-  style n’est pas corriger.
+### Ce qu’on reprend du fichier de l’élève
+
+Sa structure sert de squelette : mêmes thèmes, mêmes cartes, dans le même
+ordre, pour que l’élève retrouve sa carte d’un coup d’œil en comparant les
+deux fichiers. Les `id` de carte peuvent être repris tels quels (ils ne
+vivent que dans leur fichier).
 
 ### Ce qu’on corrige
 
@@ -340,21 +354,24 @@ n’apporte rien et se lit comme un déplacement côté synchro.
   réécrite juste, en gardant les mots de l’élève partout où ils n’étaient pas
   faux. Ne JAMAIS laisser une erreur dans une `definition` : le fichier sert
   à réviser, et le quiz apprendrait la faute par cœur.
+- **Une réponse juste reste telle quelle**, même mal tournée. Corriger le
+  style n’est pas corriger.
 - **Un trou** : carte laissée sans `definition`, « ………… » recopié du sujet
   → complété avec la bonne réponse, exactement comme pour une fiche à trous.
 - **Ce qui manque complètement** : une carte NOUVELLE, à sa place dans
-  l’arbre, avec un `id` neuf qui n’entre en collision avec aucun de ceux de
-  l’élève.
+  l’arbre, avec un `id` neuf.
+- Pour un `cours` tiré d’une prise de notes : compléter et structurer en
+  vrai cours de référence (4 niveaux, règles habituelles), pas seulement
+  boucher les trous.
 - Toute carte ajoutée ou réécrite repasse par les règles habituelles : titre
   et définition qui se déterminent l’un l’autre, sœurs de longueur
   comparable, maths en blocs `math`, mots-clés en `**gras**`.
 
 ### Montrer ce qui a été repris (facultatif)
 
-Poser `icon: "PencilLine"` sur les cartes touchées donne à l’élève la liste
-de ce que le prof a repris d’un coup d’œil : l’icône est purement mnémonique,
-elle n’entre dans aucun quiz. Ne rien poser sur les cartes laissées intactes,
-et laisser en place une icône que l’élève avait déjà choisie — elle est à lui.
+Poser `icon: "PencilLine"` sur les cartes corrigées ou ajoutées donne à
+l’élève la liste de ce que le prof a repris d’un coup d’œil : l’icône est
+purement mnémonique, elle n’entre dans aucun quiz.
 
 ## Écrire pour le mode quiz
 
@@ -561,10 +578,11 @@ dans l'arbre, à côté de trois distracteurs. Un renvoi y devient du bruit.
 | Titre identique à celui d'une carte d'une autre branche | Rend le QCM titre→définition réellement ambigu — aucune des deux définitions n'est reconnaissable comme LA bonne réponse |
 | Écrire le `.zmap` directement sous `<matière>/`, sans dossier de chapitre | Casse l'arborescence `matière/chapitre/fichier.zmap` — même un chapitre à un seul fichier a son dossier |
 | Suffixer le nom de fichier par le type (`-cours`, `-exo`) | Le type est déjà `meta.type` ; le nom de fichier décrit le sous-thème, pas la nature du contenu |
-| Corriger un élève en créant un fichier neuf (nouvel `id`, `author` du prof) | Doublon côté serveur, et l’élève est sorti de sa propre carte : le corrigé s’écrit DANS son fichier |
-| Classer en `corrections` la copie reprise d’un élève | `corrections` est le corrigé de référence d’un exercice ; une copie d’élève rectifiée est `corrigé` |
+| Corriger un élève en réécrivant SON fichier | Conflit de synchro avec ses propres modifications, et une des deux versions est perdue : la correction est TOUJOURS un fichier neuf |
+| Corriger un `exo` en produisant autre chose qu’un `corrections` | Exo corrigé = fichier `corrections` (`<exo>-corrections.zmap`), rien d’autre |
+| Corriger une `prise de notes` en produisant autre chose qu’un `cours` | Prise de notes corrigée = fichier `cours` (`<notes>-cours.zmap`), rien d’autre |
 | Laisser la réponse fausse de l’élève dans une `definition` | Le fichier sert à réviser : le quiz apprendrait l’erreur par cœur |
-| Réécrire les ids ou réordonner l’arbre d’un élève pour « faire propre » | Sa structure fait partie de son travail, et la synchro y verrait un autre fichier |
+| Réordonner l’arbre de l’élève dans la correction pour « faire propre » | Sa structure sert de repère : il doit pouvoir comparer les deux fichiers carte à carte |
 
 ## Adaptation à d'autres matières
 

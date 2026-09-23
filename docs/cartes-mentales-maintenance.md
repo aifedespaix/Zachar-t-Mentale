@@ -365,8 +365,11 @@ une résolution automatique par rôle (voir
   fichier, contenus divergents) : détecté par `isConflict`
   (`src/sync/syncService.ts`), toujours signalé (`result.conflicts`, relu par
   l'interface d'administration via `syncReporting.ts`), mais TRANCHÉ
-  automatiquement dans le même passage — le prof gagne, la version qui cède
-  est archivée dans une copie liée avant d'être remplacée. Il n'y a plus de
+  automatiquement dans le même passage — la version modifiée le plus
+  récemment gagne (`localWinsConflict`, d'après la `meta.lastModified` des
+  deux contenus), l'autre est remplacée. Aucune copie « (copie) » n'est plus
+  créée ; celles qui traînent encore sur le serveur se nettoient depuis
+  l'onglet « Doublons » de l'administration. Il n'y a plus de
   boîte de dialogue à trois choix (`ConflictResolutionDialog`,
   `src/sync/conflictResolution.ts` : retirés, devenus inatteignables une fois
   la règle déterministe) — l'usage réel n'oppose jamais que ces deux rôles

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import {
   MIND_MAPS,
+  applyCleanup,
   applyRelocation,
   applyRemoval,
   createFolder,
@@ -17,6 +18,7 @@ import {
   type RemoteSyncEvent,
 } from '@/lib/api'
 import { describeApiError } from '@/lib/pb'
+import type { CleanupPlan } from '@/lib/duplicates'
 import { buildTree, type LibraryFolder, type LibraryMap, type TreeNode } from '@/lib/tree'
 import type { Card, UserRole } from '@app/types/card'
 
@@ -61,6 +63,7 @@ interface LibraryState {
   setMapType: (id: string, type: string) => Promise<void>
   /** Supprime des cartes par identifiant — l'arbitrage d'un doublon. */
   removeMaps: (ids: readonly string[]) => Promise<void>
+  cleanDuplicates: (plan: CleanupPlan) => Promise<void>
   settleConflict: (
     conflict: RemoteConflict,
     resolution: 'kept-remote' | 'took-local' | 'dismissed',
@@ -171,6 +174,18 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     } finally {
       // Même en cas d'échec à mi-parcours, une partie des fichiers a bel et
       // bien disparu : rafraîchir est la seule réponse honnête.
+      set({ busy: null })
+      await get().refreshLibrary()
+    }
+  },
+
+  cleanDuplicates: async plan => {
+    const total = plan.rewrite.length + plan.remove.length + plan.rename.length
+    if (total === 0) return
+    set({ busy: { label: 'Nettoyage', done: 0, total } })
+    try {
+      await applyCleanup(plan, (done, count) => set({ busy: { label: 'Nettoyage', done, total: count } }))
+    } finally {
       set({ busy: null })
       await get().refreshLibrary()
     }
