@@ -228,3 +228,53 @@ describe('la « zone formule »', () => {
     await waitFor(() => expect(remaining.position).toBe(2))
   })
 })
+
+describe('sortir d’une formule vers les blocs voisins', () => {
+  it('move-out au-delà de la première ligne → fin du texte au-dessus', async () => {
+    render(<Harness initial={[{ kind: 'text', text: 'avant' }, { kind: 'math', latex: 'a\nb' }]} />)
+    const [first] = await mathFields()
+    moveOut(first, 'upward')
+    const text = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    expect(text).toHaveFocus()
+    expect(text.selectionStart).toBe(5)
+  })
+
+  it('move-out au-delà de la dernière ligne saute un tableau', async () => {
+    render(
+      <Harness
+        initial={[
+          { kind: 'math', latex: 'a' },
+          { kind: 'table', header: [], rows: [['x']] },
+          { kind: 'text', text: 'après' },
+        ]}
+      />
+    )
+    const [only] = await mathFields()
+    moveOut(only, 'forward')
+    const text = screen.getByRole('textbox', { name: /texte du bloc 3/i }) as HTMLTextAreaElement
+    expect(text).toHaveFocus()
+    expect(text.selectionStart).toBe(0)
+  })
+
+  it('↓ en fin de texte entre dans la formule, curseur au début', async () => {
+    render(<Harness initial={[{ kind: 'text', text: 'ab' }, { kind: 'math', latex: 'x\ny' }]} />)
+    const [first] = await mathFields()
+    const text = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    text.focus()
+    text.setSelectionRange(2, 2)
+    fireEvent.keyDown(text, { key: 'ArrowDown' })
+    expect(first.focus).toHaveBeenCalled()
+    expect(first.executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
+  })
+
+  it('← au début d’un texte entre dans la formule au-dessus par sa DERNIÈRE ligne', async () => {
+    render(<Harness initial={[{ kind: 'math', latex: 'x\ny' }, { kind: 'text', text: 'ab' }]} />)
+    const [, last] = await mathFields()
+    const text = screen.getByRole('textbox', { name: /texte du bloc 2/i }) as HTMLTextAreaElement
+    text.focus()
+    text.setSelectionRange(0, 0)
+    fireEvent.keyDown(text, { key: 'ArrowLeft' })
+    expect(last.focus).toHaveBeenCalled()
+    expect(last.executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
+  })
+})

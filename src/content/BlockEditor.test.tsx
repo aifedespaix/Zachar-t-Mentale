@@ -997,9 +997,12 @@ describe('le bandeau de symboles', () => {
     ])
   })
 
-  it('garde le focus après une insertion au milieu, malgré les identités stables', async () => {
+  it('garde le focus après une insertion en fin de groupe, malgré les identités stables', async () => {
     // Le risque exact de la réconciliation d'identités : si les clés se décalaient,
     // le bloc qu'on est en train d'écrire serait remonté et perdrait le focus.
+    // Ctrl+Entrée ajoute désormais APRÈS le groupe entier (voir `enterBlock`) :
+    // sans question, « un » et « deux » ne forment qu'un seul groupe, donc le
+    // nouveau bloc arrive après « deux », pas entre les deux.
     const user = userEvent.setup()
     renderEditor([
       { kind: 'text', text: 'un' },
@@ -1008,7 +1011,8 @@ describe('le bandeau de symboles', () => {
 
     await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), '{Control>}{Enter}{/Control}')
 
-    expect(screen.getByRole('textbox', { name: /texte du bloc 2/i })).toHaveFocus()
+    expect(screen.getByRole('textbox', { name: /texte du bloc 2/i })).toHaveValue('deux')
+    expect(screen.getByRole('textbox', { name: /texte du bloc 3/i })).toHaveFocus()
   })
 
   it('groupe les signes par famille, et nomme chaque famille', () => {
@@ -1634,7 +1638,24 @@ describe('the block keyboard shortcuts (Alt + …)', () => {
     expect(screen.getByRole('button', { name: /^sciences$/i, pressed: true })).toBeInTheDocument()
   })
 
-  it('adds a block outside the last question with Ctrl/Cmd + Maj + Entrée', async () => {
+  it('adds a block outside the question with Ctrl/Cmd + Entrée', async () => {
+    const { latest } = renderEditor([
+      { kind: 'question', text: 'Q' },
+      { kind: 'text', text: 'a' },
+    ])
+    const field = screen.getByRole('textbox', { name: /texte du bloc 2/i })
+    field.focus()
+
+    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true })
+
+    expect(latest()).toMatchObject([
+      { kind: 'question', text: 'Q' },
+      { kind: 'text', text: 'a' },
+      { kind: 'text', text: '', standalone: true },
+    ])
+  })
+
+  it('adds a block inside the question with Ctrl/Cmd + Maj + Entrée', async () => {
     const { latest } = renderEditor([
       { kind: 'question', text: 'Q' },
       { kind: 'text', text: 'a' },
@@ -1643,6 +1664,20 @@ describe('the block keyboard shortcuts (Alt + …)', () => {
     field.focus()
 
     fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true, shiftKey: true })
+
+    expect(latest()).toEqual([
+      { kind: 'question', text: 'Q' },
+      { kind: 'text', text: 'a' },
+      { kind: 'text', text: '' },
+    ])
+  })
+
+  it('Ctrl + Entrée from a gutter button appends outside the last question', async () => {
+    const { latest } = renderEditor([
+      { kind: 'question', text: 'Q' },
+      { kind: 'text', text: 'a' },
+    ])
+    fireEvent.keyDown(screen.getByRole('button', { name: /supprimer le bloc 2/i }), { key: 'Enter', ctrlKey: true })
 
     expect(latest()).toMatchObject([
       { kind: 'question', text: 'Q' },

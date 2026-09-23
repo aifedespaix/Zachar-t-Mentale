@@ -89,7 +89,7 @@ export function EmptyAreaContextMenu({
         <ContextMenuItem onSelect={onAddBlock}>
           <Plus size={14} />
           <span style={{ flex: 1 }}>Ajouter un bloc</span>
-          <MenuShortcut keys="Ctrl + Maj + Entrée" />
+          <MenuShortcut keys="Ctrl + Entrée" />
         </ContextMenuItem>
 
         <ContextMenuSub>

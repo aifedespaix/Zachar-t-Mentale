@@ -1623,16 +1623,19 @@ function ShortcutsPanel({
       {scope === 'title' && canRename && <Shortcut keys="Entrée" label="Valider le renommage" />}
       {scope === 'cell' && <Shortcut keys="Entrée" label="Ajouter une ligne dans la cellule" />}
       {/* Entrée écrit une LIGNE dans le champ où est le curseur — un texte, une
-          cellule, une formule. C'est Ctrl/Cmd+Entrée qui ajoute un BLOC, comme
-          dans un traitement de texte. */}
-      {scope === 'block' && <Shortcut keys="Ctrl/Cmd + Entrée" label="Nouveau bloc" />}
-      {scope === 'block' && <Shortcut keys="Entrée (en formule)" label="Ajoute une ligne de formule" />}
+          cellule, une formule. Ctrl/Cmd+Entrée ajoute un BLOC après la
+          question, comme dans un traitement de texte ; avec Maj en plus, le
+          bloc reste DANS la question. */}
+      {scope === 'block' && <Shortcut keys="Ctrl/Cmd + Entrée" label="Nouveau bloc, après la question" />}
+      {scope === 'block' && <Shortcut keys="Ctrl/Cmd + Maj + Entrée" label="Nouveau bloc dans la question" />}
+      {scope === 'block' && <Shortcut keys="Entrée (en formule / équation)" label="Nouvelle ligne / étape" />}
+      {scope === 'block' && <Shortcut keys="Entrée (en question)" label="Écrire la réponse" />}
+      {scope === 'block' && <Shortcut keys="Flèches au bord d’un champ" label="Champ ou bloc voisin" />}
       {scope === 'block' && <Shortcut keys="Tab / Maj + Tab" label="Type de bloc suivant / précédent" />}
       {scope === 'block' && <Shortcut keys="Alt + ↑ / ↓" label="Déplacer le bloc" />}
       {scope === 'block' && <Shortcut keys="Alt + D" label="Dupliquer le bloc" />}
       {scope === 'block' && <Shortcut keys="Alt + Q" label="Marquer comme question" />}
       {scope === 'block' && <Shortcut keys="Alt + 1…5 / 0" label="Onglet du bandeau / aucun" />}
-      {scope === 'block' && <Shortcut keys="Ctrl/Cmd + Maj + Entrée" label="Ajouter un bloc" />}
       {/* `$$` is a text-block gesture only: it does nothing in the title, and a
           table cell keeps its two dollar signs as literal text. */}
       {scope === 'block' && <Shortcut keys="$$" label="Transforme le texte en formule" />}

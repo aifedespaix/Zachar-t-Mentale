@@ -73,6 +73,9 @@ const KIND_CYCLE: CardBlockKind[] = ['text', 'math', 'table', 'question']
 /** The widths the image control offers, as a share of the definition's width. */
 const IMAGE_WIDTH_STEPS = [160, 240, 320, 480, 640] as const
 
+/** Les blocs où les flèches entrent : image et tableau sont sautés (un tableau serait un piège dont les flèches ne ressortent pas). */
+const NAVIGABLE_KINDS: ReadonlySet<CardBlockKind> = new Set(['text', 'question', 'math', 'equation'])
+
 type TableBlock = Extract<CardBlock, { kind: 'table' }>
 
 function tableCellText(cell: TableCell): string {
@@ -673,6 +676,59 @@ export function BlockEditor({
     pendingFocusSelector.current = fieldSelector(index)
   }
 
+  // Read at call time, never from the closure: the native picker can stay open
+  // for a minute while the user keeps typing, and appending to the block list
+  // as it was when the dialog opened would revert everything typed since.
+  const blocksRef = useRef(blocks)
+  blocksRef.current = blocks
+
+  // Le point d'entrée clavier de chaque formule/équation, par index — même
+  // raison que `fieldSetterFor` pour mettre les rappels en cache : un `ref`
+  // neuf à chaque rendu se détacherait et se rattacherait à chaque rendu.
+  const edgeHandles = useRef(new Map<number, BlockEdgeHandle | null>())
+  const edgeRefs = useRef(new Map<number, (handle: BlockEdgeHandle | null) => void>())
+  function edgeRefFor(index: number): (handle: BlockEdgeHandle | null) => void {
+    let setter = edgeRefs.current.get(index)
+    if (setter === undefined) {
+      setter = handle => {
+        edgeHandles.current.set(index, handle)
+      }
+      edgeRefs.current.set(index, setter)
+    }
+    return setter
+  }
+
+  /** Entre dans le bloc `index` par son début (premier champ) ou sa fin (dernier champ). */
+  function focusBlockEdge(index: number, at: 'start' | 'end') {
+    const block = blocksRef.current[index]
+    if (block === undefined) return
+    if (block.kind === 'text' || block.kind === 'question') {
+      const field = textFieldAt(index)
+      if (field === null) return
+      field.focus()
+      const offset = at === 'start' ? 0 : field.value.length
+      field.setSelectionRange(offset, offset)
+      return
+    }
+    edgeHandles.current.get(index)?.focusEdge(at)
+  }
+
+  /**
+   * Une flèche qui sort du bloc `index` : le bloc navigable voisin (images et
+   * tableaux sautés), par sa fin en remontant, par son début en descendant.
+   * Sans voisin, la touche est simplement avalée.
+   */
+  function exitBlock(index: number, side: 'before' | 'after') {
+    const current = blocksRef.current
+    const step = side === 'before' ? -1 : 1
+    for (let target = index + step; target >= 0 && target < current.length; target += step) {
+      if (NAVIGABLE_KINDS.has(current[target].kind)) {
+        focusBlockEdge(target, side === 'before' ? 'end' : 'start')
+        return
+      }
+    }
+  }
+
   /**
    * Focuses a block's field once the dropdown that asked for it has finished
    * closing.
@@ -698,12 +754,6 @@ export function BlockEditor({
     focusBlockLater(index + 1)
   }
 
-  // Read at call time, never from the closure: the native picker can stay open
-  // for a minute while the user keeps typing, and appending to the block list
-  // as it was when the dialog opened would revert everything typed since.
-  const blocksRef = useRef(blocks)
-  blocksRef.current = blocks
-
   function append(block: CardBlock) {
     const current = blocksRef.current
     onChange([...current, block])
@@ -725,6 +775,38 @@ export function BlockEditor({
     const lastGroup = groups[groups.length - 1]
     const block = emptyBlock(inheritableKind(current[current.length - 1]))
     append(lastGroup !== undefined && lastGroup.headerIndex !== null ? { ...block, standalone: true } : block)
+  }
+
+  /**
+   * Ctrl/Cmd+Entrée (`outside`) : un bloc juste APRÈS le groupe du bloc
+   * `index` — marqué `standalone` si ce groupe est une question, pour ne pas
+   * y tomber. Ctrl/Cmd+Maj+Entrée (`inside`) : juste après le bloc, dans son
+   * groupe. Le type suit `inheritableKind`, comme le bouton du pied.
+   */
+  function enterBlock(index: number, place: BlockPlace) {
+    const block = emptyBlock(inheritableKind(blocks[index]))
+    if (place === 'inside') {
+      insertBlockAfter(index, block)
+      return
+    }
+    const group = blockGroups(blocks).find(candidate => candidate.indexes.includes(index))
+    const last = group === undefined ? index : group.indexes[group.indexes.length - 1]
+    insertBlockAfter(last, group !== undefined && group.headerIndex !== null ? { ...block, standalone: true } : block)
+  }
+
+  /**
+   * Entrée dans l'en-tête d'une question : on passe à la réponse. Un texte
+   * vide qui suit déjà (dans le groupe) est réutilisé ; sinon on en insère un.
+   * Jamais de coupure du titre.
+   */
+  function enterQuestionBody(index: number) {
+    const next = blocks[index + 1]
+    const group = blockGroups(blocks).find(candidate => candidate.headerIndex === index)
+    if (next !== undefined && next.kind === 'text' && next.text === '' && group?.indexes.includes(index + 1) === true) {
+      focusBlockEdge(index + 1, 'start')
+      return
+    }
+    insertBlockAfter(index, { kind: 'text', text: '' })
   }
 
   /** Shared by paste, drop and the picker: one place decides what a failure looks like. */
@@ -1128,9 +1210,9 @@ ull quand l'utilisateur l'a refermé pour
   /**
    * Le clavier des blocs — Alt+flèches, Alt+D, Alt+Q, Alt+chiffre pour
    * l'onglet du bandeau — et le seul geste du bandeau vide qui n'a pas déjà
-   * de bouton : Ctrl+Maj+Entrée pour ajouter un bloc HORS de la dernière
-   * question, le même geste que le clic sur « Ajouter un bloc » en pied de
-   * liste.
+   * de bouton : Ctrl+Entrée hors d'un champ pour ajouter un bloc HORS de la
+   * dernière question, le même geste que le clic sur « Ajouter un bloc » en
+   * pied de liste.
    *
    * Un seul gestionnaire, sur la racine, plutôt qu'un par bloc : `closest`
    * retrouve la ligne visée depuis n'importe quel champ qu'elle contient.
@@ -1141,7 +1223,12 @@ ull quand l'utilisateur l'a refermé pour
    */
   function handleEditorKeyDown(event: React.KeyboardEvent) {
     if (event.ctrlKey || event.metaKey) {
-      if (event.key === 'Enter' && event.shiftKey) {
+      // Ctrl/Cmd+Entrée depuis un élément qui n'est PAS un champ (bouton de
+      // gouttière, menu…) : le geste du bouton « Ajouter un bloc » du pied.
+      // Depuis un champ, c'est le champ qui a déjà décidé (voir `enterBlock`).
+      const target = event.target as HTMLElement | null
+      const inField = target?.closest('textarea, input, math-field, [contenteditable="true"]') != null
+      if (event.key === 'Enter' && !event.shiftKey && !event.defaultPrevented && !inField) {
         event.preventDefault()
         appendOutside()
       }
@@ -1379,7 +1466,10 @@ ull quand l'utilisateur l'a refermé pour
                         index={index}
                         resolveAsset={resolveAsset}
                         onChange={next => replace(index, next)}
-                        onEnterBlock={() => insertBlockAfter(index, emptyBlock(inheritableKind(block)))}
+                        onEnterBlock={place => enterBlock(index, place)}
+                        onEnterBody={() => enterQuestionBody(index)}
+                        onExitBlock={side => exitBlock(index, side)}
+                        edgeRef={edgeRefFor(index)}
                         onSwitchKind={direction => cycleKind(index, direction)}
                         onDeleteEmpty={() => deleteEmptyAt(index)}
                         onDeleteForward={() => deleteForwardAt(index)}
@@ -1975,8 +2065,14 @@ interface BlockFieldProps {
   index: number
   resolveAsset: (asset: string) => string
   onChange: (block: CardBlock) => void
-  /** Ctrl+Entrée — insère un nouveau bloc juste après celui-ci. */
-  onEnterBlock: () => void
+  /** Ctrl/Cmd+Entrée (`outside`, après le groupe) ou Ctrl/Cmd+Maj+Entrée (`inside`, dans le groupe). */
+  onEnterBlock: (place: BlockPlace) => void
+  /** Entrée dans l'en-tête d'une question : passer à la réponse. */
+  onEnterBody: () => void
+  /** Une flèche qui sort du bloc par le haut/gauche (`before`) ou le bas/droite (`after`). */
+  onExitBlock: (side: 'before' | 'after') => void
+  /** Le point d'entrée clavier d'une formule ou d'une équation (voir `focusBlockEdge`). */
+  edgeRef: (handle: BlockEdgeHandle | null) => void
   /** Tab / Maj+Tab — passe au type suivant ou précédent. */
   onSwitchKind: (direction: 1 | -1) => void
   /** Retour arrière sur un bloc vide — le retire et rend le curseur au précédent. */
@@ -1995,6 +2091,9 @@ function BlockField({
   resolveAsset,
   onChange,
   onEnterBlock,
+  onEnterBody,
+  onExitBlock,
+  edgeRef,
   onSwitchKind,
   onDeleteEmpty,
   onDeleteForward,
@@ -2027,7 +2126,8 @@ function BlockField({
             }
             onChange({ kind: 'text', text })
           }}
-          onEnter={onEnterBlock}
+          onEnterBlock={onEnterBlock}
+          onExitBlock={onExitBlock}
           onSwitchKind={onSwitchKind}
           onDeleteEmpty={onDeleteEmpty}
           onDeleteForward={onDeleteForward}
@@ -2046,7 +2146,9 @@ function BlockField({
           data-block-index={index}
           value={block.text}
           onChange={text => onChange({ kind: 'question', text })}
-          onEnter={onEnterBlock}
+          onEnterBlock={onEnterBlock}
+          onEnterBody={onEnterBody}
+          onExitBlock={onExitBlock}
           onSwitchKind={onSwitchKind}
           onDeleteEmpty={onDeleteEmpty}
           onDeleteForward={onDeleteForward}
@@ -2068,6 +2170,8 @@ function BlockField({
           onSwitchKind={onSwitchKind}
           onDeleteEmpty={onDeleteEmpty}
           onDeleteForward={onDeleteForward}
+          onExitBlock={onExitBlock}
+          edgeRef={edgeRef}
           onFieldChange={onFieldChange}
         />
         </FieldContextMenu>
@@ -2080,7 +2184,9 @@ function BlockField({
           block={block}
           index={index}
           onChange={onChange}
-          onEnterBlock={onEnterBlock}
+          // Temporaire (Task 6 le remplace) : `EquationBlockField` ne connaît
+          // encore que le geste « hors groupe », Ctrl/Cmd+Entrée simple.
+          onEnterBlock={() => onEnterBlock('outside')}
           onDeleteEmpty={onDeleteEmpty}
           onDeleteForward={onDeleteForward}
           onFieldChange={onFieldChange}
@@ -2108,7 +2214,9 @@ function BlockField({
 function AutoGrowTextarea({
   value,
   onChange,
-  onEnter,
+  onEnterBlock,
+  onEnterBody,
+  onExitBlock,
   onSwitchKind,
   onDeleteEmpty,
   onDeleteForward,
@@ -2117,8 +2225,12 @@ function AutoGrowTextarea({
 }: {
   value: string
   onChange: (text: string) => void
-  /** Ctrl+Entrée : un nouveau bloc après celui-ci. */
-  onEnter: () => void
+  /** Ctrl/Cmd+Entrée (`outside`) ou Ctrl/Cmd+Maj+Entrée (`inside`) : un nouveau bloc. */
+  onEnterBlock: (place: BlockPlace) => void
+  /** En-tête de question seulement : Entrée (et Ctrl+Maj+Entrée) passe à la réponse ; Maj+Entrée reste un retour à la ligne. */
+  onEnterBody?: () => void
+  /** Une flèche au bord du texte : le bloc voisin. */
+  onExitBlock: (side: 'before' | 'after') => void
   /** Tab / Maj+Tab : le type suivant ou précédent. */
   onSwitchKind: (direction: 1 | -1) => void
   /** Retour arrière sur un champ vide : le bloc demande à disparaître. */
@@ -2153,24 +2265,55 @@ function AutoGrowTextarea({
       rows={1}
       onChange={event => onChange(event.target.value)}
       onKeyDown={event => {
-        // Entrée écrit une ligne : c'est le défaut du champ, on n'y touche pas.
-        // Ctrl+Entrée est le geste « un bloc après celui-ci ».
+        const field = event.currentTarget
+        const mod = event.ctrlKey || event.metaKey
         if (event.key === 'Enter') {
-          if (event.ctrlKey || event.metaKey) {
+          // Un en-tête de question ne se coupe jamais : Entrée passe à la réponse.
+          if (onEnterBody !== undefined && !mod && !event.shiftKey) {
             event.preventDefault()
-            onEnter()
+            onEnterBody()
+            return
+          }
+          // Entrée écrit une ligne (défaut du champ). Ctrl/Cmd+Entrée : un bloc
+          // après le groupe ; avec Maj : un bloc dans le groupe (ou, depuis un
+          // en-tête, la réponse — c'est déjà « dans le groupe »).
+          if (mod) {
+            event.preventDefault()
+            if (event.shiftKey && onEnterBody !== undefined) onEnterBody()
+            else onEnterBlock(event.shiftKey ? 'inside' : 'outside')
           }
           return
         }
+        // Anti-rafale : Retour arrière maintenu pour vider le texte s'arrête au
+        // bord au lieu d'emporter le bloc (puis le précédent).
         if (event.key === 'Backspace' && value === '') {
           event.preventDefault()
-          onDeleteEmpty()
+          if (!event.repeat) onDeleteEmpty()
           return
         }
         if (event.key === 'Delete' && value === '') {
           event.preventDefault()
-          onDeleteForward()
+          if (!event.repeat) onDeleteForward()
           return
+        }
+        // Les flèches au bord mènent au bloc voisin, en DEUX temps : ↑/↓ font
+        // d'abord leur travail natif (aller en début/fin), et ne sortent que
+        // si le curseur y était déjà. Une flèche modifiée n'est jamais une
+        // sortie : Alt+↑/↓ déplace le bloc, Maj+flèche sélectionne.
+        if (!mod && !event.shiftKey && !event.altKey && field.selectionStart === field.selectionEnd) {
+          const atStart = field.selectionStart === 0
+          const atEnd = field.selectionStart === value.length
+          const exit =
+            (event.key === 'ArrowLeft' || event.key === 'ArrowUp') && atStart
+              ? 'before'
+              : (event.key === 'ArrowRight' || event.key === 'ArrowDown') && atEnd
+                ? 'after'
+                : null
+          if (exit !== null) {
+            event.preventDefault()
+            onExitBlock(exit)
+            return
+          }
         }
         // Tab appartient au TYPE du bloc — sauf quand une combinaison est tenue,
         // où c'est un raccourci de l'application ou du système, pas le nôtre.
@@ -2430,9 +2573,9 @@ function MathBlockField({
   onSwitchKind: (direction: 1 | -1) => void
   onDeleteEmpty: () => void
   onDeleteForward: () => void
-  onExitBlock?: (side: 'before' | 'after') => void
+  onExitBlock: (side: 'before' | 'after') => void
   onFieldChange: (handle: MathFieldHandle | null) => void
-  edgeRef?: React.Ref<BlockEdgeHandle>
+  edgeRef: React.Ref<BlockEdgeHandle>
 }) {
   // WYSIWYG when MathLive is available, the raw LaTeX field until then — and
   // permanently if it never loads. The raw-LaTeX fallback stays the one case

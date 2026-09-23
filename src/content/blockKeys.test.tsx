@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { BlockEditor } from './BlockEditor'
@@ -175,5 +175,133 @@ describe('Suppr sur un bloc vide', () => {
 
     expect(onState).not.toHaveBeenCalled()
     expect(screen.getAllByRole('textbox', { name: /texte du bloc/i })).toHaveLength(2)
+  })
+})
+
+describe('les flèches sortent d’un bloc texte en deux temps', () => {
+  it('→ en fin passe au bloc suivant, curseur au début', () => {
+    renderEditor([
+      { kind: 'text', text: 'ab' },
+      { kind: 'text', text: 'cd' },
+    ])
+    const first = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    first.focus()
+    first.setSelectionRange(1, 1)
+    expect(fireEvent.keyDown(first, { key: 'ArrowRight' })).toBe(true) // pas au bord : natif
+    first.setSelectionRange(2, 2)
+    fireEvent.keyDown(first, { key: 'ArrowRight' })
+    const second = screen.getByRole('textbox', { name: /texte du bloc 2/i }) as HTMLTextAreaElement
+    expect(second).toHaveFocus()
+    expect(second.selectionStart).toBe(0)
+  })
+
+  it('↑ seulement quand le curseur est DÉJÀ en position 0 ; arrive à la fin du précédent', () => {
+    renderEditor([
+      { kind: 'text', text: 'ab' },
+      { kind: 'text', text: 'ligne 1\nligne 2' },
+    ])
+    const second = screen.getByRole('textbox', { name: /texte du bloc 2/i }) as HTMLTextAreaElement
+    second.focus()
+    second.setSelectionRange(3, 3)
+    expect(fireEvent.keyDown(second, { key: 'ArrowUp' })).toBe(true)
+    second.setSelectionRange(0, 0)
+    fireEvent.keyDown(second, { key: 'ArrowUp' })
+    const first = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    expect(first).toHaveFocus()
+    expect(first.selectionStart).toBe(2)
+  })
+
+  it('saute un tableau, et avale la touche sans voisin', () => {
+    renderEditor([
+      { kind: 'text', text: 'a' },
+      { kind: 'table', header: [], rows: [['x']] },
+      { kind: 'text', text: 'b' },
+    ])
+    const first = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    first.focus()
+    first.setSelectionRange(0, 0)
+    expect(fireEvent.keyDown(first, { key: 'ArrowLeft' })).toBe(false) // avalée
+    expect(first).toHaveFocus()
+    first.setSelectionRange(1, 1)
+    fireEvent.keyDown(first, { key: 'ArrowDown' })
+    expect(screen.getByRole('textbox', { name: /texte du bloc 3/i })).toHaveFocus()
+  })
+
+  it('Alt+↓ reste le déplacement du bloc', () => {
+    const { latest } = renderEditor([
+      { kind: 'text', text: 'a' },
+      { kind: 'text', text: 'b' },
+    ])
+    const first = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    first.focus()
+    first.setSelectionRange(1, 1)
+    fireEvent.keyDown(first, { key: 'ArrowDown', altKey: true })
+    expect(latest()).toEqual([
+      { kind: 'text', text: 'b' },
+      { kind: 'text', text: 'a' },
+    ])
+  })
+})
+
+describe('Ctrl+Entrée hors groupe, Ctrl+Maj+Entrée dans le groupe', () => {
+  const group: CardBlock[] = [
+    { kind: 'question', text: 'Q' },
+    { kind: 'text', text: 'a' },
+    { kind: 'text', text: 'b' },
+  ]
+
+  it('Ctrl+Entrée : après le DERNIER bloc du groupe, marqué standalone', () => {
+    const { latest } = renderEditor(group)
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /texte du bloc 2/i }), { key: 'Enter', ctrlKey: true })
+    expect(latest()).toEqual([...group, { kind: 'text', text: '', standalone: true }])
+  })
+
+  it('Ctrl+Maj+Entrée : juste après le bloc courant, dans le groupe', () => {
+    const { latest } = renderEditor(group)
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /texte du bloc 2/i }), { key: 'Enter', ctrlKey: true, shiftKey: true })
+    expect(latest()).toEqual([group[0], group[1], { kind: 'text', text: '' }, group[2]])
+  })
+})
+
+describe('Entrée dans l’en-tête de question passe dans le corps', () => {
+  it('insère un texte vide juste après l’en-tête et le focalise', async () => {
+    const { latest } = renderEditor([
+      { kind: 'question', text: 'Q' },
+      { kind: 'text', text: 'réponse' },
+    ])
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /question du bloc 1/i }), { key: 'Enter' })
+    expect(latest()).toEqual([
+      { kind: 'question', text: 'Q' },
+      { kind: 'text', text: '' },
+      { kind: 'text', text: 'réponse' },
+    ])
+    await waitFor(() => expect(screen.getByRole('textbox', { name: /texte du bloc 2/i })).toHaveFocus())
+  })
+
+  it('réutilise un texte vide qui suit déjà, sans rien insérer', () => {
+    const { onState } = renderEditor([
+      { kind: 'question', text: 'Q' },
+      { kind: 'text', text: '' },
+    ])
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /question du bloc 1/i }), { key: 'Enter' })
+    expect(onState).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: /texte du bloc 2/i })).toHaveFocus()
+  })
+
+  it('Maj+Entrée reste un retour à la ligne dans le titre', () => {
+    const { onState } = renderEditor([{ kind: 'question', text: 'Q' }])
+    expect(fireEvent.keyDown(screen.getByRole('textbox', { name: /question du bloc 1/i }), { key: 'Enter', shiftKey: true })).toBe(true)
+    expect(onState).not.toHaveBeenCalled()
+  })
+})
+
+describe('anti-rafale sur un bloc texte vide', () => {
+  it('Retour arrière répété ne supprime pas le bloc', () => {
+    const { onState } = renderEditor([
+      { kind: 'text', text: 'abc' },
+      { kind: 'text', text: '' },
+    ])
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /texte du bloc 2/i }), { key: 'Backspace', repeat: true })
+    expect(onState).not.toHaveBeenCalled()
   })
 })
