@@ -59,7 +59,7 @@ function Harness({ initial, onState }: { initial: CardBlock[]; onState?: (blocks
   )
 }
 
-async function mathFields(): Promise<(HTMLElement & { value: string; focus: () => void; executeCommand: (c: string) => boolean; position: number })[]> {
+async function mathFields(): Promise<(HTMLElement & { value: string; focus: ReturnType<typeof vi.fn>; executeCommand: (c: string) => boolean; position: number })[]> {
   return (await waitFor(() => {
     const hosts = screen.getAllByTestId('math-field')
     if (hosts.length === 0) throw new Error('pas encore de champ formule monté')
@@ -70,10 +70,15 @@ async function mathFields(): Promise<(HTMLElement & { value: string; focus: () =
     return fields
   })) as unknown as (HTMLElement & {
     value: string
-    focus: () => void
+    focus: ReturnType<typeof vi.fn>
     executeCommand: (c: string) => boolean
     position: number
   })[]
+}
+
+/** Ce que MathLive émet quand une flèche ou Tab n'a plus rien à parcourir. Renvoie `true` si l'événement a été annulé. */
+function moveOut(field: HTMLElement, direction: 'forward' | 'backward' | 'upward' | 'downward'): boolean {
+  return !field.dispatchEvent(new CustomEvent('move-out', { detail: { direction }, cancelable: true, bubbles: true }))
 }
 
 describe('la « zone formule »', () => {
@@ -106,44 +111,50 @@ describe('la « zone formule »', () => {
     expect(second.executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
   })
 
-  it('les flèches montent/descendent d’une ligne DANS le bloc', async () => {
+  it('move-out ↑/↓ et ←/→ passent d’une ligne à l’autre DANS le bloc', async () => {
     render(<Harness initial={[{ kind: 'math', latex: 'a\nb\nc' }]} />)
     const fields = await mathFields()
     expect(fields).toHaveLength(3)
 
-    fireEvent.keyDown(fields[1], { key: 'ArrowDown' })
+    moveOut(fields[1], 'downward')
     expect(fields[2].focus).toHaveBeenCalled()
     expect(fields[2].executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
 
-    fireEvent.keyDown(fields[1], { key: 'ArrowUp' })
+    moveOut(fields[1], 'upward')
     expect(fields[0].focus).toHaveBeenCalled()
     expect(fields[0].executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
 
-    // Toujours UN seul bloc : on ne sort jamais de la formule.
+    fields[0].focus.mockClear()
+    fields[2].focus.mockClear()
+    moveOut(fields[1], 'forward')
+    expect(fields[2].focus).toHaveBeenCalled()
+    moveOut(fields[1], 'backward')
+    expect(fields[0].focus).toHaveBeenCalled()
     expect(document.querySelectorAll('[data-row-index]')).toHaveLength(1)
   })
 
-  it('les flèches ne sortent pas de la formule : rien aux extrémités', async () => {
-    render(<Harness initial={[{ kind: 'math', latex: 'a\nb' }]} />)
-    const fields = await mathFields()
-
-    fireEvent.keyDown(fields[0], { key: 'ArrowUp' })
-    fireEvent.keyDown(fields[1], { key: 'ArrowDown' })
-
-    // Aucun déplacement : la touche est avalée plutôt que d'aller voir ailleurs.
-    expect(fields[0].focus).not.toHaveBeenCalled()
-    expect(fields[1].focus).not.toHaveBeenCalled()
+  it('↑/↓ au clavier ne sont jamais interceptés — MathLive circule dans la fraction', async () => {
+    render(<Harness initial={[{ kind: 'math', latex: '\\frac{1}{2}\nb' }]} />)
+    const [first] = await mathFields()
+    expect(fireEvent.keyDown(first, { key: 'ArrowDown' })).toBe(true)
+    expect(fireEvent.keyDown(first, { key: 'ArrowUp' })).toBe(true)
   })
 
-  it('une formule mono-ligne laisse les flèches à MathLive', async () => {
-    render(<Harness initial={[{ kind: 'math', latex: 'x' }]} />)
-    const [only] = await mathFields()
+  it('bug 1 : Retour arrière sur une première ligne vide ne supprime pas les autres', async () => {
+    const onState = vi.fn()
+    render(<Harness initial={[{ kind: 'text', text: 'avant' }, { kind: 'math', latex: '\nx=2' }]} onState={onState} />)
+    const [first] = await mathFields()
+    first.position = 0
+    fireEvent.keyDown(first, { key: 'Backspace' })
+    expect(onState).not.toHaveBeenCalled()
+  })
 
-    fireEvent.keyDown(only, { key: 'ArrowUp' })
-    fireEvent.keyDown(only, { key: 'ArrowDown' })
-
-    // Pas de handler de ligne : on n'a rien à faire, MathLive garde la touche.
-    expect(only.focus).not.toHaveBeenCalled()
+  it('bug 1 : Suppr sur une dernière ligne vide ne supprime pas les autres', async () => {
+    const onState = vi.fn()
+    render(<Harness initial={[{ kind: 'math', latex: 'x=2\n' }, { kind: 'text', text: 'après' }]} onState={onState} />)
+    const [, last] = await mathFields()
+    fireEvent.keyDown(last, { key: 'Delete' })
+    expect(onState).not.toHaveBeenCalled()
   })
 
   it('Retour arrière sur la ligne vide la supprime et rend la main à la fin de la précédente', async () => {

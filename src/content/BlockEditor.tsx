@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import {
   Check,
@@ -21,6 +21,7 @@ import { EquationBlockField } from './EquationEditor'
 import { canMoveBlock, movePlan } from './blockMove'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle, type MathfieldElement } from './MathFieldEditor'
+import { rawFieldKeyDown, type BlockEdgeHandle, type BlockPlace, type ExitDirection } from './fieldIntents'
 import { SymbolBand } from './SymbolBand'
 import type { BandTabId, PaletteSymbol } from '../types/symbolBand'
 import { loadBandTab, saveBandTab } from '../persistence/bandTab'
@@ -2203,72 +2204,33 @@ function joinLatexLines(lines: string[]): string {
   return lines.join('\n')
 }
 
-/** Ce qu'un champ brut de ligne peut demander — le pendant clavier de `MathFieldEditor`. */
+/** Ce qu'une ligne de formule peut demander — les mêmes intentions en WYSIWYG et en repli brut. */
 interface MathLineActions {
   setValue: (next: string) => void
   /** Entrée : ce qui reste dans la ligne courante, et ce qui part dans une nouvelle ligne après elle. */
   addLine: (before: string, after: string) => void
-  /** Ctrl/Cmd+Entrée : un nouveau bloc. Absent dans une cellule de tableau. */
-  addBlock?: () => void
+  /** Ctrl/Cmd(+Maj)+Entrée : un nouveau bloc. Absent dans une cellule de tableau. */
+  addBlock?: (place: BlockPlace) => void
   /** Retour arrière en tout début de ligne : ce qu'elle contient encore, à fusionner avec la précédente. */
   backspace: (rest: string) => void
   /** Suppr en toute fin de ligne : ce qu'elle contient encore, à fusionner avec la suivante. */
   remove: (rest: string) => void
-  /** Flèche haut : la ligne de formule PRÉCÉDENTE, dans le même bloc. Absent quand il n'y a qu'une ligne. */
-  arrowUp?: () => void
-  /** Flèche bas : la ligne de formule SUIVANTE, dans le même bloc. Absent quand il n'y a qu'une ligne. */
-  arrowDown?: () => void
+  /** Une flèche au bord : ligne voisine, ou bloc voisin aux extrémités. */
+  exit: (direction: ExitDirection) => void
   /** Tab / Maj+Tab : le type du bloc. Absent dans une cellule de tableau. */
   switchKind?: (direction: 1 | -1) => void
 }
 
-/**
- * Le clavier d'un champ brut de ligne, partagé par le bloc et la cellule.
- *
- * Un vrai `<textarea>`/`<input>` donne toujours `selectionStart`/`selectionEnd`
- * exacts, contrairement au champ MathLive : pas de repli défensif nécessaire
- * ici, Entrée/Retour arrière/Suppr lisent directement la position du curseur.
- */
-function mathLineKeyDown(actions: MathLineActions, value: string) {
-  return (event: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
-    const field = event.currentTarget
-    if (event.key === 'Enter') {
-      if (event.shiftKey) return
-      event.preventDefault()
-      if ((event.ctrlKey || event.metaKey) && actions.addBlock !== undefined) {
-        actions.addBlock()
-        return
-      }
-      const at = field.selectionStart ?? value.length
-      actions.addLine(value.slice(0, at), value.slice(field.selectionEnd ?? at))
-      return
-    }
-    if (event.key === 'Backspace' && field.selectionStart === 0 && field.selectionEnd === 0) {
-      event.preventDefault()
-      actions.backspace(value)
-      return
-    }
-    if (event.key === 'Delete' && field.selectionStart === value.length && field.selectionEnd === value.length) {
-      event.preventDefault()
-      actions.remove(value)
-      return
-    }
-    if (event.key === 'ArrowUp' && actions.arrowUp !== undefined) {
-      event.preventDefault()
-      actions.arrowUp()
-      return
-    }
-    if (event.key === 'ArrowDown' && actions.arrowDown !== undefined) {
-      event.preventDefault()
-      actions.arrowDown()
-      return
-    }
-    if (event.key === 'Tab' && actions.switchKind !== undefined) {
-      if (event.ctrlKey || event.metaKey || event.altKey) return
-      event.preventDefault()
-      actions.switchKind(event.shiftKey ? -1 : 1)
-    }
-  }
+/** Le clavier d'un champ brut de ligne, partagé par le bloc et la cellule — voir `rawFieldKeyDown`. */
+function mathLineKeyDown(actions: MathLineActions) {
+  return rawFieldKeyDown({
+    onEnter: actions.addLine,
+    onEnterBlock: actions.addBlock,
+    onBackspaceAtStart: actions.backspace,
+    onDeleteAtEnd: actions.remove,
+    onExit: direction => actions.exit(direction),
+    onSwitchKind: actions.switchKind,
+  })
 }
 
 /**
@@ -2282,7 +2244,8 @@ function mathLineKeyDown(actions: MathLineActions, value: string) {
  * Le clavier s'y comporte comme dans un textarea classique : Entrée coupe la
  * ligne en deux à la position du curseur : Retour arrière en tout début de
  * ligne la fusionne avec la précédente (curseur à l'ancienne frontière) ; Suppr
- * en toute fin la fusionne avec la suivante. Voir `actionsFor`.
+ * en toute fin la fusionne avec la suivante. Au bord d'une ligne, les flèches
+ * passent à la ligne voisine, puis au bloc voisin. Voir `actionsFor`.
  */
 function MathLinesField({
   latex,
@@ -2291,23 +2254,42 @@ function MathLinesField({
   onEnterBlock,
   onEmptyBackspace,
   onEmptyDelete,
+  onExitBlock,
   onFocusHandle,
   renderFallback,
   lineAttribute,
+  ref,
 }: {
   latex: string
   onChange: (latex: string) => void
   label: (line: number, count: number) => string
-  onEnterBlock?: () => void
+  onEnterBlock?: (place: BlockPlace) => void
   onEmptyBackspace?: () => void
   onEmptyDelete?: () => void
+  /** Une flèche au-delà de la première ou de la dernière ligne. Absent dans une cellule : la touche y est avalée. */
+  onExitBlock?: (side: 'before' | 'after') => void
   onFocusHandle?: (handle: MathFieldHandle | null) => void
   renderFallback: (line: number, count: number, actions: MathLineActions) => ReactNode
   lineAttribute?: (line: number) => Record<string, string | number> | undefined
+  ref?: React.Ref<BlockEdgeHandle>
 }) {
   const lines = latexLines(latex)
   const handles = useRef<(MathFieldHandle | null)[]>([])
   const pending = useRef<{ line: number; at: 'start' | 'end' | 'offset'; offset?: number } | null>(null)
+  // Le handle est construit une fois : il lit le nombre de lignes à l'appel.
+  const lineCount = useRef(lines.length)
+  lineCount.current = lines.length
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusEdge(at) {
+        const handle = handles.current[at === 'start' ? 0 : lineCount.current - 1]
+        if (at === 'start') handle?.focusStart()
+        else handle?.focusEnd()
+      },
+    }),
+    []
+  )
 
   // Le focus est posé APRÈS le rendu qui a ajouté ou retiré la ligne : c'est le
   // seul moment où le handle de la ligne visée existe.
@@ -2365,12 +2347,11 @@ function MathLinesField({
           pending.current = { line: line - 1, at: 'offset', offset: previous.length }
           return
         }
-        // Première ligne, rien avant : sans contenu à perdre (`rest === ''`),
-        // c'est le conteneur (bloc, ou cellule) qui demande à se retirer — et
-        // sans précédent, il ne fait rien. Avec du contenu, rien à fusionner
-        // (pas de ligne au-dessus) : comme un textarea en tout début de texte,
-        // la touche ne fait rien.
-        if (rest === '') onEmptyBackspace?.()
+        // Première ligne, rien avant : le bloc ne disparaît que si TOUTES ses
+        // lignes sont vides — une ligne vide au-dessus de `x=2` n'emporte
+        // jamais `x=2` avec elle. Sinon, comme un textarea en tout début de
+        // texte, la touche ne fait rien.
+        if (rest === '' && lines.every(current => current === '')) onEmptyBackspace?.()
       },
       // Suppr avec rien après le curseur : symétrique, `rest` (toute la ligne)
       // reçoit le contenu de la suivante, curseur inchangé à l'ancienne fin.
@@ -2381,14 +2362,19 @@ function MathLinesField({
           pending.current = { line, at: 'offset', offset: rest.length }
           return
         }
-        if (rest === '') onEmptyDelete?.()
+        if (rest === '' && lines.every(current => current === '')) onEmptyDelete?.()
       },
-      // Les flèches ne passent d'une ligne à l'autre que s'il y en a
-      // PLUSIEURS : une formule mono-ligne les laisse à MathLive, qui s'en sert
-      // dans une fraction. Aux extrémités, la touche est avalée — jamais un
-      // autre bloc.
-      arrowUp: lines.length > 1 ? () => focusLine(line - 1, 'end') : undefined,
-      arrowDown: lines.length > 1 ? () => focusLine(line + 1, 'start') : undefined,
+      // Au bord d'une ligne (MathLive n'a plus rien à parcourir) : la ligne
+      // voisine, ou le bloc voisin aux extrémités.
+      exit: direction => {
+        const backward = direction === 'left' || direction === 'up'
+        const target = backward ? line - 1 : line + 1
+        if (target >= 0 && target < lines.length) {
+          focusLine(target, backward ? 'end' : 'start')
+          return
+        }
+        onExitBlock?.(backward ? 'before' : 'after')
+      },
     }
   }
 
@@ -2414,8 +2400,7 @@ function MathLinesField({
               onEnterBlock={onEnterBlock}
               onBackspaceAtStart={actions.backspace}
               onDeleteAtEnd={actions.remove}
-              onArrowUp={actions.arrowUp}
-              onArrowDown={actions.arrowDown}
+              onExit={direction => actions.exit(direction)}
               ariaLabel={label(i, lines.length)}
               fallback={renderFallback(i, lines.length, actions)}
             />
@@ -2434,16 +2419,20 @@ function MathBlockField({
   onSwitchKind,
   onDeleteEmpty,
   onDeleteForward,
+  onExitBlock,
   onFieldChange,
+  edgeRef,
 }: {
   block: Extract<CardBlock, { kind: 'math' }>
   index: number
   onChange: (block: CardBlock) => void
-  onEnterBlock: () => void
+  onEnterBlock: (place: BlockPlace) => void
   onSwitchKind: (direction: 1 | -1) => void
   onDeleteEmpty: () => void
   onDeleteForward: () => void
+  onExitBlock?: (side: 'before' | 'after') => void
   onFieldChange: (handle: MathFieldHandle | null) => void
+  edgeRef?: React.Ref<BlockEdgeHandle>
 }) {
   // WYSIWYG when MathLive is available, the raw LaTeX field until then — and
   // permanently if it never loads. The raw-LaTeX fallback stays the one case
@@ -2460,6 +2449,8 @@ function MathBlockField({
       onEnterBlock={onEnterBlock}
       onEmptyBackspace={onDeleteEmpty}
       onEmptyDelete={onDeleteForward}
+      onExitBlock={onExitBlock}
+      ref={edgeRef}
       onFocusHandle={onFieldChange}
       renderFallback={(line, count, actions) => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -2474,7 +2465,7 @@ function MathBlockField({
             }
             value={lines[line] ?? ''}
             onChange={event => actions.setValue(event.target.value)}
-            onKeyDown={mathLineKeyDown({ ...actions, switchKind: onSwitchKind }, lines[line] ?? '')}
+            onKeyDown={mathLineKeyDown({ ...actions, switchKind: onSwitchKind })}
             spellCheck={false}
             style={{ ...FIELD_STYLE, minHeight: 44, resize: 'vertical', fontFamily: 'monospace', fontSize: 13 }}
           />
@@ -3066,7 +3057,7 @@ function TableCellField({
               aria-label={count > 1 ? `${label}, ligne ${line + 1} (LaTeX)` : `${label} (LaTeX)`}
               value={latexLines(latex)[line] ?? ''}
               onChange={event => actions.setValue(event.target.value)}
-              onKeyDown={mathLineKeyDown(actions, latexLines(latex)[line] ?? '')}
+              onKeyDown={mathLineKeyDown(actions)}
               spellCheck={false}
               style={{ ...FIELD_STYLE, fontSize: 13, fontFamily: 'monospace' }}
             />

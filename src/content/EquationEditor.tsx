@@ -152,8 +152,12 @@ function EquationTermField({
         onEnterBlock={onEnterBlock}
         onBackspaceAtStart={onBackspaceAtStart}
         onDeleteAtEnd={onDeleteAtEnd}
-        onArrowUp={onArrowUp}
-        onArrowDown={onArrowDown}
+        // Pont provisoire : ↑/↓ (via `move-out`) gardent l'ancien sens le
+        // temps que `EquationBlockField` passe à `equationNav`.
+        onExit={direction => {
+          if (direction === 'up') onArrowUp?.()
+          else if (direction === 'down') onArrowDown?.()
+        }}
         fallback={
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <input

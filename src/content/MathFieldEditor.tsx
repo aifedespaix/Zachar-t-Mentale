@@ -1,4 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState } from 'react'
+import type { BlockPlace, ExitDirection, ExitVia } from './fieldIntents'
 
 /**
  * What the symbol palette drives. Exposed as a handle rather than as another
@@ -69,11 +70,12 @@ export interface MathFieldEditorProps {
    */
   onEnter?: (before: string, after: string) => void
   /**
-   * Ctrl/Cmd+Entrée : un NOUVEAU bloc après celui-ci — le geste « un bloc de
-   * plus » de tous les autres champs. Absent dans une cellule de tableau, où
-   * il n'y a pas de bloc à créer : `onEnter` prend alors la touche.
+   * Ctrl/Cmd+Entrée (`outside` : un bloc après le groupe) ou Ctrl/Cmd+Maj+Entrée
+   * (`inside` : un bloc dans le groupe, juste après celui-ci). Absent dans une
+   * cellule de tableau, où il n'y a pas de bloc à créer : `onEnter` prend alors
+   * Ctrl+Entrée, et Ctrl+Maj+Entrée reste à MathLive.
    */
-  onEnterBlock?: () => void
+  onEnterBlock?: (place: BlockPlace) => void
   /**
    * Retour arrière avec le curseur en tout début de champ (rien avant, que
    * la ligne soit vide ou non) : `rest` est tout le contenu du champ, à
@@ -88,13 +90,15 @@ export interface MathFieldEditorProps {
    */
   onDeleteAtEnd?: (rest: string) => void
   /**
-   * Flèche haut : la ligne de formule PRÉCÉDENTE, dans le même champ. Absent
-   * quand il n'y a qu'une ligne — la touche reste alors à MathLive, qui s'en
-   * sert pour circuler dans une fraction.
+   * MathLive n'a plus rien à parcourir dans cette direction (événement
+   * `move-out`) : le parent décide où va le curseur — ligne voisine, champ
+   * voisin, bloc voisin. Renvoyer `false` = nulle part où aller : MathLive
+   * garde alors son comportement par défaut (Tab passe à l'élément suivant).
+   * La navigation INTERNE (numérateur ↔ dénominateur…) n'est jamais touchée.
    */
-  onArrowUp?: () => void
-  /** Flèche bas : la ligne de formule SUIVANTE, dans le même champ. Voir `onArrowUp`. */
-  onArrowDown?: () => void
+  onExit?: (direction: ExitDirection, via: ExitVia) => boolean | void
+  /** Un `move-out` issu de Tab passe par `onExit` (équation). Sans lui, Tab reste entièrement à MathLive. */
+  tabExits?: boolean
   ref?: React.Ref<MathFieldHandle>
 }
 
@@ -118,6 +122,14 @@ export type MathfieldElement = HTMLElement & {
   selectionIsCollapsed?: boolean
   /** MathLive's `getValue(start, end)` — the LaTeX between two offsets, for splitting a line at the caret. */
   getValue?: (start?: number, end?: number) => string
+}
+
+/** `move-out` parle en sens de lecture ; la description, en côtés. */
+const MOVE_OUT_DIRECTIONS: Partial<Record<string, ExitDirection>> = {
+  forward: 'right',
+  backward: 'left',
+  upward: 'up',
+  downward: 'down',
 }
 
 /**
@@ -182,9 +194,27 @@ function hideVirtualKeyboardToggle(field: MathfieldElement): void {
   shadow.append(style)
 }
 
+/**
+ * MathLive joue un son (« plonk ») quand une flèche ne mène nulle part dans le
+ * champ — exactement le moment où la description, elle, emmène le curseur au
+ * champ ou au bloc voisin. Coupé une fois pour toutes : un son qui dit
+ * « impossible » juste avant un déplacement qui réussit est faux.
+ */
+function silencePlonk(module: unknown): void {
+  try {
+    const element = (module as { MathfieldElement?: { plonkSound: string | null } }).MathfieldElement
+    if (element !== undefined) element.plonkSound = null
+  } catch {
+    // Le mock de `mathlive` dans les tests renvoie `{}` : Vitest lève alors sur
+    // l'accès à une propriété qu'il n'a pas explicitement exportée, plutôt que
+    // de rendre `undefined`. Rien à couper dans ce cas — silencieusement.
+  }
+}
+
 function loadMathLive(): Promise<boolean> {
   loadPromise ??= import('mathlive')
-    .then(() => {
+    .then(module => {
+      silencePlonk(module)
       loaded = true
       return true
     })
@@ -225,8 +255,8 @@ export function MathFieldEditor({
   onEnterBlock,
   onBackspaceAtStart,
   onDeleteAtEnd,
-  onArrowUp,
-  onArrowDown,
+  onExit,
+  tabExits,
   ref,
 }: MathFieldEditorProps) {
   // Which editor this block shows. It starts on the caller's field whenever
@@ -251,10 +281,10 @@ export function MathFieldEditor({
   onBackspaceAtStartRef.current = onBackspaceAtStart
   const onDeleteAtEndRef = useRef(onDeleteAtEnd)
   onDeleteAtEndRef.current = onDeleteAtEnd
-  const onArrowUpRef = useRef(onArrowUp)
-  onArrowUpRef.current = onArrowUp
-  const onArrowDownRef = useRef(onArrowDown)
-  onArrowDownRef.current = onArrowDown
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
+  const tabExitsRef = useRef(tabExits)
+  tabExitsRef.current = tabExits
   // Same reason as `onChangeRef`: the handle below is built once, so it must
   // not close over the formula as it was at mount.
   const latexRef = useRef(latex)
@@ -407,40 +437,35 @@ export function MathFieldEditor({
     // seule une interception antérieure — la phase de capture, ici — permet
     // de gagner la course et d'empêcher la suppression normale d'un
     // caractère de fusionner ou supprimer la ligne/étape en plus.
+    // La dernière touche vue par ce champ : `move-out` ne dit pas s'il vient
+    // d'une flèche ou de Tab, ni si une touche de modification était tenue.
+    let lastKey = ''
+    let lastModified = false
     field.addEventListener(
       'keydown',
       event => {
-        // ↑/↓ ne changent de ligne que si le bloc en a PLUSIEURS : une formule
-        // mono-ligne laisse la touche à MathLive, qui s'en sert dans une fraction.
-        // Voir `MathLinesField`.
-        if (event.key === 'ArrowUp' && onArrowUpRef.current !== undefined) {
-          event.preventDefault()
-          onArrowUpRef.current()
-          return
-        }
-        if (event.key === 'ArrowDown' && onArrowDownRef.current !== undefined) {
-          event.preventDefault()
-          onArrowDownRef.current()
-          return
-        }
+        lastKey = event.key
+        lastModified = event.shiftKey || event.ctrlKey || event.metaKey || event.altKey
+        // Au bord, une touche d'effacement RÉPÉTÉE est avalée : Retour arrière
+        // maintenu pour vider le champ ne traverse pas la frontière.
         if (event.key === 'Backspace' && caretAtStart(field) && onBackspaceAtStartRef.current !== undefined) {
           event.preventDefault()
-          onBackspaceAtStartRef.current(field.value)
+          if (!event.repeat) onBackspaceAtStartRef.current(field.value)
           return
         }
         if (event.key === 'Delete' && caretAtEnd(field) && onDeleteAtEndRef.current !== undefined) {
           event.preventDefault()
-          onDeleteAtEndRef.current(field.value)
+          if (!event.repeat) onDeleteAtEndRef.current(field.value)
           return
         }
-        if (event.key !== 'Enter' || event.shiftKey) return
+        if (event.key !== 'Enter') return
+        const mod = event.ctrlKey || event.metaKey
+        const enterBlock = onEnterBlockRef.current
+        // Maj+Entrée seule appartient à MathLive (rangées d'une matrice).
+        if (event.shiftKey && !(mod && enterBlock !== undefined)) return
         event.preventDefault()
-        // Ctrl/Cmd+Entrée demande un NOUVEAU bloc ; Entrée seule coupe la ligne
-        // en deux à la position du curseur. Dans une cellule (pas de
-        // `onEnterBlock`), les deux ajoutent une ligne : il n'y a pas de bloc à
-        // créer.
-        if ((event.ctrlKey || event.metaKey) && onEnterBlockRef.current !== undefined) {
-          onEnterBlockRef.current()
+        if (mod && enterBlock !== undefined) {
+          enterBlock(event.shiftKey ? 'inside' : 'outside')
           return
         }
         const { before, after } = splitAtCaret(field)
@@ -448,6 +473,18 @@ export function MathFieldEditor({
       },
       { capture: true }
     )
+    // MathLive émet `move-out` quand une flèche (ou Tab) n'a plus rien à
+    // parcourir DANS le champ : c'est là, et seulement là, que le curseur
+    // change de champ — d'où le « deux temps » (`aaa|b` → `aaab|` → voisin).
+    field.addEventListener('move-out', event => {
+      const exit = onExitRef.current
+      if (exit === undefined) return
+      const via: ExitVia = lastKey === 'Tab' ? 'tab' : 'arrow'
+      if (via === 'tab' ? tabExitsRef.current !== true : lastModified) return
+      const direction = MOVE_OUT_DIRECTIONS[(event as CustomEvent<{ direction?: string }>).detail?.direction ?? '']
+      if (direction === undefined) return
+      if (exit(direction, via) !== false) event.preventDefault()
+    })
     host.replaceChildren(field)
     fieldRef.current = field
     hideVirtualKeyboardToggle(field)
