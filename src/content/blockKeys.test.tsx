@@ -49,6 +49,22 @@ describe('Entrée écrit une ligne', () => {
   })
 })
 
+describe('composition (IME)', () => {
+  it('Entrée qui valide une composition dans une question ne passe pas à la réponse', () => {
+    const { onState } = renderEditor([{ kind: 'question', text: 'Q' }])
+    const field = screen.getByRole('textbox', { name: /question du bloc 1/i })
+    expect(fireEvent.keyDown(field, { key: 'Enter', isComposing: true })).toBe(true)
+    expect(onState).not.toHaveBeenCalled()
+  })
+
+  it('Retour arrière pendant une composition ne retire pas un texte vide', () => {
+    const { onState } = renderEditor([{ kind: 'text', text: 'a' }, { kind: 'text', text: '' }])
+    const field = screen.getByRole('textbox', { name: /texte du bloc 2/i })
+    expect(fireEvent.keyDown(field, { key: 'Backspace', isComposing: true })).toBe(true)
+    expect(onState).not.toHaveBeenCalled()
+  })
+})
+
 describe('Ctrl+Entrée crée un bloc', () => {
   it('ajoute un bloc après, et y met le curseur', async () => {
     const user = userEvent.setup()

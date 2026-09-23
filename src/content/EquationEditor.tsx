@@ -5,7 +5,7 @@ import { equationStepIsSolved } from './blocks'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle } from './MathFieldEditor'
 import { navigate, operationVisible, readingOrder, type EqColumn, type EqField, type EqPos } from './equationNav'
-import { rawFieldKeyDown, type BlockEdgeHandle, type BlockPlace, type ExitDirection, type ExitVia } from './fieldIntents'
+import { latchEdgeKey, rawFieldKeyDown, type BlockEdgeHandle, type BlockPlace, type ExitDirection, type ExitVia } from './fieldIntents'
 
 function isStepEmpty(step: EquationStep): boolean {
   return step.left.trim() === '' && step.right.trim() === '' && (step.operation ?? '').trim() === ''
@@ -458,6 +458,23 @@ export function EquationBlockField({
     else handle.focusStart()
   })
 
+  // Le dernier champ de ce bloc qui a eu le focus. Sert à un seul cas : Opₙ
+  // qu'on vient de VIDER sur une étape résolue disparaît (la règle de
+  // visibilité reste pure, voir `operationVisible`) et emporte le focus avec
+  // lui — le curseur retombe alors à la fin de Dₙ, là où il était juste avant.
+  const focused = useRef<EqPos | null>(null)
+  useEffect(() => {
+    const last = focused.current
+    if (last === null || last.field !== 'operation' || operationVisible(steps, last.step)) return
+    focused.current = null
+    // Focus parti ailleurs (clic, annulation depuis un autre champ) : on n'y touche pas.
+    const active = document.activeElement
+    if (active !== null && active !== document.body) return
+    // Le Retour arrière maintenu qui a vidé Opₙ ne doit pas continuer dans Dₙ.
+    latchEdgeKey('Backspace')
+    handleAt({ step: last.step, field: 'right' })?.focusEnd()
+  })
+
   useImperativeHandle(
     ref,
     () => ({
@@ -572,6 +589,7 @@ export function EquationBlockField({
                 {...intentsFor({ step: stepIndex, field: 'left' })}
                 onFocusHandle={() => {
                   column.current = 'left'
+                  focused.current = { step: stepIndex, field: 'left' }
                   onFieldChange(handles.current.get(fieldKey(stepIndex, 'left')) ?? null)
                 }}
                 side="left"
@@ -599,6 +617,7 @@ export function EquationBlockField({
                 {...intentsFor({ step: stepIndex, field: 'right' })}
                 onFocusHandle={() => {
                   column.current = 'right'
+                  focused.current = { step: stepIndex, field: 'right' }
                   onFieldChange(handles.current.get(fieldKey(stepIndex, 'right')) ?? null)
                 }}
                 side="right"
@@ -621,7 +640,10 @@ export function EquationBlockField({
                   ref={handle => {
                     handles.current.set(fieldKey(stepIndex, 'operation'), handle)
                   }}
-                  onFocusHandle={() => onFieldChange(handles.current.get(fieldKey(stepIndex, 'operation')) ?? null)}
+                  onFocusHandle={() => {
+                    focused.current = { step: stepIndex, field: 'operation' }
+                    onFieldChange(handles.current.get(fieldKey(stepIndex, 'operation')) ?? null)
+                  }}
                   {...intentsFor({ step: stepIndex, field: 'operation' })}
                   style={OPERATION_FIELD_STYLE}
                 />

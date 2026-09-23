@@ -196,12 +196,14 @@ describe("équation — l'opération après la dernière étape", () => {
       <BlockView blocks={[{ kind: 'equation', steps: [{ left: '2x', right: '8', operation: '÷ 2' }] }]} resolveAsset={resolve} />
     )
     expect(container.textContent ?? '').toContain('÷')
+    // Affichée deux fois, une sous chaque membre.
+    expect(screen.getAllByTestId('equation-operation')).toHaveLength(2)
   })
 
   it("n'affiche rien quand elle est vide", () => {
-    const { container } = render(
+    render(
       <BlockView blocks={[{ kind: 'equation', steps: [{ left: '2x', right: '8' }] }]} resolveAsset={resolve} />
     )
-    expect(container.textContent ?? '').not.toContain('÷')
+    expect(screen.queryAllByTestId('equation-operation')).toHaveLength(0)
   })
 })

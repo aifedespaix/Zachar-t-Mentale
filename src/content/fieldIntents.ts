@@ -36,6 +36,58 @@ export interface RawFieldIntents {
   onSwitchKind?: (direction: 1 | -1) => void
 }
 
+/** Les deux touches dont l'intention au bord peut déplacer le curseur dans un AUTRE champ. */
+export type EdgeKey = 'Backspace' | 'Delete'
+
+let latchedKey: EdgeKey | null = null
+let guardInstalled = false
+
+/**
+ * Tant que la garde est posée, chaque répétition AUTOMATIQUE de la touche
+ * verrouillée est avalée — où qu'elle tombe. Posée en capture sur `window`,
+ * donc avant tout champ : avant MathLive (qui écoute en capture dans son
+ * shadow DOM et efface dès qu'il voit la touche), avant React, avant le
+ * navigateur. Toute autre frappe la lève.
+ */
+function guardRepeat(event: globalThis.KeyboardEvent): void {
+  if (latchedKey === null || event.isComposing) return
+  if (event.repeat && event.key === latchedKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    return
+  }
+  latchedKey = null
+}
+
+function releaseOnKeyUp(event: globalThis.KeyboardEvent): void {
+  if (event.key === latchedKey) latchedKey = null
+}
+
+function releaseAll(): void {
+  latchedKey = null
+}
+
+/**
+ * À appeler quand Retour arrière/Suppr a déclenché une intention au bord
+ * (passer au champ voisin, retirer un bloc, une ligne, une étape).
+ *
+ * Sans elle, une touche MAINTENUE traverse : le premier appui déplace le
+ * curseur, et les répétitions suivantes tombent dans le NOUVEAU champ, où le
+ * curseur n'est pas au bord — elles y effacent son contenu. La spec l'exclut :
+ * aucune perte de contenu « ni par répétition de touche maintenue ». La garde
+ * tient jusqu'au relâchement de la touche (ou jusqu'à n'importe quelle autre
+ * frappe) ; un nouvel appui efface ensuite normalement.
+ */
+export function latchEdgeKey(key: EdgeKey): void {
+  latchedKey = key
+  if (guardInstalled || typeof window === 'undefined') return
+  guardInstalled = true
+  window.addEventListener('keydown', guardRepeat, true)
+  window.addEventListener('keyup', releaseOnKeyUp, true)
+  // Touche relâchée dans une autre fenêtre : aucun `keyup` n'arrivera ici.
+  window.addEventListener('blur', releaseAll)
+}
+
 /**
  * Le clavier de TOUT champ brut (`<input>`/`<textarea>`) de la description —
  * le repli LaTeX d'une formule, d'un membre d'équation, l'opération. Un vrai
@@ -44,11 +96,13 @@ export interface RawFieldIntents {
  *
  * Une flèche modifiée (Alt, Maj, Ctrl, Cmd) n'est jamais une sortie : Alt+↑/↓
  * déplace le bloc, Maj+flèche sélectionne. Une touche d'effacement RÉPÉTÉE
- * au bord est avalée : Retour arrière maintenu pour vider un champ ne
- * traverse pas la frontière.
+ * au bord est avalée, et celle qui déclenche une intention verrouille ses
+ * répétitions (`latchEdgeKey`) : Retour arrière maintenu pour vider un champ
+ * ne traverse pas la frontière. Une frappe qui compose (IME) reste à l'IME.
  */
 export function rawFieldKeyDown(intents: RawFieldIntents) {
   return (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) return
     const field = event.currentTarget
     const value = field.value
     const start = field.selectionStart ?? value.length
@@ -75,12 +129,16 @@ export function rawFieldKeyDown(intents: RawFieldIntents) {
       case 'Backspace':
         if (!collapsed || start !== 0 || intents.onBackspaceAtStart === undefined) return
         event.preventDefault()
-        if (!event.repeat) intents.onBackspaceAtStart(value)
+        if (event.repeat) return
+        latchEdgeKey('Backspace')
+        intents.onBackspaceAtStart(value)
         return
       case 'Delete':
         if (!collapsed || start !== value.length || intents.onDeleteAtEnd === undefined) return
         event.preventDefault()
-        if (!event.repeat) intents.onDeleteAtEnd(value)
+        if (event.repeat) return
+        latchEdgeKey('Delete')
+        intents.onDeleteAtEnd(value)
         return
       case 'ArrowLeft':
         if (plain && collapsed && start === 0) exit('left', 'arrow')

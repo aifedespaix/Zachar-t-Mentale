@@ -64,6 +64,18 @@ function moveOut(field: HTMLElement, direction: 'forward' | 'backward' | 'upward
 }
 
 describe('les touches du champ formule', () => {
+  it('pendant une composition (IME), Entrée et Retour arrière restent à l’IME', async () => {
+    const onEnter = vi.fn()
+    const onBackspaceAtStart = vi.fn()
+    const field = await mountField({ onEnter, onBackspaceAtStart })
+    field.position = 0
+
+    expect(fireEvent.keyDown(field, { key: 'Enter', isComposing: true })).toBe(true)
+    expect(fireEvent.keyDown(field, { key: 'Backspace', isComposing: true })).toBe(true)
+    expect(onEnter).not.toHaveBeenCalled()
+    expect(onBackspaceAtStart).not.toHaveBeenCalled()
+  })
+
   it('Entrée seule ajoute une ligne, Ctrl+Entrée demande un nouveau bloc', async () => {
     // Entrée écrit une ligne DANS le champ courant ; c'est Ctrl/Cmd+Entrée qui
     // garde le geste « un bloc de plus », comme partout ailleurs.

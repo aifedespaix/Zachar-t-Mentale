@@ -245,6 +245,8 @@ describe('le bloc équation — clavier', () => {
     )
     await mathFields()
     expect(screen.queryByTestId('equation-op-input-0-1')).not.toBeInTheDocument()
+    // L'opération ENTRE deux étapes, elle, reste toujours là.
+    expect(screen.getByTestId('equation-op-input-0-0')).toBeInTheDocument()
     solved.unmount()
 
     render(<Harness initial={[{ kind: 'equation', steps: [{ left: 'x', right: '4', operation: 'vérif' }] }]} />)
@@ -329,7 +331,7 @@ describe('le bloc équation — flèches, Tab, Entrée', () => {
     await waitFor(() => expect(screen.getByTestId('equation-op-input-0-0')).toHaveFocus())
   })
 
-  it('↓ depuis G₀ va sur l’interligne, puis ↓ sur l’étape suivante dans la colonne mémorisée', async () => {
+  it('↓ depuis D₀ va sur l’interligne, puis ↓ sur l’étape suivante dans la colonne mémorisée', async () => {
     render(<Harness initial={twoSteps} />)
     const fields = await mathFields()
     // Focus sur D₀ : c'est lui que la colonne retient.
@@ -439,5 +441,158 @@ describe('le bloc équation — flèches, Tab, Entrée', () => {
     const [, right] = await mathFields()
     await waitFor(() => expect(right.focus).toHaveBeenCalled())
     expect(right.executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
+  })
+})
+
+describe('touche d’effacement maintenue — jamais de traversée', () => {
+  const twoSteps: CardBlock[] = [{ kind: 'equation', steps: [{ left: '2x', right: '8' }, { left: 'x', right: '2x' }] }]
+
+  it('Retour arrière maintenu au début de D₀ : les répétitions n’effacent pas la fin de G₀', async () => {
+    render(<Harness initial={twoSteps} />)
+    const fields = await mathFields()
+    fields[1].position = 0
+    fireEvent.keyDown(fields[1], { key: 'Backspace' })
+    expect(fields[0].executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
+
+    // G₀ a le curseur en fin : sans garde, MathLive effacerait « x ».
+    expect(fireEvent.keyDown(fields[0], { key: 'Backspace', repeat: true })).toBe(false)
+    expect(fields[0].value).toBe('2x')
+
+    // Relâchée puis maintenue à nouveau : l'effacement redevient normal.
+    fireEvent.keyUp(fields[0], { key: 'Backspace' })
+    expect(fireEvent.keyDown(fields[0], { key: 'Backspace', repeat: true })).toBe(true)
+  })
+
+  it('Suppr maintenu en fin de G₀ : les répétitions n’effacent pas le début de D₀', async () => {
+    render(<Harness initial={twoSteps} />)
+    const fields = await mathFields()
+    fireEvent.keyDown(fields[0], { key: 'Delete' })
+    expect(fields[1].executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
+    // Le mock ne déplace pas le curseur : on le pose là où `moveToMathfieldStart` l'aurait mis.
+    fields[1].position = 0
+
+    expect(fireEvent.keyDown(fields[1], { key: 'Delete', repeat: true })).toBe(false)
+    fireEvent.keyUp(fields[1], { key: 'Delete' })
+    expect(fireEvent.keyDown(fields[1], { key: 'Delete', repeat: true })).toBe(true)
+  })
+
+  it('fusion de deux lignes de formule : les répétitions n’effacent pas la fin de la ligne 1', async () => {
+    const onState = vi.fn()
+    render(<Harness initial={[{ kind: 'math', latex: 'ab\ncd' }]} onState={onState} />)
+    const fields = await mathFields()
+    fields[1].position = 0
+    fireEvent.keyDown(fields[1], { key: 'Backspace' })
+    await waitFor(() => expect(lastBlocks(onState)).toEqual([{ kind: 'math', latex: 'abcd' }]))
+    const [merged] = await mathFields()
+    await waitFor(() => expect(merged.position).toBe(2))
+
+    expect(fireEvent.keyDown(merged, { key: 'Backspace', repeat: true })).toBe(false)
+    expect(lastBlocks(onState)).toEqual([{ kind: 'math', latex: 'abcd' }])
+  })
+
+  it('bloc texte vide retiré : les répétitions n’effacent pas la fin du bloc précédent', async () => {
+    const onState = vi.fn()
+    render(<Harness initial={[{ kind: 'text', text: 'avant' }, { kind: 'text', text: '' }]} onState={onState} />)
+    const empty = screen.getByRole('textbox', { name: /texte du bloc 2/i })
+    fireEvent.keyDown(empty, { key: 'Backspace' })
+    await waitFor(() => expect(lastBlocks(onState)).toEqual([{ kind: 'text', text: 'avant' }]))
+    const previous = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    await waitFor(() => expect(previous).toHaveFocus())
+    expect(previous.selectionStart).toBe(5)
+
+    expect(fireEvent.keyDown(previous, { key: 'Backspace', repeat: true })).toBe(false)
+    fireEvent.keyUp(previous, { key: 'Backspace' })
+    expect(fireEvent.keyDown(previous, { key: 'Backspace' })).toBe(true)
+  })
+})
+
+describe('bloc vide retiré — le curseur entre par le bord du voisin', () => {
+  it('Retour arrière dans un texte vide après une équation : fin de son DERNIER champ', async () => {
+    const onState = vi.fn()
+    render(
+      <Harness
+        initial={[{ kind: 'equation', steps: [{ left: '2x', right: '8' }] }, { kind: 'text', text: '' }]}
+        onState={onState}
+      />
+    )
+    await mathFields()
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /texte du bloc 2/i }), { key: 'Backspace' })
+    await waitFor(() => expect(lastBlocks(onState)).toHaveLength(1))
+    // 2x = 8 n'est pas résolue : le dernier champ est Op₀.
+    await waitFor(() => expect(screen.getByTestId('equation-op-input-0-0')).toHaveFocus())
+  })
+
+  it('Retour arrière dans un texte vide après une formule multi-ligne : fin de sa DERNIÈRE ligne', async () => {
+    const onState = vi.fn()
+    render(<Harness initial={[{ kind: 'math', latex: 'a\nb' }, { kind: 'text', text: '' }]} onState={onState} />)
+    const fields = await mathFields()
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /texte du bloc 2/i }), { key: 'Backspace' })
+    await waitFor(() => expect(lastBlocks(onState)).toHaveLength(1))
+    await waitFor(() => expect(fields[1].executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd'))
+    expect(fields[1].focus).toHaveBeenCalled()
+    expect(fields[0].focus).not.toHaveBeenCalled()
+  })
+
+  it('Suppr dans un texte vide avant une formule multi-ligne : début de sa PREMIÈRE ligne', async () => {
+    const onState = vi.fn()
+    render(<Harness initial={[{ kind: 'text', text: '' }, { kind: 'math', latex: 'a\nb' }]} onState={onState} />)
+    await mathFields()
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /texte du bloc 1/i }), { key: 'Delete' })
+    await waitFor(() => expect(lastBlocks(onState)).toHaveLength(1))
+    await waitFor(async () => {
+      const fields = await mathFields()
+      expect(fields[0].executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
+      expect(fields[0].focus).toHaveBeenCalled()
+      expect(fields[1].focus).not.toHaveBeenCalled()
+    })
+  })
+})
+
+describe('Opₙ vidé sur une étape résolue', () => {
+  it('le curseur retombe à la fin de Dₙ au lieu de se perdre', async () => {
+    const onState = vi.fn()
+    render(
+      <Harness
+        initial={[{ kind: 'equation', steps: [{ left: '2x', right: '8', operation: '\\div 2' }, { left: 'x', right: '4', operation: 'a' }] }]}
+        onState={onState}
+      />
+    )
+    const fields = await mathFields()
+    fireEvent.click(await screen.findByTestId('equation-op-input-0-1'))
+    const input = await waitFor(() => {
+      const field = screen.getByTestId('equation-op-input-0-1')
+      expect(field).toHaveFocus()
+      return field
+    })
+
+    fireEvent.change(input, { target: { value: '' } })
+    await waitFor(() => expect(screen.queryByTestId('equation-op-input-0-1')).not.toBeInTheDocument())
+    await waitFor(() => expect(fields[3].executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd'))
+    expect(fields[3].focus).toHaveBeenCalled()
+    // Retour arrière maintenu qui a vidé Opₙ : il n'attaque pas Dₙ.
+    expect(fireEvent.keyDown(fields[3], { key: 'Backspace', repeat: true })).toBe(false)
+  })
+
+  it('une annulation depuis un autre champ ne vole pas le focus', async () => {
+    function Controlled() {
+      const [blocks, setBlocks] = useState<CardBlock[]>([
+        { kind: 'text', text: 'ailleurs' },
+        { kind: 'equation', steps: [{ left: 'x', right: '4', operation: 'a' }] },
+      ])
+      return (
+        <>
+          <button onClick={() => setBlocks([blocks[0], { kind: 'equation', steps: [{ left: 'x', right: '4' }] }])}>vider</button>
+          <BlockEditor blocks={blocks} onChange={setBlocks} resolveAsset={asset => asset} />
+        </>
+      )
+    }
+    render(<Controlled />)
+    const fields = await mathFields()
+    const text = screen.getByRole('textbox', { name: /texte du bloc 1/i })
+    text.focus()
+    fireEvent.click(screen.getByRole('button', { name: 'vider' }))
+    await waitFor(() => expect(screen.queryByTestId('equation-op-input-1-0')).not.toBeInTheDocument())
+    expect(fields[1].focus).not.toHaveBeenCalled()
+    expect(text).toHaveFocus()
   })
 })

@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState } from 'react'
-import type { BlockPlace, ExitDirection, ExitVia } from './fieldIntents'
+import { latchEdgeKey, type BlockPlace, type ExitDirection, type ExitVia } from './fieldIntents'
 
 /**
  * What the symbol palette drives. Exposed as a handle rather than as another
@@ -205,9 +205,9 @@ function silencePlonk(module: unknown): void {
     const element = (module as { MathfieldElement?: { plonkSound: string | null } }).MathfieldElement
     if (element !== undefined) element.plonkSound = null
   } catch {
-    // Le mock de `mathlive` dans les tests renvoie `{}` : Vitest lève alors sur
-    // l'accès à une propriété qu'il n'a pas explicitement exportée, plutôt que
-    // de rendre `undefined`. Rien à couper dans ce cas — silencieusement.
+    // La forme de l'API MathLive peut changer d'une version à l'autre (ou le
+    // module chargé ne pas l'exposer du tout) : couper le son est un confort,
+    // il ne doit jamais empêcher l'éditeur de se charger.
   }
 }
 
@@ -444,18 +444,26 @@ export function MathFieldEditor({
     field.addEventListener(
       'keydown',
       event => {
+        // Une frappe qui compose (IME) appartient à l'IME, pas à la description.
+        if (event.isComposing) return
         lastKey = event.key
         lastModified = event.shiftKey || event.ctrlKey || event.metaKey || event.altKey
-        // Au bord, une touche d'effacement RÉPÉTÉE est avalée : Retour arrière
-        // maintenu pour vider le champ ne traverse pas la frontière.
+        // Au bord, une touche d'effacement RÉPÉTÉE est avalée, et celle qui
+        // déclenche l'intention verrouille ses répétitions (`latchEdgeKey`) :
+        // Retour arrière maintenu pour vider le champ ne traverse pas la
+        // frontière pour effacer le champ voisin.
         if (event.key === 'Backspace' && caretAtStart(field) && onBackspaceAtStartRef.current !== undefined) {
           event.preventDefault()
-          if (!event.repeat) onBackspaceAtStartRef.current(field.value)
+          if (event.repeat) return
+          latchEdgeKey('Backspace')
+          onBackspaceAtStartRef.current(field.value)
           return
         }
         if (event.key === 'Delete' && caretAtEnd(field) && onDeleteAtEndRef.current !== undefined) {
           event.preventDefault()
-          if (!event.repeat) onDeleteAtEndRef.current(field.value)
+          if (event.repeat) return
+          latchEdgeKey('Delete')
+          onDeleteAtEndRef.current(field.value)
           return
         }
         if (event.key !== 'Enter') return

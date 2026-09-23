@@ -85,6 +85,81 @@ describe(`rawFieldKeyDown — Retour arrière / Suppr`, () => {
   })
 })
 
+describe(`rawFieldKeyDown — touche d'effacement maintenue`, () => {
+  // Deux champs bruts : l'intention au bord du premier passe au second (fin
+  // pour Retour arrière, début pour Suppr), comme un champ voisin de la
+  // description.
+  function mountPair() {
+    const secondKeyDown = vi.fn()
+    render(
+      <>
+        <input
+          aria-label="premier"
+          defaultValue="abc"
+          onKeyDown={rawFieldKeyDown({
+            onBackspaceAtStart: () => {
+              second.focus()
+              second.setSelectionRange(3, 3)
+            },
+            onDeleteAtEnd: () => {
+              second.focus()
+              second.setSelectionRange(0, 0)
+            },
+          })}
+        />
+        <input aria-label="second" defaultValue="xyz" onKeyDown={secondKeyDown} />
+      </>
+    )
+    const first = screen.getByRole('textbox', { name: 'premier' }) as HTMLInputElement
+    const second = screen.getByRole('textbox', { name: 'second' }) as HTMLInputElement
+    return { first, second, secondKeyDown }
+  }
+
+  it(`Retour arrière maintenu : les répétitions dans le champ d'arrivée sont avalées`, () => {
+    const { first, second, secondKeyDown } = mountPair()
+    first.setSelectionRange(0, 0)
+    fireEvent.keyDown(first, { key: 'Backspace' })
+    expect(second).toHaveFocus()
+
+    // `fireEvent` renvoie `false` quand la touche a été empêchée.
+    expect(fireEvent.keyDown(second, { key: 'Backspace', repeat: true })).toBe(false)
+    expect(fireEvent.keyDown(second, { key: 'Backspace', repeat: true })).toBe(false)
+    expect(secondKeyDown).not.toHaveBeenCalled()
+
+    // Touche relâchée : un nouvel appui (même répété ensuite) efface normalement.
+    fireEvent.keyUp(second, { key: 'Backspace' })
+    expect(fireEvent.keyDown(second, { key: 'Backspace' })).toBe(true)
+    expect(fireEvent.keyDown(second, { key: 'Backspace', repeat: true })).toBe(true)
+    expect(secondKeyDown).toHaveBeenCalledTimes(2)
+  })
+
+  it(`Suppr maintenu : même garde, et un autre appui la lève`, () => {
+    const { first, second, secondKeyDown } = mountPair()
+    first.setSelectionRange(3, 3)
+    fireEvent.keyDown(first, { key: 'Delete' })
+    expect(second).toHaveFocus()
+
+    expect(fireEvent.keyDown(second, { key: 'Delete', repeat: true })).toBe(false)
+    // Une AUTRE touche n'est jamais avalée, et elle lève la garde.
+    expect(fireEvent.keyDown(second, { key: 'x' })).toBe(true)
+    expect(fireEvent.keyDown(second, { key: 'Delete', repeat: true })).toBe(true)
+    expect(secondKeyDown).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe(`rawFieldKeyDown — composition (IME)`, () => {
+  it(`une touche pendant une composition reste à l'IME`, () => {
+    const onEnter = vi.fn()
+    const onBackspaceAtStart = vi.fn()
+    const { caret, press } = mount({ onEnter, onBackspaceAtStart })
+    caret(0)
+    expect(press({ key: 'Enter', isComposing: true })).toBe(false)
+    expect(press({ key: 'Backspace', isComposing: true })).toBe(false)
+    expect(onEnter).not.toHaveBeenCalled()
+    expect(onBackspaceAtStart).not.toHaveBeenCalled()
+  })
+})
+
 describe(`rawFieldKeyDown — Entrée`, () => {
   it(`Entrée coupe au curseur`, () => {
     const onEnter = vi.fn()

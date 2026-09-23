@@ -309,7 +309,7 @@ function OperationView({ latex }: { latex: string }) {
   }
   // Safe: `renderMathToHtml` escapes the text it emits, and `trust: false`
   // keeps it from building links or embedding resources (see renderMath tests).
-  return <div style={style} dangerouslySetInnerHTML={{ __html: renderMathToHtml(latex, false) }} />
+  return <div data-testid="equation-operation" style={style} dangerouslySetInnerHTML={{ __html: renderMathToHtml(latex, false) }} />
 }
 
 /**

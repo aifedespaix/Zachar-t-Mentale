@@ -21,7 +21,7 @@ import { EquationBlockField } from './EquationEditor'
 import { canMoveBlock, movePlan } from './blockMove'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle, type MathfieldElement } from './MathFieldEditor'
-import { rawFieldKeyDown, type BlockEdgeHandle, type BlockPlace, type ExitDirection } from './fieldIntents'
+import { latchEdgeKey, rawFieldKeyDown, type BlockEdgeHandle, type BlockPlace, type ExitDirection } from './fieldIntents'
 import { SymbolBand } from './SymbolBand'
 import type { BandTabId, PaletteSymbol } from '../types/symbolBand'
 import { loadBandTab, saveBandTab } from '../persistence/bandTab'
@@ -577,15 +577,14 @@ export function BlockEditor({
   const pendingCaret = useRef<{ index: number; position: number } | null>(null)
   const pendingFocusSelector = useRef<string | null>(null)
   /**
-   * Which formula block's field to focus AT ITS END once a pending removal's
-   * render has committed — the merge gesture backspace on an empty formula
-   * LINE uses (see `deleteEmptyAt`). A math field has no DOM position a
-   * `pendingCaret` could set, so it is asked through its own handle instead
-   * (see `MathFieldHandle.focusEnd`).
+   * Le bloc (et son bord) où entrer une fois qu'un retrait a été rendu — le
+   * geste de Retour arrière / Suppr sur un bloc vide (voir `deleteEmptyAt`,
+   * `deleteForwardAt`). Passe par `focusBlockEdge`, comme les flèches : la fin
+   * du DERNIER champ d'une équation ou d'une formule multi-ligne, le début de
+   * son premier — jamais « le premier champ trouvé » ni la ligne focalisée en
+   * dernier.
    */
-  const pendingMathFocusEnd = useRef<number | null>(null)
-  /** Même chose pour le DÉBUT — le Suppr qui retire un bloc vide et rend la main au suivant (voir `deleteForwardAt`). */
-  const pendingMathFocusStart = useRef<number | null>(null)
+  const pendingEdge = useRef<{ index: number; at: 'start' | 'end' } | null>(null)
 
   /** The text field of block `index`, looked up in the DOM it is rendered in. */
   function textFieldAt(index: number): HTMLTextAreaElement | null {
@@ -620,23 +619,10 @@ export function BlockEditor({
         ?.setSelectionRange(cellCaret.position, cellCaret.position)
     }
 
-    // Un handle n'existe que si la ligne a DÉJÀ eu le focus : le bloc suivant
-    // d'un bloc supprimé au Suppr n'en a aucun, et il faut alors retrouver son
-    // premier champ dans le DOM plutôt que de perdre le focus.
-    const mathFocusIndex = pendingMathFocusEnd.current
-    if (mathFocusIndex !== null) {
-      pendingMathFocusEnd.current = null
-      const handle = mathFields[mathFocusIndex]
-      if (handle !== null && handle !== undefined) handle.focusEnd()
-      else editorRef.current?.querySelector<HTMLElement>(fieldSelector(mathFocusIndex))?.focus()
-    }
-
-    const mathFocusStartIndex = pendingMathFocusStart.current
-    if (mathFocusStartIndex !== null) {
-      pendingMathFocusStart.current = null
-      const handle = mathFields[mathFocusStartIndex]
-      if (handle !== null && handle !== undefined) handle.focusStart()
-      else editorRef.current?.querySelector<HTMLElement>(fieldSelector(mathFocusStartIndex))?.focus()
+    const edge = pendingEdge.current
+    if (edge !== null) {
+      pendingEdge.current = null
+      focusBlockEdge(edge.index, edge.at)
     }
   })
 
@@ -1011,13 +997,10 @@ export function BlockEditor({
     const previous = blocks[index - 1]
     onChange(blocks.filter((_, i) => i !== index))
     setActiveIndex(index - 1)
-    if (previous.kind === 'text' || previous.kind === 'question') {
-      pendingCaret.current = { index: index - 1, position: previous.text.length }
-    } else if (previous.kind === 'math') {
-      // Une formule n'a pas de position DOM à poser comme un texte : c'est le
-      // champ lui-même (ou son repli LaTeX brut) qui sait se placer à la fin
-      // de ce qu'il contient déjà — voir `MathFieldHandle.focusEnd`.
-      pendingMathFocusEnd.current = index - 1
+    if (NAVIGABLE_KINDS.has(previous.kind)) {
+      // Texte, question, formule ou équation : la fin de son DERNIER champ,
+      // comme ↑ en y entrant — voir `focusBlockEdge`.
+      pendingEdge.current = { index: index - 1, at: 'end' }
     } else {
       // Une image ou un tableau n'a pas de « fin » où poser un caret : on se
       // contente de ramener le focus sur son premier champ.
@@ -1035,10 +1018,8 @@ export function BlockEditor({
     const next = blocks[index + 1]
     onChange(blocks.filter((_, i) => i !== index))
     setActiveIndex(index)
-    if (next.kind === 'text' || next.kind === 'question') {
-      pendingCaret.current = { index, position: 0 }
-    } else if (next.kind === 'math') {
-      pendingMathFocusStart.current = index
+    if (NAVIGABLE_KINDS.has(next.kind)) {
+      pendingEdge.current = { index, at: 'start' }
     } else {
       focusBlockLater(index)
     }
@@ -2266,6 +2247,9 @@ function AutoGrowTextarea({
       rows={1}
       onChange={event => onChange(event.target.value)}
       onKeyDown={event => {
+        // Une frappe qui compose (IME) appartient à l'IME : l'Entrée qui valide
+        // une composition ne doit pas faire passer un en-tête à sa réponse.
+        if (event.nativeEvent.isComposing) return
         const field = event.currentTarget
         const mod = event.ctrlKey || event.metaKey
         if (event.key === 'Enter') {
@@ -2286,15 +2270,20 @@ function AutoGrowTextarea({
           return
         }
         // Anti-rafale : Retour arrière maintenu pour vider le texte s'arrête au
-        // bord au lieu d'emporter le bloc (puis le précédent).
+        // bord au lieu d'emporter le bloc — et, une fois le bloc retiré, ses
+        // répétitions n'entament pas la fin du précédent (`latchEdgeKey`).
         if (event.key === 'Backspace' && value === '') {
           event.preventDefault()
-          if (!event.repeat) onDeleteEmpty()
+          if (event.repeat) return
+          latchEdgeKey('Backspace')
+          onDeleteEmpty()
           return
         }
         if (event.key === 'Delete' && value === '') {
           event.preventDefault()
-          if (!event.repeat) onDeleteForward()
+          if (event.repeat) return
+          latchEdgeKey('Delete')
+          onDeleteForward()
           return
         }
         // Les flèches au bord mènent au bloc voisin, en DEUX temps : ↑/↓ font
