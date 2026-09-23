@@ -1,16 +1,15 @@
 import type { ReactNode } from 'react'
 import { useState } from 'react'
-import { Check, X, Lightbulb, Network } from 'lucide-react'
+import { Check, X, Lightbulb } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 
 interface QcmDialogProps {
   open: boolean
   heading: string
   hint?: string
-  noHintNote?: string
   /**
    * A richly-rendered hint (e.g. a media block via `BlockView`), shown
-   * instead of `hint`/`noHintNote` when present. `hint` stays a plain string
+   * instead of `hint` when present. `hint` stays a plain string
    * for the common text case; this exists only for content a string cannot
    * carry.
    */
@@ -47,7 +46,6 @@ export function QcmDialog({
   open,
   heading,
   hint,
-  noHintNote,
   hintNode,
   correctOption,
   distractors,
@@ -89,7 +87,7 @@ export function QcmDialog({
           <DialogTitle>{heading}</DialogTitle>
         </DialogHeader>
 
-        {(hintNode || hint || noHintNote) && (
+        {(hintNode || hint) && (
           <div
             style={{
               display: 'flex',
@@ -101,17 +99,13 @@ export function QcmDialog({
               fontSize: 13,
             }}
           >
-            {hintNode || hint ? (
-              <Lightbulb size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-            ) : (
-              <Network size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-            )}
+            <Lightbulb size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             {/* One scroll box for both the plain hint and the rich `hintNode`,
                 so a whole card definition or a table scrolls inside the box
                 instead of growing the dialog past the viewport. The icon stays
                 outside it and pins to the top. */}
             <div className="qcm-hint-scroll" style={{ minWidth: 0 }}>
-              {hintNode ?? <span>{hint ?? noHintNote}</span>}
+              {hintNode ?? <span>{hint}</span>}
             </div>
           </div>
         )}

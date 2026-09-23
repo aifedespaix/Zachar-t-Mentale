@@ -284,11 +284,11 @@ describe('attachDistractors', () => {
     expect(questions).toEqual([{ cardId: 'a', type: 'qcm-media-title', distractorTitles: ['B'], hint: 'Def média A' }])
   })
 
-  it('gives no hint for "difficile" qcm-media-title, same as qcm-title', () => {
+  it('keeps a "difficile" qcm-media-title a QCM — the media itself is what it is asked from', () => {
     const mediaA: Card = { id: 'a', level: 1, title: 'A', kind: 'media', definition: 'Def média A', parentId: null, order: 0 }
     const mediaB: Card = { id: 'b', level: 2, title: 'B', kind: 'media', definition: 'Def média B', parentId: 'a', order: 0 }
     const questions = attachDistractors([mediaA, mediaB], [{ cardId: 'a', type: 'qcm-media-title' }], 'difficile')
-    expect(questions[0].hint).toBeUndefined()
+    expect(questions[0]).toMatchObject({ type: 'qcm-media-title', distractorTitles: ['B'] })
   })
 
   it('fills distractorDefinitions for a qcm-definition question when distractors exist', () => {
@@ -318,14 +318,26 @@ describe('attachDistractors', () => {
     expect(questions[0].hint).toBe('Le signe dépend de la distance à zéro.')
   })
 
-  it('gives no hint for "difficile" qcm-title even when a definition exists', () => {
-    const questions = attachDistractors([cardWithDef, otherWithDef], [{ cardId: 'a', type: 'qcm-title' }], 'difficile')
-    expect(questions[0].hint).toBeUndefined()
+  it('blanks out the **keywords** of the definition for a "difficile" qcm-title hint', () => {
+    const marked: Card = { ...cardWithDef, definition: 'Le **signe** dépend de la **distance** à zéro.' }
+    const questions = attachDistractors([marked, otherWithDef], [{ cardId: 'a', type: 'qcm-title' }], 'difficile')
+    expect(questions[0].hint).toBe('Le ____ dépend de la ____ à zéro.')
   })
 
-  it('gives no hint for qcm-title when the card has no definition at all', () => {
-    const questions = attachDistractors([cardNoDef, otherNoDef], [{ cardId: 'c', type: 'qcm-title' }], 'facile')
-    expect(questions[0].hint).toBeUndefined()
+  it('keeps the whole definition for a "difficile" qcm-title hint when it has no keyword to blank', () => {
+    const questions = attachDistractors([cardWithDef, otherWithDef], [{ cardId: 'a', type: 'qcm-title' }], 'difficile')
+    expect(questions[0].hint).toBe('Def A')
+  })
+
+  it('asks a qcm-title on a card without definition from its sub-cards, in order', () => {
+    const second: Card = { id: 'e', level: 2, title: 'E', parentId: 'c', order: 1 }
+    const questions = attachDistractors([cardNoDef, second, otherNoDef], [{ cardId: 'c', type: 'qcm-title' }], 'difficile')
+    expect(questions[0]).toMatchObject({ type: 'qcm-title', hint: 'Regroupe : D, E.' })
+  })
+
+  it('turns a qcm-title on a leaf without definition into a recall question — nothing to ask it from', () => {
+    const questions = attachDistractors([cardNoDef, otherNoDef], [{ cardId: 'd', type: 'qcm-title' }], 'facile')
+    expect(questions).toEqual([{ cardId: 'd', type: 'recall' }])
   })
 
   it('falls back to "recall" when a qcm-title question has no possible title distractor', () => {
