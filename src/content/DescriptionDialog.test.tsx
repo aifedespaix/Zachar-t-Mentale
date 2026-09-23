@@ -132,6 +132,55 @@ describe('DescriptionDialog', () => {
     expect(onRenameTitle).toHaveBeenCalledWith('Nouveau titre')
   })
 
+  it('autosaves a renamed title after a pause in typing, like the blocks', async () => {
+    vi.useFakeTimers()
+    const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime })
+    const onRenameTitle = vi.fn()
+    const props = renderDialog({ onRenameTitle })
+
+    const title = screen.getByRole('textbox', { name: /titre de la carte/i })
+    await user.clear(title)
+    await user.type(title, 'Titre sans blur')
+
+    expect(onRenameTitle).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(700)
+
+    expect(onRenameTitle).toHaveBeenCalledTimes(1)
+    expect(onRenameTitle).toHaveBeenCalledWith('Titre sans blur')
+    // Still focused: autosaving the title is not leaving it.
+    expect(title).toHaveFocus()
+    expect(props.onClose).not.toHaveBeenCalled()
+  })
+
+  it('flushes a title still being typed when the dialog closes', async () => {
+    const user = userEvent.setup()
+    const onRenameTitle = vi.fn()
+    renderDialog({ onRenameTitle })
+
+    const title = screen.getByRole('textbox', { name: /titre de la carte/i })
+    await user.clear(title)
+    await user.type(title, 'Fermé aussitôt')
+    await user.click(screen.getByRole('button', { name: /^fermer$/i }))
+
+    expect(onRenameTitle).toHaveBeenCalledTimes(1)
+    expect(onRenameTitle).toHaveBeenCalledWith('Fermé aussitôt')
+  })
+
+  it('never saves an emptied title, and puts the last one back on blur', async () => {
+    vi.useFakeTimers()
+    const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime })
+    const onRenameTitle = vi.fn()
+    renderDialog({ onRenameTitle, cardTitle: 'Signes contraires' })
+
+    const title = screen.getByRole('textbox', { name: /titre de la carte/i })
+    await user.clear(title)
+    await vi.advanceTimersByTimeAsync(700)
+    await user.tab()
+
+    expect(onRenameTitle).not.toHaveBeenCalled()
+    expect(title).toHaveValue('Signes contraires')
+  })
+
   it('leaves the title read-only with no rename handler', () => {
     renderDialog()
 

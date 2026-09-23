@@ -428,20 +428,60 @@ export function DescriptionDialog({
     return () => clearTimeout(debounceRef.current)
   }, [draft, cardId, onSave])
 
-  function commitTitle() {
+  // The title autosaves exactly like the blocks: on a short pause in typing,
+  // and flushed on every way out. Compared against what was last SENT rather
+  // than `cardTitle`, so a rename is not re-sent while the parent has yet to
+  // re-render with it. An empty title is never saved — it is still being
+  // typed over — and blurring on one puts the last saved title back.
+  const titleDraftRef = useRef(titleDraft)
+  titleDraftRef.current = titleDraft
+  const lastSavedTitleRef = useRef(cardTitle)
+  const titleDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // The title as it stood when the field was focused — what `Échap` restores,
+  // since by then autosave may already have renamed the card mid-edit.
+  const titleAtFocusRef = useRef(cardTitle)
+
+  function saveTitle(value: string) {
+    const next = value.trim()
+    if (next === '' || next === lastSavedTitleRef.current) return
+    lastSavedTitleRef.current = next
+    onRenameTitle?.(next)
+  }
+
+  function flushTitle() {
+    clearTimeout(titleDebounceRef.current)
+    saveTitle(titleDraftRef.current)
+  }
+
+  // Keyed on whether a rename handler exists, not on the handler itself: the
+  // parent passes a fresh closure every render, and each block autosave
+  // re-renders it — which would keep restarting this debounce.
+  const canRename = onRenameTitle !== undefined
+  useEffect(() => {
+    if (!canRename) return
     const next = titleDraft.trim()
-    if (next !== '' && next !== cardTitle) onRenameTitle?.(next)
-    else setTitleDraft(cardTitle)
+    if (next === '' || next === lastSavedTitleRef.current) return
+    clearTimeout(titleDebounceRef.current)
+    titleDebounceRef.current = setTimeout(() => saveTitle(titleDraftRef.current), AUTOSAVE_DELAY_MS)
+    return () => clearTimeout(titleDebounceRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titleDraft, canRename])
+
+  function commitTitle() {
+    flushTitle()
+    if (titleDraft.trim() === '') setTitleDraft(lastSavedTitleRef.current)
     setTitleFocused(false)
   }
 
   function close() {
     flush()
+    flushTitle()
     onClose()
   }
 
   function navigate(targetId: string) {
     flush()
+    flushTitle()
     onNavigate?.(targetId)
   }
 
@@ -473,6 +513,7 @@ export function DescriptionDialog({
 
   function deleteDescription() {
     clearTimeout(debounceRef.current)
+    flushTitle()
     onSave([])
     onClose()
   }
@@ -768,14 +809,22 @@ export function DescriptionDialog({
                   value={titleDraft}
                   readOnly={!onRenameTitle}
                   onChange={event => setTitleDraft(event.target.value)}
-                  onFocus={() => setTitleFocused(true)}
+                  onFocus={() => {
+                    titleAtFocusRef.current = lastSavedTitleRef.current
+                    setTitleFocused(true)
+                  }}
                   onBlur={commitTitle}
                   onKeyDown={event => {
                     if (event.key === 'Enter') {
                       event.preventDefault()
                       event.currentTarget.blur()
                     }
-                    if (event.key === 'Escape') setTitleDraft(cardTitle)
+                    if (event.key === 'Escape') {
+                      clearTimeout(titleDebounceRef.current)
+                      titleDraftRef.current = titleAtFocusRef.current
+                      setTitleDraft(titleAtFocusRef.current)
+                      saveTitle(titleAtFocusRef.current)
+                    }
                   }}
                   style={{
                     flex: 1,
@@ -867,7 +916,7 @@ export function DescriptionDialog({
           {shortcutsOpen && (
             <ShortcutsPanel
               scope={caretScope}
-              canRename={onRenameTitle !== undefined}
+              canRename={canRename}
               onClose={() => setShortcutsOpen(false)}
             />
           )}
