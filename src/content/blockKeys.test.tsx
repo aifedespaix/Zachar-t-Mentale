@@ -261,6 +261,20 @@ describe('Ctrl+Entrée hors groupe, Ctrl+Maj+Entrée dans le groupe', () => {
     fireEvent.keyDown(screen.getByRole('textbox', { name: /texte du bloc 2/i }), { key: 'Enter', ctrlKey: true, shiftKey: true })
     expect(latest()).toEqual([group[0], group[1], { kind: 'text', text: '' }, group[2]])
   })
+
+  it('Ctrl+Entrée hors question : juste après le bloc courant, jamais standalone', () => {
+    // Sans en-tête, `blockGroups` renvoie quand même un groupe (headerIndex
+    // null) pour toute la suite de blocs — mais ce n'est pas une VRAIE
+    // question à sauter : le spec veut juste-après-le-bloc, comme si de rien.
+    const noQuestion: CardBlock[] = [
+      { kind: 'text', text: 'a' },
+      { kind: 'text', text: 'b' },
+      { kind: 'text', text: 'c' },
+    ]
+    const { latest } = renderEditor(noQuestion)
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /texte du bloc 1/i }), { key: 'Enter', ctrlKey: true })
+    expect(latest()).toEqual([noQuestion[0], { kind: 'text', text: '' }, noQuestion[1], noQuestion[2]])
+  })
 })
 
 describe('Entrée dans l’en-tête de question passe dans le corps', () => {

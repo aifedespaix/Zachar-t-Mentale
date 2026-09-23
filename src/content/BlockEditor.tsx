@@ -780,8 +780,9 @@ export function BlockEditor({
   /**
    * Ctrl/Cmd+Entrée (`outside`) : un bloc juste APRÈS le groupe du bloc
    * `index` — marqué `standalone` si ce groupe est une question, pour ne pas
-   * y tomber. Ctrl/Cmd+Maj+Entrée (`inside`) : juste après le bloc, dans son
-   * groupe. Le type suit `inheritableKind`, comme le bouton du pied.
+   * y tomber ; hors d'une question : juste après le bloc. Ctrl/Cmd+Maj+Entrée
+   * (`inside`) : juste après le bloc, dans son groupe. Le type suit
+   * `inheritableKind`, comme le bouton du pied.
    */
   function enterBlock(index: number, place: BlockPlace) {
     const block = emptyBlock(inheritableKind(blocks[index]))
@@ -790,7 +791,7 @@ export function BlockEditor({
       return
     }
     const group = blockGroups(blocks).find(candidate => candidate.indexes.includes(index))
-    const last = group === undefined ? index : group.indexes[group.indexes.length - 1]
+    const last = group === undefined || group.headerIndex === null ? index : group.indexes[group.indexes.length - 1]
     insertBlockAfter(last, group !== undefined && group.headerIndex !== null ? { ...block, standalone: true } : block)
   }
 

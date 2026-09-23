@@ -997,12 +997,9 @@ describe('le bandeau de symboles', () => {
     ])
   })
 
-  it('garde le focus après une insertion en fin de groupe, malgré les identités stables', async () => {
+  it('garde le focus après une insertion au milieu, malgré les identités stables', async () => {
     // Le risque exact de la réconciliation d'identités : si les clés se décalaient,
     // le bloc qu'on est en train d'écrire serait remonté et perdrait le focus.
-    // Ctrl+Entrée ajoute désormais APRÈS le groupe entier (voir `enterBlock`) :
-    // sans question, « un » et « deux » ne forment qu'un seul groupe, donc le
-    // nouveau bloc arrive après « deux », pas entre les deux.
     const user = userEvent.setup()
     renderEditor([
       { kind: 'text', text: 'un' },
@@ -1011,8 +1008,7 @@ describe('le bandeau de symboles', () => {
 
     await user.type(screen.getByRole('textbox', { name: /texte du bloc 1/i }), '{Control>}{Enter}{/Control}')
 
-    expect(screen.getByRole('textbox', { name: /texte du bloc 2/i })).toHaveValue('deux')
-    expect(screen.getByRole('textbox', { name: /texte du bloc 3/i })).toHaveFocus()
+    expect(screen.getByRole('textbox', { name: /texte du bloc 2/i })).toHaveFocus()
   })
 
   it('groupe les signes par famille, et nomme chaque famille', () => {
