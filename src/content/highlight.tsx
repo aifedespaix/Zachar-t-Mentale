@@ -15,6 +15,14 @@ export function stripHighlightMarkers(text: string): string {
   return text.replace(HIGHLIGHT_PATTERN, '$1')
 }
 
+/**
+ * Every `**mot-clé**` replaced by a blank — the quiz's "difficile" hint: the
+ * whole sentence stays readable, only the key terms are withheld.
+ */
+export function maskHighlightMarkers(text: string, blank = '____'): string {
+  return text.replace(HIGHLIGHT_PATTERN, blank)
+}
+
 export function renderHighlighted(text: string): ReactNode[] {
   const nodes: ReactNode[] = []
   let lastIndex = 0

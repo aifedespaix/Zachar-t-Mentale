@@ -9,7 +9,7 @@ import type {
   RecallProgress,
 } from '../types/quiz'
 import { contentOf, nonTextKinds } from '../content/blocks'
-import { stripHighlightMarkers } from '../content/highlight'
+import { maskHighlightMarkers, stripHighlightMarkers } from '../content/highlight'
 
 const DIFFICULTY_SETTINGS: Record<QuizDifficulty, { sampleRatio: number }> = {
   facile: { sampleRatio: 0.2 },
@@ -165,16 +165,30 @@ export function buildTitleDistractorPool(
 }
 
 /**
- * facile/moyen = full definition (never truncated — a partial hint used to
- * cut mid-sentence, which the mission explicitly asked to stop doing);
- * difficile = no textual hint, position in the tree only. Markers are always
- * stripped: this string reaches `QcmDialog`'s plain-text hint prop, which has
- * no rich rendering of its own.
+ * The written clue a title question is asked from — never "guess from the
+ * card's place in the tree": the graph is blurred behind the dialog, and a
+ * position alone is not a question.
+ *
+ * - With a definition: facile/moyen show it in full (never truncated — a
+ *   partial hint used to cut mid-sentence, which the mission explicitly asked
+ *   to stop doing); difficile shows it with its `**mots-clés**` blanked out,
+ *   and in full when it has none to blank.
+ * - Without one: a card that groups sub-cards is asked from them
+ *   (« Regroupe : A, B, C. »). A leaf with no definition has nothing to be
+ *   asked from — `undefined`, and the caller degrades it to recall.
+ *
+ * Markers never survive: this string reaches `QcmDialog`'s plain-text hint
+ * prop, which has no rich rendering of its own.
  */
-function buildHint(card: Card, difficulty: QuizDifficulty): string | undefined {
-  if (!card.definition) return undefined
-  if (difficulty === 'difficile') return undefined
-  return stripHighlightMarkers(card.definition)
+function buildHint(cards: Card[], card: Card, difficulty: QuizDifficulty): string | undefined {
+  if (card.definition) {
+    return stripHighlightMarkers(difficulty === 'difficile' ? maskHighlightMarkers(card.definition) : card.definition)
+  }
+  const children = cards
+    .filter(c => c.parentId === card.id)
+    .sort((a, b) => a.order - b.order)
+    .map(c => c.title)
+  return children.length > 0 ? `Regroupe : ${children.join(', ')}.` : undefined
 }
 
 export function attachDistractors(
@@ -196,9 +210,14 @@ export function attachDistractors(
     }
 
     if (question.type === 'qcm-title' || question.type === 'qcm-media-title') {
+      const hint = buildHint(cards, card, difficulty)
+      // A plain title question with nothing written to ask it from is the
+      // fill-in-the-blank question instead. A media title question always
+      // has its media to show, hint or not.
+      if (question.type === 'qcm-title' && hint === undefined) return { cardId: question.cardId, type: 'recall' }
       const pool = buildTitleDistractorPool(cards, card, difficulty, random)
       if (pool.length === 0) return { cardId: question.cardId, type: 'recall' }
-      return { ...question, distractorTitles: pool, hint: buildHint(card, difficulty) }
+      return { ...question, distractorTitles: pool, hint }
     }
 
     return question

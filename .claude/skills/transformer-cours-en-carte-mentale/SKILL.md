@@ -369,9 +369,15 @@ différente sur ce qui est écrit :
 |---|---|---|---|
 | `qcm-definition` | le `title` de la card | il choisit la bonne `definition` parmi 4 | `kind` absent/`definition`, la card a une `definition` |
 | `recall` | le `title` en texte à trous | il écrit le titre lettre par lettre | `kind` absent/`definition`, la card n'a PAS de `definition` |
-| `qcm-title` | la `definition` en entier (comme indice) | il choisit le bon `title` parmi 4 | `kind` absent/`definition`, mode QCM activé |
+| `qcm-title` | la `definition` comme indice (en entier en facile/moyen, **mots-clés remplacés par `____`** en difficile) | il choisit le bon `title` parmi 4 | `kind` absent/`definition`, mode QCM activé, la card a une `definition` |
+| `qcm-title` (card-thème) | « Regroupe : A, B, C. » — les titres de ses sous-cards, dans l'ordre `order` | il choisit le bon `title` parmi 4 | mode QCM activé, la card n'a PAS de `definition` mais a des enfants |
+| `recall` (repli QCM) | le `title` en texte à trous | il écrit le titre | mode QCM activé, card SANS `definition` ET SANS enfant |
 | `qcm-media` | le `title` de la card | il choisit le bon média (tableau/formule/image) parmi 4 | `kind: 'media'` |
-| `qcm-media-title` | le média en entier (comme indice) | il choisit le bon `title` parmi 4 | `kind: 'media'`, mode QCM activé |
+| `qcm-media-title` | le média en entier, à toutes les difficultés | il choisit le bon `title` parmi 4 | `kind: 'media'`, mode QCM activé |
+
+L'app ne pose **jamais** de question « devine d'après la position de la card
+dans l'arbre » : chaque question part d'un texte écrit. Ce texte, c'est toi
+qui le fournis — une card sans rien d'écrit ne peut être qu'un texte à trous.
 
 ### 1. Titre et définition doivent se déterminer l'un l'autre
 
@@ -402,17 +408,44 @@ non, réécrire.
 
 Dans le texte d'une `definition` (ou d'un bloc `text`), encadrer les mots ou
 groupes de mots essentiels avec des doubles astérisques : `**mot-clé**`.
-L'application les affiche en couleur dans la fiche de lecture — jamais dans
-le quiz, où toute option s'affiche en texte plat, y compris pour cette
-carte-là si elle sert de distracteur ailleurs.
+L'application les affiche en couleur dans la fiche de lecture ; dans le quiz,
+toute option s'affiche en texte plat, y compris pour cette carte-là si elle
+sert de distracteur ailleurs.
+
+**En difficulté « difficile », ces mots-clés deviennent des trous** dans
+l'indice de `qcm-title` : « **Mettre au même dénominateur**, puis… » s'affiche
+« ____, puis… ». Le marquage fabrique donc directement la question difficile,
+et se choisit avec ça en tête :
+
+- **Masquer ce qui se retient, pas ce qui se devine.** Le mot-clé est le terme
+  que l'élève doit savoir restituer (la notion, le mot technique, la valeur).
+  Un article ou un mot de liaison masqué ne teste rien.
+- **La phrase trouée doit encore désigner UN seul titre** parmi ses sœurs.
+  Si masquer les mots-clés rend la définition applicable à n'importe quelle
+  sœur, c'est qu'on a masqué tout ce qui la distinguait : garder visible au
+  moins un élément discriminant.
+- **Si un mot du titre apparaît dans la définition, le marquer** : en
+  difficile il sera masqué au lieu de souffler la réponse.
+- **Une définition sans aucun `**…**` s'affiche en entier même en
+  difficile** — la card perd alors son niveau de difficulté. Marquer au moins
+  un terme sur chaque card qui a une définition.
 
 ```json
 // BON — les mots qui portent le sens sont marqués, la phrase reste lisible sans eux
 { "title": "Addition de fractions", "definition": "**Mettre au même dénominateur**, puis additionner les numérateurs en gardant le dénominateur commun." }
 ```
 
-Ne pas marquer une phrase entière ni un mot sur deux — deux ou trois termes
-par définition, ceux qu'un élève chercherait à retenir en premier.
+Ne pas marquer une phrase entière ni un mot sur deux — un à trois termes
+par définition, ceux qu'un élève chercherait à retenir en premier. Au-delà,
+la version difficile n'est plus qu'une suite de `____` illisible.
+
+```json
+// MAUVAIS en difficile — « ____ ____ de ____ : ____ » ne dit plus rien
+{ "definition": "**Somme** **des carrés** des **côtés** : **hypoténuse²**" }
+
+// BON — « Dans un triangle rectangle, le carré de l'____ égale la somme des carrés des deux autres côtés. »
+{ "definition": "Dans un triangle rectangle, le carré de l'**hypoténuse** égale la somme des carrés des deux autres côtés." }
+```
 
 ### 3. Les sœurs doivent être distinguables — mais pas trivialement
 
@@ -442,9 +475,27 @@ Si deux cartes décrivent la même méthode sous deux thèmes, différencier
 leurs titres (« Avec calculatrice, en appliquant » / « Avec calculatrice, en
 calculant ») plutôt que les laisser identiques.
 
-### 4. Un titre sans définition sera écrit à la main
+### 4. Une card sans définition : thème ou texte à trous
 
-Une card sans `definition` devient une question `recall` : l'app affiche le
+Une card sans `definition` n'a que deux destins :
+
+- **Elle a des enfants** (card-thème, typiquement niveau 1-2) : en mode QCM,
+  la question est « Regroupe : A, B, C. », avec les titres de ses enfants
+  dans l'ordre de leur `order`, et l'élève choisit le titre parmi 4. Pour que
+  ça marche :
+  - le titre du thème doit être **le nom naturel qui englobe ses enfants**
+    (« Opérations sur les fractions », pas « Partie 2 ») ;
+  - les titres des enfants, lus ensemble, doivent **évoquer ce thème-là et
+    pas un thème voisin**. Des enfants génériques (« Méthode », « Exemple »,
+    « Cas particulier ») rendent la question impossible ;
+  - un thème à un seul enfant donne un indice maigre : regrouper ou donner
+    une `definition` au thème.
+- **Elle n'a pas d'enfant** (feuille) : il n'y a rien d'écrit sur quoi poser
+  un QCM, donc c'est TOUJOURS une question `recall`, même en mode QCM. Une
+  feuille est presque toujours une notion : **lui donner une `definition`**
+  est le meilleur moyen d'en faire une bonne question.
+
+La question `recall` : l'app affiche le
 titre en texte à trous (`P____s______e`) et l'utilisateur tape les lettres
 manquantes. La difficulté choisie décide du nombre de lettres offertes au
 départ (moitié en facile, un quart en moyen, la première lettre seule en
@@ -466,12 +517,10 @@ bascule alors en QCM, où la longueur du titre n'est plus un problème.
 ### 5. Rédiger l'indice de `qcm-title` via la définition
 
 En mode QCM, la `definition` (ou le média) sert d'indice pour retrouver le
-titre : affichée intégralement en facile et en moyen, absente en difficile
-(il ne reste que la position dans l'arbre). Elle n'est plus jamais coupée en
-plein milieu — écrire l'information qui rattache la définition à son titre
-n'importe où dans le texte, pas seulement au début, reste malgré tout une
-bonne pratique : une définition lisible d'un coup d'œil sert mieux l'élève
-qu'une définition optimisée pour une troncature qui n'existe plus.
+titre : affichée intégralement en facile et en moyen, avec ses mots-clés
+remplacés par `____` en difficile (voir §2) ; un média s'affiche en entier à
+toutes les difficultés. Elle n'est jamais coupée en plein milieu : une
+définition lisible d'un coup d'œil sert mieux l'élève.
 
 Ce que ça impose :
 
@@ -503,6 +552,10 @@ dans l'arbre, à côté de trois distracteurs. Un renvoi y devient du bruit.
 | Définition qui ne nomme pas son sujet (« On applique la règle ») | Illisible comme indice en mode QCM : le titre devient introuvable |
 | Titre recopié mot pour mot dans sa propre définition | En mode QCM, l'indice donne directement la réponse |
 | Titre long ou numéroté sur une card sans définition | Elle devient une question à écrire lettre par lettre : intapable |
+| Définition sans aucun `**mot-clé**` | En difficile, rien n'est masqué : la question est aussi facile qu'en facile |
+| Mots-clés trop nombreux, ou masquant tout ce qui distingue la card de ses sœurs | En difficile, l'indice troué ne désigne plus aucun titre en particulier |
+| Card-thème aux enfants génériques (« Méthode », « Exemple ») | « Regroupe : Méthode, Exemple » ne permet de retrouver aucun thème |
+| Feuille sans définition « parce que le titre suffit » | Elle ne peut être qu'un texte à trous, jamais un QCM |
 | Renvoi d'une card à une autre (« comme ci-dessus ») | Une définition est lue seule en quiz, hors de son contexte |
 | Inventer un numéro de chapitre non trouvé dans les sources | Nommer par slug thématique si le numéro réel n'est pas connu |
 | Titre identique à celui d'une carte d'une autre branche | Rend le QCM titre→définition réellement ambigu — aucune des deux définitions n'est reconnaissable comme LA bonne réponse |

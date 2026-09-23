@@ -5,9 +5,11 @@ export type QuizDifficulty = 'facile' | 'moyen' | 'difficile'
 export interface QuizConfig {
   levels: CardLevel[]
   difficulty: QuizDifficulty
-  /** When true, every drawn card is quizzed on its TITLE via QCM (with its
-   * definition as a difficulty-graded hint, if it has one) instead of the
-   * default recall-title / QCM-definition split. */
+  /** When true, every drawn card is quizzed on its TITLE via QCM, asked from
+   * a written clue (its definition — keywords blanked on "difficile" — or,
+   * lacking one, the sub-cards it groups) instead of the default
+   * recall-title / QCM-definition split. A leaf with no definition has no
+   * clue and stays a recall question. */
   qcmMode: boolean
 }
 
@@ -20,7 +22,7 @@ export interface QuizQuestion {
   distractorDefinitions?: string[]
   /** qcm-title / qcm-media-title only. */
   distractorTitles?: string[]
-  /** qcm-title / qcm-media-title only; absent means "no textual hint, context of the graph only". */
+  /** qcm-title / qcm-media-title only: the written clue the title is asked from (see `buildHint`). */
   hint?: string
 }
 

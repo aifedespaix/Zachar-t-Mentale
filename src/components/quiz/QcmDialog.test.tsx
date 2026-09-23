@@ -41,12 +41,11 @@ describe('QcmDialog', () => {
     expect(screen.getByText(/processus par lequel les plantes/i)).toBeInTheDocument()
   })
 
-  it('shows the no-hint note instead when there is no hint', () => {
+  it('shows no hint box at all when there is no hint', () => {
     render(
       <QcmDialog
         open
         heading="Quel est le titre de cette carte ?"
-        noHintNote="Aide-toi de la position de la carte dans l'arbre."
         correctOption="La photosynthèse"
         distractors={['La respiration']}
         onAnswer={() => {}}
@@ -54,10 +53,10 @@ describe('QcmDialog', () => {
       />
     )
 
-    expect(screen.getByText(/aide-toi de la position/i)).toBeInTheDocument()
+    expect(document.querySelector('.qcm-hint-scroll')).toBeNull()
   })
 
-  it('renders hintNode instead of the plain hint/noHintNote text when provided', () => {
+  it('renders hintNode instead of the plain hint text when provided', () => {
     render(
       <QcmDialog
         open
