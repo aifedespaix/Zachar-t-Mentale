@@ -4,14 +4,14 @@ import type { CardBlock, EquationStep } from '../types/cardBlock'
 import { equationStepIsSolved } from './blocks'
 import { renderMathToHtml } from './renderMath'
 import { MathFieldEditor, type MathFieldHandle } from './MathFieldEditor'
-
-type StepField = 'left' | 'right' | 'operation'
+import { navigate, operationVisible, readingOrder, type EqColumn, type EqField, type EqPos } from './equationNav'
+import { rawFieldKeyDown, type BlockEdgeHandle, type BlockPlace, type ExitDirection, type ExitVia } from './fieldIntents'
 
 function isStepEmpty(step: EquationStep): boolean {
   return step.left.trim() === '' && step.right.trim() === '' && (step.operation ?? '').trim() === ''
 }
 
-function fieldKey(step: number, field: StepField): string {
+function fieldKey(step: number, field: EqField): string {
   return `${step}:${field}`
 }
 
@@ -120,8 +120,7 @@ function EquationTermField({
   onEnterBlock,
   onBackspaceAtStart,
   onDeleteAtEnd,
-  onArrowUp,
-  onArrowDown,
+  onExit,
   side,
   style,
 }: {
@@ -132,11 +131,11 @@ function EquationTermField({
   onFocusHandle: () => void
   /** Entrée (sans Ctrl/Cmd) : toujours « nouvelle étape », jamais une coupure au curseur — une étape n'a rien à couper. */
   onEnter: () => void
-  onEnterBlock: () => void
+  onEnterBlock: (place: BlockPlace) => void
   onBackspaceAtStart: (rest: string) => void
   onDeleteAtEnd: (rest: string) => void
-  onArrowUp?: () => void
-  onArrowDown?: () => void
+  /** Une flèche (ou Tab) au bord : le champ voisin selon `equationNav`. `false` = nulle part où aller. */
+  onExit: (direction: ExitDirection, via: ExitVia) => boolean | void
   /** Lequel des deux membres — pilote (via `index.css`) l'alignement du texte vers le « = » et le nettoyage du chrome MathLive (fond, menu ≡), voir `[data-equation-side]`. */
   side: 'left' | 'right'
   style?: CSSProperties
@@ -152,12 +151,8 @@ function EquationTermField({
         onEnterBlock={onEnterBlock}
         onBackspaceAtStart={onBackspaceAtStart}
         onDeleteAtEnd={onDeleteAtEnd}
-        // Pont provisoire : ↑/↓ (via `move-out`) gardent l'ancien sens le
-        // temps que `EquationBlockField` passe à `equationNav`.
-        onExit={direction => {
-          if (direction === 'up') onArrowUp?.()
-          else if (direction === 'down') onArrowDown?.()
-        }}
+        onExit={onExit}
+        tabExits
         fallback={
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <input
@@ -165,39 +160,14 @@ function EquationTermField({
               value={value}
               spellCheck={false}
               onChange={event => onChangeValue(event.target.value)}
-              onKeyDown={event => {
-                const field = event.currentTarget
-                if (event.key === 'Enter') {
-                  if (event.shiftKey) return
-                  event.preventDefault()
-                  if (event.ctrlKey || event.metaKey) onEnterBlock()
-                  else onEnter()
-                  return
-                }
-                if (event.key === 'Backspace' && field.selectionStart === 0 && field.selectionEnd === 0) {
-                  event.preventDefault()
-                  onBackspaceAtStart(field.value)
-                  return
-                }
-                if (
-                  event.key === 'Delete' &&
-                  field.selectionStart === field.value.length &&
-                  field.selectionEnd === field.value.length
-                ) {
-                  event.preventDefault()
-                  onDeleteAtEnd(field.value)
-                  return
-                }
-                if (event.key === 'ArrowUp' && onArrowUp !== undefined) {
-                  event.preventDefault()
-                  onArrowUp()
-                  return
-                }
-                if (event.key === 'ArrowDown' && onArrowDown !== undefined) {
-                  event.preventDefault()
-                  onArrowDown()
-                }
-              }}
+              onKeyDown={rawFieldKeyDown({
+                onEnter: () => onEnter(),
+                onEnterBlock,
+                onBackspaceAtStart,
+                onDeleteAtEnd,
+                onExit,
+                tabExits: true,
+              })}
               style={RAW_FIELD_STYLE}
             />
             <div
@@ -246,6 +216,7 @@ function EquationOperationField({
   onEnterBlock,
   onBackspaceAtStart,
   onDeleteAtEnd,
+  onExit,
   style,
   ref,
 }: {
@@ -255,9 +226,10 @@ function EquationOperationField({
   dataTestId?: string
   onFocusHandle: () => void
   onEnter: () => void
-  onEnterBlock: () => void
+  onEnterBlock: (place: BlockPlace) => void
   onBackspaceAtStart: (rest: string) => void
   onDeleteAtEnd: (rest: string) => void
+  onExit: (direction: ExitDirection, via: ExitVia) => boolean | void
   style?: CSSProperties
   ref?: React.Ref<MathFieldHandle>
 }) {
@@ -354,26 +326,14 @@ function EquationOperationField({
             field.setSelectionRange(caret, caret)
             return
           }
-          if (event.key === 'Enter') {
-            if (event.shiftKey) return
-            event.preventDefault()
-            if (event.ctrlKey || event.metaKey) onEnterBlock()
-            else onEnter()
-            return
-          }
-          if (event.key === 'Backspace' && field.selectionStart === 0 && field.selectionEnd === 0) {
-            event.preventDefault()
-            onBackspaceAtStart(field.value)
-            return
-          }
-          if (
-            event.key === 'Delete' &&
-            field.selectionStart === field.value.length &&
-            field.selectionEnd === field.value.length
-          ) {
-            event.preventDefault()
-            onDeleteAtEnd(field.value)
-          }
+          rawFieldKeyDown({
+            onEnter: () => onEnter(),
+            onEnterBlock,
+            onBackspaceAtStart,
+            onDeleteAtEnd,
+            onExit,
+            tabExits: true,
+          })(event)
         }}
         style={{ ...style, ...OPERATION_INPUT_STYLE }}
       />
@@ -434,30 +394,28 @@ export interface EquationBlockFieldProps {
   block: Extract<CardBlock, { kind: 'equation' }>
   index: number
   onChange: (block: CardBlock) => void
-  /** Ctrl+Entrée : un nouveau bloc après celui-ci. */
-  onEnterBlock: () => void
+  /** Ctrl/Cmd+Entrée (`outside`, après le groupe) ou Ctrl/Cmd+Maj+Entrée (`inside`, dans le groupe). */
+  onEnterBlock: (place: BlockPlace) => void
   /** Retour arrière tout en début du bloc, quand il est vide : il demande à disparaître vers le précédent. */
   onDeleteEmpty: () => void
   /** Suppr tout en fin du bloc, quand il est vide : il demande à disparaître vers le suivant. */
   onDeleteForward: () => void
+  /** Une flèche qui sort du bloc par le haut/gauche (`before`) ou le bas/droite (`after`). */
+  onExitBlock: (side: 'before' | 'after') => void
   /** Le champ vivant du membre focalisé, pour les touches du bandeau de symboles. */
   onFieldChange: (handle: MathFieldHandle | null) => void
+  ref?: React.Ref<BlockEdgeHandle>
 }
 
 /**
  * L'éditeur d'un bloc équation : une suite d'étapes, chacune un membre gauche
- * et un membre droit dans des cases de couleur, séparées par « = », et
- * l'opération qui mène à l'étape suivante — sauf sur la dernière, qui n'en a
- * pas (voir `equationStepIsSolved`).
- *
- * Entrée (dans n'importe lequel des trois champs d'une étape) ajoute une
- * étape après celle-ci — le geste « aller à la ligne » demandé pour une
- * équation, symétrique de la LIGNE qu'Entrée ajoute dans une formule
- * (`MathLinesField`). Retour arrière en tout début du membre gauche d'une
- * étape VIDE la fusionne avec la précédente (ou, sur la première étape,
- * demande la disparition du bloc) ; Suppr en toute fin du membre droit fait
- * de même vers la suivante — jamais quand l'étape porte encore du contenu,
- * pour ne jamais effacer en silence ce que l'élève vient d'écrire.
+ * et un membre droit dans des cases de couleur, séparées par « = », puis
+ * l'opération qui mène à l'étape suivante. Le clavier suit le tableau
+ * « Équation » de la spec de navigation : l'ordre de lecture et les flèches
+ * vivent dans `equationNav.ts` ; Entrée passe à l'étape suivante (en
+ * réutilisant une étape vide) ; Retour arrière/Suppr vont de champ en champ et
+ * ne suppriment qu'une étape vide ou un bloc entièrement vide ; Opₙ reste
+ * visible sauf après une étape résolue où rien n'est écrit.
  */
 export function EquationBlockField({
   block,
@@ -466,61 +424,142 @@ export function EquationBlockField({
   onEnterBlock,
   onDeleteEmpty,
   onDeleteForward,
+  onExitBlock,
   onFieldChange,
+  ref,
 }: EquationBlockFieldProps) {
   // Un bloc équation a toujours au moins une étape à l'écran, même si son
   // contenu sur disque est un `steps: []` malformé (voir `sanitizeBlock`) —
   // le premier changement réécrit alors ce repli dans le bloc lui-même.
   const steps = block.steps.length > 0 ? block.steps : [{ left: '', right: '' }]
+  const stepsRef = useRef(steps)
+  stepsRef.current = steps
   const handles = useRef(new Map<string, MathFieldHandle | null>())
-  const pending = useRef<{ step: number; field: StepField; at: 'start' | 'end' } | null>(null)
+  const pending = useRef<{ pos: EqPos; at: 'start' | 'end' } | null>(null)
+  // Le dernier membre (G ou D) qui a eu le focus, quelle que soit la façon :
+  // c'est là que ↑/↓ reviennent depuis une opération. G au montage.
+  const column = useRef<EqColumn>('left')
+
+  function handleAt(pos: EqPos): MathFieldHandle | null {
+    return handles.current.get(fieldKey(pos.step, pos.field)) ?? null
+  }
 
   // Le focus est posé APRÈS le rendu qui a ajouté ou retiré une étape : c'est
-  // le seul moment où le handle de l'étape visée existe — même couture que
-  // `MathLinesField`.
+  // le seul moment où le handle de l'étape visée existe. Une opération qui
+  // vient de disparaître (dernière étape devenue résolue) renvoie au membre
+  // droit de la même étape plutôt que de perdre le curseur.
   useEffect(() => {
     const target = pending.current
     if (target === null) return
     pending.current = null
-    const handle = handles.current.get(fieldKey(target.step, target.field))
-    if (handle === null || handle === undefined) return
+    const handle = handleAt(target.pos) ?? handleAt({ step: target.pos.step, field: 'right' })
+    if (handle === null) return
     if (target.at === 'end') handle.focusEnd()
     else handle.focusStart()
   })
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusEdge(at) {
+        const order = readingOrder(stepsRef.current)
+        const pos = at === 'start' ? order[0] : order[order.length - 1]
+        const handle = pos === undefined ? null : handleAt(pos)
+        if (at === 'start') handle?.focusStart()
+        else handle?.focusEnd()
+      },
+    }),
+    []
+  )
 
   function write(next: EquationStep[]) {
     onChange({ kind: 'equation', steps: next, ...(block.standalone === true ? { standalone: true } : {}) })
   }
 
-  function setField(stepIndex: number, field: 'left' | 'right' | 'operation', value: string) {
+  function setField(stepIndex: number, field: EqField, value: string) {
     write(steps.map((step, i) => (i === stepIndex ? { ...step, [field]: value } : step)))
   }
 
-  /** Focus DIRECT sur une étape déjà montée — pas de `pending` : un simple déplacement ne change pas le contenu, donc ne provoque aucun rendu. */
-  function focusField(stepIndex: number, field: StepField, at: 'start' | 'end') {
-    const handle = handles.current.get(fieldKey(stepIndex, field))
-    if (handle === null || handle === undefined) return
+  /** Focus DIRECT sur un champ déjà monté — pas de `pending` : un simple déplacement ne change pas le contenu. */
+  function focusField(pos: EqPos, at: 'start' | 'end') {
+    const handle = handleAt(pos)
+    if (handle === null) return
     if (at === 'end') handle.focusEnd()
     else handle.focusStart()
   }
 
-  function addStepAfter(stepIndex: number) {
-    const next = [...steps]
-    next.splice(stepIndex + 1, 0, { left: '', right: '' })
-    write(next)
-    pending.current = { step: stepIndex + 1, field: 'left', at: 'start' }
+  function removeStep(stepIndex: number, focus: EqPos, at: 'start' | 'end') {
+    write(steps.filter((_, i) => i !== stepIndex))
+    pending.current = { pos: focus, at }
   }
 
-  function removeStep(stepIndex: number, focus: { step: number; field: StepField; at: 'start' | 'end' }) {
-    write(steps.filter((_, i) => i !== stepIndex))
-    pending.current = focus
+  /** Entrée : l'étape suivante si elle est vide, sinon une étape neuve — focus sur son membre gauche. */
+  function enterStep(stepIndex: number) {
+    const next = steps[stepIndex + 1]
+    if (next !== undefined && isStepEmpty(next)) {
+      focusField({ step: stepIndex + 1, field: 'left' }, 'start')
+      return
+    }
+    const inserted = [...steps]
+    inserted.splice(stepIndex + 1, 0, { left: '', right: '' })
+    write(inserted)
+    pending.current = { pos: { step: stepIndex + 1, field: 'left' }, at: 'start' }
+  }
+
+  /** Une flèche ou Tab depuis `from` — voir `navigate`. Tab sans destination retombe sur le navigateur. */
+  function go(from: EqPos, direction: ExitDirection, via: ExitVia): boolean {
+    const target = navigate(steps, from, direction, column.current)
+    if (target === 'exit-before' || target === 'exit-after') {
+      if (via === 'tab') return false
+      onExitBlock(target === 'exit-before' ? 'before' : 'after')
+      return true
+    }
+    focusField(target.pos, target.at)
+    return true
+  }
+
+  /** Les intentions clavier d'un champ — le tableau « Équation » de la spec, ligne à ligne. */
+  function intentsFor(pos: EqPos) {
+    const { step: i, field } = pos
+    const blockEmpty = steps.length === 1 && isStepEmpty(steps[0])
+    return {
+      onEnter: () => enterStep(i),
+      onEnterBlock,
+      onExit: (direction: ExitDirection, via: ExitVia) => go(pos, direction, via),
+      onBackspaceAtStart: () => {
+        if (field === 'right') return focusField({ step: i, field: 'left' }, 'end')
+        if (field === 'operation') return focusField({ step: i, field: 'right' }, 'end')
+        if (i === 0) {
+          if (blockEmpty) onDeleteEmpty()
+          return
+        }
+        const previousOperation: EqPos = { step: i - 1, field: 'operation' }
+        if (isStepEmpty(steps[i])) removeStep(i, previousOperation, 'end')
+        else focusField(previousOperation, 'end')
+      },
+      onDeleteAtEnd: () => {
+        if (field === 'left') return focusField({ step: i, field: 'right' }, 'start')
+        if (field === 'right') {
+          if (operationVisible(steps, i)) return focusField({ step: i, field: 'operation' }, 'start')
+          if (i + 1 < steps.length) return focusField({ step: i + 1, field: 'left' }, 'start')
+          if (blockEmpty) onDeleteForward()
+          return
+        }
+        const next = steps[i + 1]
+        if (next === undefined) {
+          if (blockEmpty) onDeleteForward()
+          return
+        }
+        if (isStepEmpty(next)) removeStep(i + 1, pos, 'end')
+        else focusField({ step: i + 1, field: 'left' }, 'start')
+      },
+    }
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {steps.map((step, stepIndex) => {
-        const isFirst = stepIndex === 0
-        const isLast = stepIndex === steps.length - 1
+        const showOperation = operationVisible(steps, stepIndex)
         const solved = equationStepIsSolved(steps, stepIndex)
         return (
           <div key={stepIndex} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -530,24 +569,11 @@ export function EquationBlockField({
                 onChangeValue={value => setField(stepIndex, 'left', value)}
                 ariaLabel={`Membre gauche de l'étape ${stepIndex + 1} du bloc ${index + 1}`}
                 registerHandle={handle => handles.current.set(fieldKey(stepIndex, 'left'), handle)}
-                onFocusHandle={() => onFieldChange(handles.current.get(fieldKey(stepIndex, 'left')) ?? null)}
-                onEnter={() => addStepAfter(stepIndex)}
-                onEnterBlock={onEnterBlock}
-                onBackspaceAtStart={rest => {
-                  if (rest !== '') return
-                  if (isFirst) {
-                    if (steps.length === 1 && isStepEmpty(step)) onDeleteEmpty()
-                    return
-                  }
-                  if (!isStepEmpty(step)) return
-                  removeStep(stepIndex, { step: stepIndex - 1, field: 'right', at: 'end' })
+                {...intentsFor({ step: stepIndex, field: 'left' })}
+                onFocusHandle={() => {
+                  column.current = 'left'
+                  onFieldChange(handles.current.get(fieldKey(stepIndex, 'left')) ?? null)
                 }}
-                onDeleteAtEnd={rest => {
-                  if (rest !== '') return
-                  focusField(stepIndex, 'right', 'start')
-                }}
-                onArrowUp={stepIndex > 0 ? () => focusField(stepIndex - 1, 'left', 'end') : undefined}
-                onArrowDown={!isLast ? () => focusField(stepIndex + 1, 'left', 'start') : undefined}
                 side="left"
                 style={solved ? SOLVED_TERM : LEFT_BOX}
               />
@@ -570,29 +596,17 @@ export function EquationBlockField({
                 onChangeValue={value => setField(stepIndex, 'right', value)}
                 ariaLabel={`Membre droit de l'étape ${stepIndex + 1} du bloc ${index + 1}`}
                 registerHandle={handle => handles.current.set(fieldKey(stepIndex, 'right'), handle)}
-                onFocusHandle={() => onFieldChange(handles.current.get(fieldKey(stepIndex, 'right')) ?? null)}
-                onEnter={() => addStepAfter(stepIndex)}
-                onEnterBlock={onEnterBlock}
-                onBackspaceAtStart={rest => {
-                  if (rest !== '') return
-                  focusField(stepIndex, 'left', 'end')
+                {...intentsFor({ step: stepIndex, field: 'right' })}
+                onFocusHandle={() => {
+                  column.current = 'right'
+                  onFieldChange(handles.current.get(fieldKey(stepIndex, 'right')) ?? null)
                 }}
-                onDeleteAtEnd={rest => {
-                  if (rest !== '') return
-                  if (isLast) {
-                    if (steps.length === 1 && isStepEmpty(step)) onDeleteForward()
-                    return
-                  }
-                  focusField(stepIndex, 'operation', 'start')
-                }}
-                onArrowUp={stepIndex > 0 ? () => focusField(stepIndex - 1, 'right', 'end') : undefined}
-                onArrowDown={!isLast ? () => focusField(stepIndex + 1, 'right', 'start') : undefined}
                 side="right"
                 style={solved ? SOLVED_TERM : RIGHT_BOX}
               />
             </div>
 
-            {!isLast && (
+            {showOperation && (
               // L'opération n'est SAISIE qu'une fois (un seul champ vivant,
               // sous le membre gauche) mais AFFICHÉE deux fois — une fois
               // sous chaque membre, chacune centrée sous sa case — pour bien
@@ -608,21 +622,7 @@ export function EquationBlockField({
                     handles.current.set(fieldKey(stepIndex, 'operation'), handle)
                   }}
                   onFocusHandle={() => onFieldChange(handles.current.get(fieldKey(stepIndex, 'operation')) ?? null)}
-                  onEnter={() => addStepAfter(stepIndex)}
-                  onEnterBlock={onEnterBlock}
-                  onBackspaceAtStart={rest => {
-                    if (rest !== '') return
-                    focusField(stepIndex, 'right', 'end')
-                  }}
-                  onDeleteAtEnd={rest => {
-                    if (rest !== '') return
-                    const nextStep = steps[stepIndex + 1]
-                    if (nextStep !== undefined && isStepEmpty(nextStep)) {
-                      removeStep(stepIndex + 1, { step: stepIndex, field: 'operation', at: 'end' })
-                      return
-                    }
-                    focusField(stepIndex + 1, 'left', 'start')
-                  }}
+                  {...intentsFor({ step: stepIndex, field: 'operation' })}
                   style={OPERATION_FIELD_STYLE}
                 />
                 {/* La même largeur que le « = » de la ligne au-dessus : sans

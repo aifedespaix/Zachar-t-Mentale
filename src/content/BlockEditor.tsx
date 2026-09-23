@@ -2185,11 +2185,11 @@ function BlockField({
           block={block}
           index={index}
           onChange={onChange}
-          // Temporaire (Task 6 le remplace) : `EquationBlockField` ne connaît
-          // encore que le geste « hors groupe », Ctrl/Cmd+Entrée simple.
-          onEnterBlock={() => onEnterBlock('outside')}
+          onEnterBlock={onEnterBlock}
           onDeleteEmpty={onDeleteEmpty}
           onDeleteForward={onDeleteForward}
+          onExitBlock={onExitBlock}
+          ref={edgeRef}
           onFieldChange={onFieldChange}
         />
         </FieldContextMenu>

@@ -75,6 +75,10 @@ function lastBlocks(onState: ReturnType<typeof vi.fn>): CardBlock[] {
   return onState.mock.calls[onState.mock.calls.length - 1][0] as CardBlock[]
 }
 
+function moveOut(field: HTMLElement, direction: 'forward' | 'backward' | 'upward' | 'downward'): boolean {
+  return !field.dispatchEvent(new CustomEvent('move-out', { detail: { direction }, cancelable: true, bubbles: true }))
+}
+
 describe('le bloc équation — clavier', () => {
   it('Entrée (dans n’importe quel champ) ajoute une ÉTAPE dans le même bloc, jamais un bloc', async () => {
     const onState = vi.fn()
@@ -126,7 +130,7 @@ describe('le bloc équation — clavier', () => {
     expect(document.querySelectorAll('[data-row-index]')).toHaveLength(2)
   })
 
-  it('Retour arrière sur l’étape VIDE la retire et rend la main à la fin du membre droit précédent', async () => {
+  it('Retour arrière sur l’étape VIDE la retire et rend la main à la fin de l’opération précédente', async () => {
     const onState = vi.fn()
     render(
       <Harness
@@ -135,19 +139,13 @@ describe('le bloc équation — clavier', () => {
       />
     )
     const fields = await mathFields()
-    expect(fields).toHaveLength(4) // étape 1 : gauche, droite ; étape 2 : gauche, droite — pas d'opération formule
-    const secondLeft = fields[2]
-
-    fireEvent.keyDown(secondLeft, { key: 'Backspace' })
+    fireEvent.keyDown(fields[2], { key: 'Backspace' })
 
     await waitFor(() => expect(lastBlocks(onState)).toEqual([
       { kind: 'equation', steps: [{ left: '2x', right: '8' }] },
     ]))
-    const remaining = await mathFields()
-    expect(remaining).toHaveLength(2) // plus qu'une étape, donc plus d'opération
-    const right = remaining[1]
-    await waitFor(() => expect(right.focus).toHaveBeenCalled())
-    expect(right.executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
+    // 2x = 8 n'est pas résolue : l'opération après la dernière étape reste là.
+    await waitFor(() => expect(screen.getByTestId('equation-op-input-0-0')).toHaveFocus())
   })
 
   it('Retour arrière sur une étape NON vide ne retire rien — jamais de perte silencieuse', async () => {
@@ -168,6 +166,8 @@ describe('le bloc équation — clavier', () => {
     // Rien n'a changé : deux étapes toujours là, le contenu de la seconde intact.
     expect(onState).not.toHaveBeenCalled()
     expect(await mathFields()).toHaveLength(4)
+    // … mais le curseur remonte à la fin de l'opération précédente.
+    await waitFor(() => expect(screen.getByTestId('equation-op-input-0-0')).toHaveFocus())
   })
 
   it('Retour arrière en tout début de bloc — le bloc entier vide demande à disparaître vers le précédent', async () => {
@@ -188,7 +188,7 @@ describe('le bloc équation — clavier', () => {
     await waitFor(() => expect(lastBlocks(onState)).toEqual([{ kind: 'text', text: 'avant' }]))
   })
 
-  it('Suppr en toute fin de bloc — le bloc entier vide demande à disparaître vers le suivant', async () => {
+  it('Suppr en fin de D₀ passe à l’opération, puis Suppr sur Opₙ vide retire le bloc vide', async () => {
     const onState = vi.fn()
     render(
       <Harness
@@ -200,10 +200,15 @@ describe('le bloc équation — clavier', () => {
       />
     )
     const fields = await mathFields()
-    const right = fields[1]
+    fireEvent.keyDown(fields[1], { key: 'Delete' })
+    const operation = await waitFor(() => {
+      const input = screen.getByTestId('equation-op-input-0-0')
+      expect(input).toHaveFocus()
+      return input
+    })
+    expect(onState).not.toHaveBeenCalled()
 
-    fireEvent.keyDown(right, { key: 'Delete' })
-
+    fireEvent.keyDown(operation, { key: 'Delete' })
     await waitFor(() => expect(lastBlocks(onState)).toEqual([{ kind: 'text', text: 'après' }]))
   })
 
@@ -230,16 +235,20 @@ describe('le bloc équation — clavier', () => {
     ]))
   })
 
-  it('la dernière étape — une variable seule — n’a pas de champ opération', async () => {
-    render(
-      <Harness
-        initial={[{ kind: 'equation', steps: [{ left: '2x', right: '8', operation: '÷ 2' }, { left: 'x', right: '4' }] }]}
-      />
+  it('Opₙ : visible tant que la dernière étape n’est pas résolue, caché sinon — sauf s’il a un contenu', async () => {
+    const { unmount } = render(<Harness initial={[{ kind: 'equation', steps: [{ left: '2x', right: '8' }] }]} />)
+    expect(await screen.findByTestId('equation-op-input-0-0')).toBeInTheDocument()
+    unmount()
+
+    const solved = render(
+      <Harness initial={[{ kind: 'equation', steps: [{ left: '2x', right: '8', operation: '\\div 2' }, { left: 'x', right: '4' }] }]} />
     )
-    const fields = await mathFields()
-    // étape 1 : gauche, droite (2) ; étape 2 (résultat) : gauche, droite (2) —
-    // l'opération n'est jamais un champ formule, quel que soit son contenu.
-    expect(fields).toHaveLength(4)
+    await mathFields()
+    expect(screen.queryByTestId('equation-op-input-0-1')).not.toBeInTheDocument()
+    solved.unmount()
+
+    render(<Harness initial={[{ kind: 'equation', steps: [{ left: 'x', right: '4', operation: 'vérif' }] }]} />)
+    expect(await screen.findByTestId('equation-op-input-0-0')).toBeInTheDocument()
   })
 
   it('l’opération est un texte normal, affiché deux fois — une fois sous chaque membre —, éditable au clic', async () => {
@@ -304,5 +313,131 @@ describe('le bloc équation — clavier', () => {
       kind: 'equation',
       steps: [{ left: '2x', right: '8', operation: '\\times \\div ' }, { left: 'x', right: '4' }],
     }))
+  })
+})
+
+describe('le bloc équation — flèches, Tab, Entrée', () => {
+  const twoSteps: CardBlock[] = [{ kind: 'equation', steps: [{ left: '2x', right: '8' }, { left: 'x', right: '2x' }] }]
+
+  it('→ (move-out) suit l’ordre de lecture G₀ → D₀ → Op₀', async () => {
+    render(<Harness initial={twoSteps} />)
+    const fields = await mathFields()
+    moveOut(fields[0], 'forward')
+    expect(fields[1].focus).toHaveBeenCalled()
+    expect(fields[1].executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
+    moveOut(fields[1], 'forward')
+    await waitFor(() => expect(screen.getByTestId('equation-op-input-0-0')).toHaveFocus())
+  })
+
+  it('↓ depuis G₀ va sur l’interligne, puis ↓ sur l’étape suivante dans la colonne mémorisée', async () => {
+    render(<Harness initial={twoSteps} />)
+    const fields = await mathFields()
+    // Focus sur D₀ : c'est lui que la colonne retient.
+    fireEvent.focusIn(fields[1])
+    moveOut(fields[1], 'downward')
+    const operation = await waitFor(() => {
+      const input = screen.getByTestId('equation-op-input-0-0')
+      expect(input).toHaveFocus()
+      return input
+    })
+    fireEvent.keyDown(operation, { key: 'ArrowDown' })
+    expect(fields[3].focus).toHaveBeenCalled() // D₁
+    expect(fields[3].executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
+  })
+
+  it('↑ depuis G₁ remonte sur l’opération de l’étape précédente', async () => {
+    render(<Harness initial={twoSteps} />)
+    const fields = await mathFields()
+    moveOut(fields[2], 'upward')
+    await waitFor(() => expect(screen.getByTestId('equation-op-input-0-0')).toHaveFocus())
+  })
+
+  it('au-delà de G₀, sortie vers le bloc précédent (fin du texte)', async () => {
+    render(<Harness initial={[{ kind: 'text', text: 'avant' }, ...twoSteps]} />)
+    const fields = await mathFields()
+    moveOut(fields[0], 'backward')
+    const text = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    expect(text).toHaveFocus()
+    expect(text.selectionStart).toBe(5)
+  })
+
+  it('↓ en fin de texte entre dans l’équation par G₀', async () => {
+    render(<Harness initial={[{ kind: 'text', text: 'ab' }, ...twoSteps]} />)
+    const fields = await mathFields()
+    const text = screen.getByRole('textbox', { name: /texte du bloc 1/i }) as HTMLTextAreaElement
+    text.focus()
+    text.setSelectionRange(2, 2)
+    fireEvent.keyDown(text, { key: 'ArrowDown' })
+    expect(fields[0].focus).toHaveBeenCalled()
+    expect(fields[0].executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
+  })
+
+  it('Tab (move-out) depuis D₀ va sur l’opération ; Tab dans Opₙ reste au navigateur', async () => {
+    render(<Harness initial={[{ kind: 'equation', steps: [{ left: '2x', right: '8' }] }]} />)
+    const fields = await mathFields()
+    fireEvent.keyDown(fields[1], { key: 'Tab' })
+    expect(moveOut(fields[1], 'forward')).toBe(true)
+    const operation = await waitFor(() => {
+      const input = screen.getByTestId('equation-op-input-0-0')
+      expect(input).toHaveFocus()
+      return input
+    })
+    // Dernier champ : Tab n'est pas avalé, pas de piège au clavier.
+    expect(fireEvent.keyDown(operation, { key: 'Tab' })).toBe(true)
+  })
+
+  it('Entrée réutilise une étape suivante vide au lieu d’en ajouter une', async () => {
+    const onState = vi.fn()
+    render(
+      <Harness initial={[{ kind: 'equation', steps: [{ left: '2x', right: '8' }, { left: '', right: '' }] }]} onState={onState} />
+    )
+    const fields = await mathFields()
+    fireEvent.keyDown(fields[0], { key: 'Enter' })
+    expect(onState).not.toHaveBeenCalled()
+    expect(fields[2].focus).toHaveBeenCalled()
+    expect(fields[2].executeCommand).toHaveBeenCalledWith('moveToMathfieldStart')
+  })
+
+  it('Retour arrière au début de D va à la fin de G', async () => {
+    render(<Harness initial={twoSteps} />)
+    const fields = await mathFields()
+    fields[1].position = 0
+    fireEvent.keyDown(fields[1], { key: 'Backspace' })
+    expect(fields[0].focus).toHaveBeenCalled()
+    expect(fields[0].executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
+  })
+
+  it('Ctrl+Maj+Entrée : un bloc dans la question, juste après l’équation', async () => {
+    const onState = vi.fn()
+    render(
+      <Harness
+        initial={[{ kind: 'question', text: 'Q' }, ...twoSteps, { kind: 'text', text: 'fin' }]}
+        onState={onState}
+      />
+    )
+    const fields = await mathFields()
+    fireEvent.keyDown(fields[0], { key: 'Enter', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(lastBlocks(onState)).toEqual([
+      { kind: 'question', text: 'Q' },
+      ...twoSteps,
+      { kind: 'text', text: '' },
+      { kind: 'text', text: 'fin' },
+    ]))
+  })
+
+  it('repli sur le membre droit quand l’opération visée vient de disparaître', async () => {
+    // Retirer l'étape vide rend x = 4 dernière ET résolue : Op₀ vide se cache,
+    // le curseur doit atterrir à la fin de D₀ plutôt que nulle part.
+    const onState = vi.fn()
+    render(
+      <Harness initial={[{ kind: 'equation', steps: [{ left: 'x', right: '4' }, { left: '', right: '' }] }]} onState={onState} />
+    )
+    const fields = await mathFields()
+    fireEvent.keyDown(fields[2], { key: 'Backspace' })
+    await waitFor(() => expect(lastBlocks(onState)).toEqual([{ kind: 'equation', steps: [{ left: 'x', right: '4' }] }]))
+    expect(screen.queryByTestId('equation-op-input-0-0')).not.toBeInTheDocument()
+    const [, right] = await mathFields()
+    await waitFor(() => expect(right.focus).toHaveBeenCalled())
+    expect(right.executeCommand).toHaveBeenCalledWith('moveToMathfieldEnd')
   })
 })
