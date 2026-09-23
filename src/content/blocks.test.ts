@@ -484,6 +484,32 @@ describe('equationStepIsSolved — jamais saisi, toujours déduit', () => {
   })
 })
 
+describe('equationStepIsSolved — la variable est vraiment isolée', () => {
+  const cases: [string, string, boolean][] = [
+    ['x', '5', true],
+    ['x', '\\frac{3}{2}', true],
+    ['5', 'x', true],
+    ['x', '2x + 3', false],
+    ['x', '', false],
+    ['x', '   ', false],
+    ['x', '\\max(a, b)', true],
+    ['\\alpha', '2\\alpha', false],
+    ['x', '2ax', false],
+    ['x', '\\frac{x}{2}', false],
+    ['x_1', 'x_{1} + 2', false],
+    ['x_1', 'x_2 + 2', true],
+    ['x', 'x_1 + 2', true],
+  ]
+  it.each(cases)('%s = %s → %s', (left, right, expected) => {
+    expect(equationStepIsSolved([{ left, right }], 0)).toBe(expected)
+  })
+
+  it('ne regarde que la DERNIÈRE étape', () => {
+    expect(equationStepIsSolved([{ left: 'x', right: '5' }, { left: '2x', right: '10' }], 0)).toBe(false)
+  })
+})
+
+
 describe('equationToPlainText — le miroir texte d’un bloc équation', () => {
   it('une ligne « gauche = droite » par étape, l’opération entre parenthèses entre deux étapes', () => {
     const steps: EquationStep[] = [
