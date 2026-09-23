@@ -10,7 +10,7 @@ import {
 import { serializeMindMap } from '@app/persistence/serialization'
 import type { Card, MindMapMeta, UserRole } from '@app/types/card'
 import { mapTypeOf } from '@app/types/mapType'
-import type { DuplicateFile } from './duplicates'
+import { cardsOfContent, type CleanupPlan, type DuplicateFile } from './duplicates'
 
 /**
  * Ce que l'interface d'administration fait au serveur.
@@ -286,6 +286,37 @@ export async function applyRemoval(removals: readonly Removal[], onProgress?: (d
     await pb.collection(removal.collection).delete(removal.id)
     done += 1
     onProgress?.(done, removals.length)
+  }
+}
+
+/**
+ * Exécute le grand nettoyage des doublons (voir `planCleanup`).
+ *
+ * Les réécritures passent EN PREMIER : si l'une échoue, la copie qui portait
+ * la version la plus récente n'a pas encore été supprimée, et rien n'est
+ * perdu. Les renommages passent en dernier, une fois leur chemin libéré.
+ */
+export async function applyCleanup(plan: CleanupPlan, onProgress?: (done: number, total: number) => void): Promise<void> {
+  const total = plan.rewrite.length + plan.remove.length + plan.rename.length
+  let done = 0
+  const step = () => {
+    done += 1
+    onProgress?.(done, total)
+  }
+  for (const { target, source } of plan.rewrite) {
+    const cards = cardsOfContent(source.content)
+    if (cards === null) throw new Error(`« ${source.path} » est illisible : impossible d’en reprendre les cartes.`)
+    const { content } = buildUpdatedMapContent(target.content, cards, target.author, 'prof')
+    await pb.collection(MIND_MAPS).update(target.id, { content })
+    step()
+  }
+  for (const file of plan.remove) {
+    await pb.collection(MIND_MAPS).delete(file.id)
+    step()
+  }
+  for (const { file, path } of plan.rename) {
+    await pb.collection(MIND_MAPS).update(file.id, { path })
+    step()
   }
 }
 

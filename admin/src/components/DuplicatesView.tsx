@@ -1,8 +1,15 @@
 import { useCallback, useState } from 'react'
-import { Copy, RefreshCw, ScanSearch, ShieldCheck, Trash2 } from 'lucide-react'
+import { Copy, Eraser, GitFork, RefreshCw, ScanSearch, ShieldCheck, Trash2 } from 'lucide-react'
 import { fetchMapContents } from '@/lib/api'
 import { describeApiError } from '@/lib/pb'
-import { findDuplicateGroups, type DuplicateGroup } from '@/lib/duplicates'
+import {
+  findCopyGroups,
+  findDuplicateGroups,
+  planCleanup,
+  type CleanupPlan,
+  type CopyGroup,
+  type DuplicateGroup,
+} from '@/lib/duplicates'
 import { fullDate, plural } from '@/lib/format'
 import { nameOf, parentOf } from '@/lib/tree'
 import { MAP_TYPE_LABELS, mapTypeOf } from '@app/types/mapType'
@@ -23,10 +30,19 @@ import { Badge, Button, EmptyState, ErrorBanner, IconButton, Sheet, Spinner } fr
  * reconnaître chaque fichier (chemin, auteur, type, date de création, date de
  * modification), laisser choisir celui qu'on garde, et exécuter la suppression
  * des autres — jamais sans une confirmation qui les nomme.
+ *
+ * « Tout nettoyer » fait la même chose d'un coup pour TOUTE la bibliothèque, et
+ * s'occupe aussi des copies « (copie) » laissées par les anciennes
+ * synchronisations : dans chaque cas, seule la version la plus récemment
+ * modifiée survit (voir `planCleanup`).
  */
 export function DuplicatesView() {
   const removeMaps = useLibrary(state => state.removeMaps)
+  const cleanDuplicates = useLibrary(state => state.cleanDuplicates)
   const [groups, setGroups] = useState<DuplicateGroup[] | null>(null)
+  const [copyGroups, setCopyGroups] = useState<CopyGroup[]>([])
+  const [cleanup, setCleanup] = useState<CleanupPlan | null>(null)
+  const [confirmingCleanup, setConfirmingCleanup] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [keep, setKeep] = useState<Record<string, string>>({})
@@ -36,8 +52,11 @@ export function DuplicatesView() {
     setLoading(true)
     setError(null)
     try {
-      const found = findDuplicateGroups(await fetchMapContents())
+      const files = await fetchMapContents()
+      const found = findDuplicateGroups(files)
       setGroups(found)
+      setCopyGroups(findCopyGroups(files))
+      setCleanup(planCleanup(files))
       // Le fichier gardé par défaut est la copie la PLUS RÉCENTE : c'est celle
       // qui a le plus de chances de porter la dernière correction. Un choix
       // déjà fait par l'utilisateur survit à une réanalyse.
@@ -54,6 +73,8 @@ export function DuplicatesView() {
   }, [])
 
   const surplus = groups?.reduce((total, group) => total + group.files.length - 1, 0) ?? 0
+  const copySurplus = copyGroups.reduce((total, group) => total + group.files.length - 1, 0)
+  const cleanupSize = cleanup === null ? 0 : cleanup.remove.length + cleanup.rewrite.length + cleanup.rename.length
 
   return (
     <div className="flex h-full flex-col">
@@ -63,11 +84,17 @@ export function DuplicatesView() {
           <p className="truncate text-[11px] text-ink-500">
             {groups === null
               ? 'Compare les cartes, jamais les métadonnées.'
-              : groups.length === 0
+              : groups.length === 0 && copyGroups.length === 0
                 ? 'Aucun contenu en double.'
-                : `${plural(groups.length, 'groupe')} · ${plural(surplus, 'fichier')} en trop`}
+                : `${plural(groups.length + copyGroups.length, 'groupe')} · ${plural(surplus + copySurplus, 'fichier')} en trop`}
           </p>
         </div>
+        {cleanupSize > 0 && (
+          <Button tone="danger" onClick={() => setConfirmingCleanup(true)} disabled={loading}>
+            <Eraser size={16} />
+            Tout nettoyer
+          </Button>
+        )}
         <IconButton label="Relancer l’analyse" onClick={() => void analyse()} disabled={loading}>
           <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
         </IconButton>
@@ -101,7 +128,7 @@ export function DuplicatesView() {
           <div className="p-6">
             <Spinner label="Analyse en cours…" />
           </div>
-        ) : groups.length === 0 ? (
+        ) : groups.length === 0 && copyGroups.length === 0 ? (
           <EmptyState
             icon={<ShieldCheck size={40} />}
             title="Aucun doublon"
@@ -109,9 +136,24 @@ export function DuplicatesView() {
           />
         ) : (
           <>
-            <p className="px-4 pb-1 pt-3 text-[11px] text-ink-500">
-              Choisissez le fichier à garder dans chaque groupe, puis supprimez les autres.
-            </p>
+            {copyGroups.length > 0 && (
+              <>
+                <p className="px-4 pb-1 pt-3 text-[11px] text-ink-500">
+                  Copies laissées par la synchronisation : « Tout nettoyer » ne garde que la version la plus récemment
+                  modifiée, sous le nom de l’original.
+                </p>
+                <ul className="flex flex-col">
+                  {copyGroups.map(group => (
+                    <CopyGroupCard key={group.path} group={group} />
+                  ))}
+                </ul>
+              </>
+            )}
+            {groups.length > 0 && (
+              <p className="px-4 pb-1 pt-3 text-[11px] text-ink-500">
+                Choisissez le fichier à garder dans chaque groupe, puis supprimez les autres.
+              </p>
+            )}
             <ul className="flex flex-col">
               {groups.map(group => (
                 <GroupCard
@@ -126,6 +168,18 @@ export function DuplicatesView() {
           </>
         )}
       </div>
+
+      {confirmingCleanup && cleanup !== null && (
+        <CleanupSheet
+          plan={cleanup}
+          onClose={() => setConfirmingCleanup(false)}
+          onSubmit={async () => {
+            await cleanDuplicates(cleanup)
+            setConfirmingCleanup(false)
+            await analyse()
+          }}
+        />
+      )}
 
       {confirming !== null && (
         <ArbitrateSheet
@@ -282,6 +336,141 @@ function ArbitrateSheet({
       <p className="mt-3 text-xs text-ink-500">
         La suppression ne touche que le serveur. Les copies déjà présentes sur les appareils des élèves restent en place
         jusqu’à ce qu’ils les suppriment eux-mêmes.
+      </p>
+    </Sheet>
+  )
+}
+
+function CopyGroupCard({ group }: { group: CopyGroup }) {
+  const newest = group.files[0]
+
+  return (
+    <li className="border-b border-ink-900 px-4 py-4">
+      <div className="mb-2 flex items-center gap-2">
+        <GitFork size={16} className="shrink-0 text-warn" />
+        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">{nameOf(group.path)}</h2>
+        <Badge tone="warn">{plural(group.files.length, 'version')}</Badge>
+      </div>
+      <p className="mb-2 truncate text-[11px] text-ink-500">
+        {parentOf(group.path) === '' ? 'À la racine' : `Dans « ${parentOf(group.path)} »`}
+        {group.original === null && ' · original introuvable'}
+      </p>
+      <ul className="flex flex-col gap-1.5">
+        {group.files.map(file => (
+          <li
+            key={file.id}
+            className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
+              file.id === newest.id ? 'border-accent/60 bg-accent-soft/20' : 'border-ink-800 bg-ink-900/60'
+            }`}
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{nameOf(file.path)}</span>
+              <span className="block truncate text-[11px] text-ink-500">
+                {file.author} · modifié le {fullDate(file.updated)}
+              </span>
+            </span>
+            {file.id === newest.id && <Badge tone="accent">Plus récente</Badge>}
+          </li>
+        ))}
+      </ul>
+    </li>
+  )
+}
+
+function CleanupSheet({
+  plan,
+  onClose,
+  onSubmit,
+}: {
+  plan: CleanupPlan
+  onClose: () => void
+  onSubmit: () => Promise<void>
+}) {
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit() {
+    setWorking(true)
+    setError(null)
+    try {
+      await onSubmit()
+    } catch (caught) {
+      setError(describeApiError(caught, 'Nettoyage des doublons'))
+      setWorking(false)
+    }
+  }
+
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      title="Tout nettoyer"
+      footer={
+        <div className="flex gap-2">
+          <Button tone="ghost" onClick={onClose} className="flex-1" disabled={working}>
+            Annuler
+          </Button>
+          <Button tone="danger" onClick={() => void submit()} disabled={working} className="flex-1">
+            {working ? 'Nettoyage…' : plan.remove.length > 0 ? `Supprimer ${plan.remove.length}` : 'Appliquer'}
+          </Button>
+        </div>
+      }
+    >
+      {error !== null && (
+        <div className="mb-3">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+
+      <p className="text-sm">Pour chaque doublon, seule la version la plus récemment modifiée est gardée.</p>
+
+      {plan.rewrite.length > 0 && (
+        <>
+          <p className="mt-3 text-xs font-medium text-ink-300">Reprennent la version plus récente de leur copie</p>
+          <ul className="mt-1.5 flex flex-col gap-2">
+            {plan.rewrite.map(({ target, source }) => (
+              <li key={target.id} className="rounded-xl border border-accent/40 bg-accent-soft/20 px-3 py-2">
+                <span className="block truncate text-sm text-ink-100">{target.path}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-ink-500">← {nameOf(source.path)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {plan.rename.length > 0 && (
+        <>
+          <p className="mt-3 text-xs font-medium text-ink-300">Reprennent le nom de l’original disparu</p>
+          <ul className="mt-1.5 flex flex-col gap-2">
+            {plan.rename.map(({ file, path }) => (
+              <li key={file.id} className="rounded-xl border border-ink-800 bg-ink-900/60 px-3 py-2">
+                <span className="block truncate text-sm text-ink-100">{file.path}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-ink-500">→ {nameOf(path)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {plan.remove.length > 0 && (
+        <>
+          <p className="mt-3 text-xs font-medium text-ink-300">Supprimés</p>
+          <ul className="mt-1.5 flex flex-col gap-2">
+            {plan.remove.map(file => (
+              <li key={file.id} className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2">
+                <span className="block truncate text-sm text-ink-100">{file.path}</span>
+                <span className="mt-0.5 block text-[11px] text-ink-500">
+                  {file.author} · modifié le {fullDate(file.updated)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <p className="mt-3 text-xs text-ink-500">
+        Les appareils synchronisés suppriment ces fichiers à leur prochaine synchronisation, tant qu’ils n’y ont pas
+        touché depuis.
       </p>
     </Sheet>
   )

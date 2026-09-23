@@ -5,15 +5,17 @@ import type { Card } from '@app/types/card'
 import { fullDate } from '@/lib/format'
 import type { DuplicateFile } from '@/lib/duplicates'
 
-const { fetchMapContents, removeMaps } = vi.hoisted(() => ({
+const { fetchMapContents, removeMaps, cleanDuplicates } = vi.hoisted(() => ({
   fetchMapContents: vi.fn(),
   removeMaps: vi.fn(),
+  cleanDuplicates: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({ fetchMapContents }))
 vi.mock('@/lib/pb', () => ({ describeApiError: (_error: unknown, what: string) => `${what} a échoué.` }))
 vi.mock('@/state/useLibrary', () => ({
-  useLibrary: (selector: (state: { removeMaps: typeof removeMaps }) => unknown) => selector({ removeMaps }),
+  useLibrary: (selector: (state: { removeMaps: typeof removeMaps; cleanDuplicates: typeof cleanDuplicates }) => unknown) =>
+    selector({ removeMaps, cleanDuplicates }),
 }))
 
 import { DuplicatesView } from './DuplicatesView'
@@ -53,6 +55,8 @@ beforeEach(() => {
   fetchMapContents.mockReset()
   removeMaps.mockReset()
   removeMaps.mockResolvedValue(undefined)
+  cleanDuplicates.mockReset()
+  cleanDuplicates.mockResolvedValue(undefined)
 })
 
 /** Lance l'analyse et rend la main ; chaque test attend ensuite ce qu'il guette. */
@@ -121,6 +125,36 @@ describe('DuplicatesView', () => {
     await ouvrirArbitrage()
 
     expect(screen.getByText('Maths/Chapitre 1.zmap')).toBeInTheDocument()
+  })
+
+  it('« Tout nettoyer » ne garde que la version la plus récente, copies de synchronisation comprises', async () => {
+    const original = fileOf('rec-orig', 'Maths/Chapitre 2.zmap', {
+      updated: '2026-01-01 00:00:00.000Z',
+      content: JSON.stringify({ cards: [card('r', 'Chapitre 2', null)] }),
+    })
+    const syncCopy = fileOf('rec-copy', 'Maths/Chapitre 2 (copie).zmap', {
+      updated: '2026-04-01 00:00:00.000Z',
+      content: JSON.stringify({ cards: [card('r', 'Chapitre 2', null), card('x', 'Ajout', 'r')] }),
+    })
+    fetchMapContents.mockResolvedValue([RECENT, ANCIEN, original, syncCopy])
+    await analyser()
+    await screen.findByText(/identiques/)
+
+    await userEvent.click(screen.getByRole('button', { name: /Tout nettoyer/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Supprimer 2/ }))
+
+    await waitFor(() => expect(cleanDuplicates).toHaveBeenCalledTimes(1))
+    const plan = cleanDuplicates.mock.calls[0][0]
+    expect(plan.remove.map((file: DuplicateFile) => file.id).sort()).toEqual(['rec-copy', 'rec-old'])
+    expect(plan.rewrite.map((step: { target: DuplicateFile }) => step.target.id)).toEqual(['rec-orig'])
+  })
+
+  it('n’affiche pas « Tout nettoyer » quand il n’y a rien à nettoyer', async () => {
+    fetchMapContents.mockResolvedValue([RECENT])
+    await analyser()
+    await screen.findByText('Aucun doublon')
+
+    expect(screen.queryByRole('button', { name: /Tout nettoyer/ })).not.toBeInTheDocument()
   })
 
   it('annonce l’absence de doublons plutôt qu’une liste vide', async () => {

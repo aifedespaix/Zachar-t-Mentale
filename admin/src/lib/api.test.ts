@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('./pb', () => ({ pb: { collection: vi.fn(), filter: vi.fn() } }))
 
-import { FOLDERS, MIND_MAPS, buildNewMapContent, buildUpdatedMapContent, planRelocation, planRemoval } from './api'
+import { pb } from './pb'
+import { FOLDERS, MIND_MAPS, applyCleanup, buildNewMapContent, buildUpdatedMapContent, planRelocation, planRemoval } from './api'
 import type { LibraryFolder, LibraryMap } from './tree'
+import type { DuplicateFile } from './duplicates'
 import type { Card } from '@app/types/card'
 
 function map(path: string, id = `rec-${path}`): LibraryMap {
@@ -135,5 +137,34 @@ describe('buildUpdatedMapContent', () => {
   it('survives a previous content that is not even JSON', () => {
     const updated = buildUpdatedMapContent('cassé', cards, 'aife', 'prof')
     expect(JSON.parse(updated.content).cards).toHaveLength(2)
+  })
+})
+
+describe('applyCleanup', () => {
+  function dup(id: string, path: string, content: string): DuplicateFile {
+    return { id, file_id: `file-${id}`, author: 'eleve1', path, type: '', created: '', updated: '', content }
+  }
+
+  it('rewrites the original with the copy’s cards and its own identity BEFORE deleting anything, renames last', async () => {
+    const calls: string[] = []
+    const update = vi.fn(async (id: string, body: Record<string, unknown>) => {
+      calls.push(`update ${id} ${Object.keys(body).join(',')}`)
+    })
+    const remove = vi.fn(async (id: string) => {
+      calls.push(`delete ${id}`)
+    })
+    vi.mocked(pb.collection).mockReturnValue({ update, delete: remove } as never)
+
+    const original = dup('o', 'Ch.zmap', JSON.stringify({ meta: { id: 'file-o', author: 'eleve1', role: 'eleve', lastModified: '' }, cards: [] }))
+    const copy = dup('c', 'Ch (copie).zmap', JSON.stringify({ meta: { id: 'file-c' }, cards: [{ id: 'r', level: 1, title: 'R', parentId: null, order: 0 }] }))
+    const orphan = dup('x', 'Autre (copie 2).zmap', '[]')
+
+    await applyCleanup({ rewrite: [{ target: original, source: copy }], remove: [copy], rename: [{ file: orphan, path: 'Autre.zmap' }] })
+
+    expect(calls).toEqual(['update o content', 'delete c', 'update x path'])
+    const written = JSON.parse(update.mock.calls[0][1].content as string)
+    expect(written.meta.id).toBe('file-o')
+    expect(written.meta.author).toBe('eleve1')
+    expect(written.cards.map((c: Card) => c.title)).toEqual(['R'])
   })
 })
