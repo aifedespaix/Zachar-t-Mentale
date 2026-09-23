@@ -100,7 +100,7 @@ Conventions :
 |---|---|
 | Ctrl/Cmd+Entrée | Nouveau bloc **hors groupe**, juste après le groupe courant (juste après le bloc s'il n'est pas dans un groupe). Type hérité via `inheritableKind`. Porte `standalone: true` quand il suit une question (voir `appendOutside`). |
 | Ctrl/Cmd+Maj+Entrée | Nouveau bloc **dans le groupe**, juste après le bloc courant (= `insertBlockAfter(index, …)`). |
-| Ctrl+Entrée sans champ focalisé | `appendOutside()` — comme le bouton « Ajouter un bloc » du pied. Le libellé du menu du vide (`EmptyAreaContextMenu`) devient « Ctrl + Entrée ». |
+| Ctrl+Entrée depuis un élément de l'éditeur qui n'est pas un champ de saisie (bouton de gouttière, etc.) | `appendOutside()` — comme le bouton « Ajouter un bloc » du pied. Le libellé du menu du vide (`EmptyAreaContextMenu`) devient « Ctrl + Entrée ». Même portée que l'ancien Ctrl+Maj+Entrée : l'écouteur de la racine de `BlockEditor`. |
 | Sortie haut / gauche d'un bloc | Bloc navigable précédent, dernier champ, curseur à la fin. |
 | Sortie bas / droite d'un bloc | Bloc navigable suivant, premier champ, curseur au début. |
 | Aucun bloc navigable dans cette direction | La touche est avalée. |
@@ -175,9 +175,8 @@ vides). La navigation ignore un Opₙ caché.
 | Suppr en fin de Dᵢ | Opᵢ s'il est visible ; sinon Gᵢ₊₁ ; en fin de bloc, même règle que G₀. |
 | Suppr en fin de Opᵢ | Étape i+1 vide → supprimée, curseur reste en fin de Opᵢ. Étape i+1 non vide → début de Gᵢ₊₁. Opₙ → même règle que G₀. |
 
-**Colonne mémorisée** : la dernière colonne (G ou D) d'où l'on est descendu ou
-monté vers une opération ; remise à G dès qu'on focalise un champ autrement
-(clic, ←/→).
+**Colonne mémorisée** : le dernier membre (G ou D) qui a eu le focus, quelle
+que soit la façon (flèche, Tab, clic). G au montage du bloc.
 
 ### Détection « résolu »
 
@@ -187,9 +186,10 @@ monté vers une opération ; remise à G dès qu'on focalise un champ autrement
 2. un membre est une variable seule `v` (`isBareVariable`, inchangé) ;
 3. l'autre membre est non vide (après `trim`) ;
 4. l'autre membre ne contient pas `v` : on retire les commandes LaTeX
-   (`\\[a-zA-Z]+`) sauf si `v` en est une, puis on cherche `v` comme
-   identifiant (non précédé/suivi d'une lettre ; indice inclus quand `v` en a
-   un, ex. `x_1`).
+   (`\\[a-zA-Z]+`) sauf si `v` en est une, puis on cherche `v`. Une lettre
+   collée compte (`2ax` contient `x` : multiplication implicite) ; une
+   commande doit finir là (`\alphabet` ne contient pas `\alpha`) ; l'indice
+   compte (`x_1` ≠ `x_2`, `x` ≠ `x_1`, `x_1` = `x_{1}`).
 
 | Étape | Résolu |
 |---|---|
@@ -200,9 +200,14 @@ monté vers une opération ; remise à G dès qu'on focalise un champ autrement
 | `x = ` | non |
 | `x = \max(a, b)` | oui |
 | `\alpha = 2\alpha` | non |
+| `x = 2ax` | non |
+| `x_1 = x_{1} + 2` | non |
+| `x_1 = x_2 + 2` | oui |
+| `x = x_1 + 2` | oui |
 
-`BlockView` (lecture) : affiche une opération non vide après la dernière étape
-quand celle-ci n'est pas résolue, avec la même mise en page doublée.
+`BlockView` (lecture) et `equationToPlainText` : une opération **non vide**
+après la dernière étape est affichée / écrite, comme les autres (l'éditeur ne
+masque jamais un contenu saisi, la lecture non plus).
 
 ## Architecture
 
