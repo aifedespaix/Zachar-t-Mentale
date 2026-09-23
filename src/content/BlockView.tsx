@@ -158,7 +158,6 @@ const BlockItem = memo(function BlockItem({
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
           {steps.map((step, stepIndex) => {
-            const isLast = stepIndex === steps.length - 1
             const solved = equationStepIsSolved(steps, stepIndex)
             const operation = (step.operation ?? '').trim()
             return (
@@ -192,7 +191,7 @@ const BlockItem = memo(function BlockItem({
                   </span>
                   <EquationTermView latex={step.right} solved={solved} side="right" />
                 </div>
-                {!isLast && operation !== '' && (
+                {operation !== '' && (
                   // Affichée deux fois, une fois sous chaque membre — jamais
                   // une seule fois centrée : c'est elle qui montre qu'elle
                   // porte sur les DEUX à la fois. Voir `EquationStep.operation`.

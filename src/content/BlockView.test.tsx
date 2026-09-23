@@ -189,3 +189,19 @@ describe('BlockView — the group a question header opens', () => {
     expect(container.querySelector('[data-group]')).toBeNull()
   })
 })
+
+describe("équation — l'opération après la dernière étape", () => {
+  it("est affichée quand elle a un contenu", () => {
+    const { container } = render(
+      <BlockView blocks={[{ kind: 'equation', steps: [{ left: '2x', right: '8', operation: '÷ 2' }] }]} resolveAsset={resolve} />
+    )
+    expect(container.textContent ?? '').toContain('÷')
+  })
+
+  it("n'affiche rien quand elle est vide", () => {
+    const { container } = render(
+      <BlockView blocks={[{ kind: 'equation', steps: [{ left: '2x', right: '8' }] }]} resolveAsset={resolve} />
+    )
+    expect(container.textContent ?? '').not.toContain('÷')
+  })
+})

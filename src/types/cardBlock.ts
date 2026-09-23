@@ -27,7 +27,9 @@ export type TableCell = string | { latex: string }
 
 /**
  * Une étape d'une équation : ses deux membres, et l'opération qui mène à
- * l'étape SUIVANTE — absente sur la dernière, qui n'en a pas.
+ * l'étape suivante. Après la dernière étape, elle reste saisissable tant que
+ * l'équation n'est pas résolue (voir `operationVisible`), et n'est jamais
+ * masquée une fois écrite.
  *
  * Une seule `operation`, jamais deux : le principe même d'une équation est
  * qu'on applique la MÊME chose des deux côtés, donc un champ par membre

@@ -558,3 +558,9 @@ describe('un bloc équation traverse normalizeContent/sanitizeBlocks sans perte'
     expect(sanitizeBlocks(raw)).toEqual([])
   })
 })
+
+describe("equationToPlainText — dernière opération", () => {
+  it("écrit une opération non vide après la dernière étape", () => {
+    expect(equationToPlainText([{ left: '2x', right: '8', operation: '÷ 2' }])).toBe('2x = 8\n(÷ 2)')
+  })
+})

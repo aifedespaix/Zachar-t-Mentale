@@ -171,21 +171,19 @@ export function equationStepIsSolved(steps: EquationStep[], index: number): bool
 
 /**
  * Le miroir texte d'une équation : une ligne « gauche = droite » par étape,
- * l'opération entre parenthèses entre deux étapes qui en ont une.
+ * l'opération entre parenthèses après chaque étape qui en a une.
  *
  * Exportée : c'est aussi ce que `BlockEditor` lit comme `source` d'un bloc
  * équation quand on le convertit vers un autre type (voir `sourceOf`).
  */
 export function equationToPlainText(steps: EquationStep[]): string {
   const lines: string[] = []
-  steps.forEach((step, index) => {
+  steps.forEach(step => {
     const left = latexToPlainText(step.left)
     const right = latexToPlainText(step.right)
     if (left !== '' || right !== '') lines.push(`${left} = ${right}`)
-    if (index < steps.length - 1) {
-      const operation = latexToPlainText(step.operation ?? '')
-      if (operation !== '') lines.push(`(${operation})`)
-    }
+    const operation = latexToPlainText(step.operation ?? '')
+    if (operation !== '') lines.push(`(${operation})`)
   })
   return lines.join('\n')
 }
